@@ -1,0 +1,59 @@
+/// <reference types="vite/client" />
+
+import { describe, expect, it } from 'vitest';
+import {
+  RUNTIME_ASSET_MANIFEST,
+  resolveRuntimeAssetUrl,
+} from './runtime-asset-catalogue';
+
+describe('runtime asset manifest', () => {
+  it('defines exactly the twelve approved runtime assets', () => {
+    expect(RUNTIME_ASSET_MANIFEST).toHaveLength(12);
+  });
+
+  it('contains only paths under assets/runtime', () => {
+    for (const entry of RUNTIME_ASSET_MANIFEST) {
+      expect(entry.sourcePath.startsWith('assets/runtime/')).toBe(true);
+    }
+  });
+
+  it('has unique ids and unique paths', () => {
+    const ids = new Set<string>();
+    const paths = new Set<string>();
+    for (const entry of RUNTIME_ASSET_MANIFEST) {
+      ids.add(entry.id);
+      paths.add(entry.sourcePath);
+    }
+    expect(ids.size).toBe(RUNTIME_ASSET_MANIFEST.length);
+    expect(paths.size).toBe(RUNTIME_ASSET_MANIFEST.length);
+  });
+
+  it('matches the approved Master §5.6 asset list', () => {
+    expect(
+      RUNTIME_ASSET_MANIFEST.map((entry) => entry.sourcePath).sort(),
+    ).toEqual([
+      'assets/runtime/aircraft/german-fighter.png',
+      'assets/runtime/backgrounds/hangar-background.webp',
+      'assets/runtime/backgrounds/operations-background.webp',
+      'assets/runtime/fonts/ibm-plex-mono-medium.woff2',
+      'assets/runtime/fonts/ibm-plex-mono-regular.woff2',
+      'assets/runtime/fonts/ibm-plex-mono-semibold.woff2',
+      'assets/runtime/icons/check.svg',
+      'assets/runtime/icons/crosshair.svg',
+      'assets/runtime/icons/gear.svg',
+      'assets/runtime/icons/map-trifold.svg',
+      'assets/runtime/icons/pause.svg',
+      'assets/runtime/icons/warehouse.svg',
+    ]);
+  });
+});
+
+describe('resolveRuntimeAssetUrl', () => {
+  it('resolves a manifest path below the configured base', () => {
+    expect(
+      resolveRuntimeAssetUrl(
+        'assets/runtime/backgrounds/operations-background.webp',
+      ),
+    ).toBe(`${import.meta.env.BASE_URL}backgrounds/operations-background.webp`);
+  });
+});

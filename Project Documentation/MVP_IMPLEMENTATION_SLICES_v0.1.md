@@ -326,6 +326,7 @@ The Product Owner has authorized the independent acceptance reviewer to commit a
 | Slice | Status |
 |---|---|
 | S01 | Accepted |
-| S02–S14 | Not Started |
+| S02 | Accepted |
+| S03–S14 | Not Started |
 
 Status changes require implementation evidence and review. This document is not an agent-maintained progress log; approved status changes are recorded deliberately rather than rewritten speculatively.
