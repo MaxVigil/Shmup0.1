@@ -9,6 +9,8 @@ Use this skill as a project router, not as a strategic-game design source.
 
 ## Required sources
 
+Apply the revision-aware reading rule in `AGENTS.md` §2: a new agent session reads these sources completely; the same persistent session may reuse completely read, unchanged sources after checking revisions. Always reread the assigned Slice and changed normative sources.
+
 Before acting, read completely:
 
 1. `AGENTS.md`;

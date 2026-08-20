@@ -27,6 +27,8 @@ If sources conflict, stop the affected work and report the exact conflict. Do no
 
 ## 2. Required reading before work
 
+Reading is revision-aware. In a new agent session, read every required source completely. In the same persistent session, first compare repository revisions: unchanged sources already read completely need not be reread. Always reread the assigned Slice contract, every changed canonical source, and the relevant normative sections. Never rely on an agent-authored summary in place of a canonical source.
+
 For every task, read completely:
 
 - `Project Documentation/README.md`;
@@ -168,6 +170,41 @@ The Product Owner is a non-technical relay between the implementation agent and 
 - Do not send progress narration unless a tool approval is required or the assigned environment requires it to continue.
 - Work on the next Slice begins only from a new explicit assignment after the current Slice is accepted.
 
+### 8.1 Filesystem handoff
+
+When `.agent-handoff/control.json` exists, it is the active transient assignment envelope. It does not replace canonical documentation and is never committed. The implementation agent must:
+
+1. run `npm run handoff:validate` before editing;
+2. match `runId`, `sliceId`, `baseRevision`, `taskType`, and the canonical section;
+3. execute only that Slice or correction;
+4. write evidence under `.agent-handoff/evidence/` when required;
+5. write `.agent-handoff/result.json` last, after all work and gates, then run `npm run handoff:validate` again;
+6. tell the Product Owner only: `Handoff ready. Tell Codex: DeepSeek completed the cycle.`
+
+`result.json` contains only variable evidence: identifiers, state, changed paths, AC/TC, gates, evidence paths, material deviations, and blockers. Do not copy requirements or full logs into it. A completed result never authorizes the next Slice, commit, or push.
+
+Write `result.json` with this exact shape; arrays may be empty:
+
+```json
+{
+  "protocolVersion": 1,
+  "runId": "copied from control",
+  "sliceId": "Sxx",
+  "baseRevision": "copied from control",
+  "state": "awaiting_review",
+  "changedPaths": ["src/..."],
+  "criteria": ["source-qualified AC/TC"],
+  "gates": [{ "command": "npm run verify", "status": "pass" }],
+  "evidencePaths": [],
+  "deviations": [],
+  "blockers": []
+}
+```
+
+An issue object uses `{ "severity": "S0|S1|S2|S3", "disposition": "blocked|fix_now|accepted_observation", "impact": "one sentence", "owner": "required only for accepted_observation" }`. Set `state` to `blocked` when blockers exist. `awaiting_review` cannot contain `S0`–`S2` or an unpassed gate.
+
+The Product Owner relays only `DeepSeek completed the cycle.` The independent reviewer reads the handoff, inspects the actual diff, and reruns applicable gates. For a correction, the reviewer replaces `control.json`; the Product Owner relays only `Continue the active Slice under the standing protocol.`
+
 ## 9. Verification
 
 - Every code increment: `npm run verify`.
@@ -183,6 +220,34 @@ The Product Owner is a non-technical relay between the implementation agent and 
 - A correction is named `Sxx-WIyy within Slice Sxx`; it is not a new Slice.
 - Complete all corrections, rerun affected Slice gates, and return one revised report.
 - Do not begin the next Slice while acceptance is pending or corrections remain.
+
+### 10.1 Defect and uncertainty policy
+
+Severity describes impact, not implementation order:
+
+| Class | Meaning                                                                                                                | Default disposition                                       | Product Owner required                |
+| ----- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------- |
+| `S0`  | Missing or contradictory product behaviour; scope or player outcome cannot be derived safely                           | Stop only affected work; request one product decision     | Yes                                   |
+| `S1`  | Correctness, state-integrity, security, destructive-action, or non-negotiable architecture defect                      | Fix before acceptance                                     | Only if the contract must change      |
+| `S2`  | Incomplete AC, player-visible defect, evidence gap, boundary violation, or foundation likely to cause dependent rework | Fix before acceptance by default                          | Only for a material product trade-off |
+| `S3`  | Local, bounded imperfection with no player, architecture, acceptance, or dependent-Slice impact                        | Fix during self-review or accept without a separate cycle | No                                    |
+| `S4`  | Reversible implementation preference between equivalent valid choices                                                  | Agent decides; do not report or track                     | No                                    |
+
+Rules:
+
+- known `S0`–`S2` are incompatible with `Accepted`;
+- consolidate every discoverable `S1`/`S2` into one correction Work Item;
+- never create a correction cycle solely for `S3` or discuss `S4`;
+- defer a material issue only with one-sentence impact, a concrete owning Slice, and proof that no current or dependent contract relies on the defect; otherwise fix now;
+- do not create a general defect backlog for MVP;
+- after a second failed correction for the same defect class, stop automatic repetition and review the root cause: specification, test, decomposition, or agent execution;
+- ambiguity outside the assigned scope creates no requirement and no speculative implementation.
+
+Acceptance requires no known `S0`–`S2`, passing required gates, proportionate evidence, no unresolved source conflict, no ownerless deferral, and no known-defective foundation passed to the next Slice.
+
+### 10.2 Proactive process audit
+
+After each accepted Slice, the independent reviewer silently checks correction causes, repeated defects, redundant reading or gates, relay steps, and candidates for a test, lint rule, validator, or hook. Raise a process proposal only when it removes a cycle, prevents a recurring defect class, materially reduces context, or reduces Product Owner involvement. Do not produce a routine process report when no useful change exists.
 
 ## 11. Git and external actions
 

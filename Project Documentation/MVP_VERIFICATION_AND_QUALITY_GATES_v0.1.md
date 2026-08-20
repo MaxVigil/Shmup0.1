@@ -235,6 +235,20 @@ On this macOS environment, `npm ci` reported that optional `fsevents` install sc
 - Verification must not modify product source except when the invoked command is explicitly a formatting or approved update command.
 - Gates must not be weakened to accept an existing failure.
 
+### 14.1 Slice acceptance threshold
+
+Automated green gates are necessary but do not equal acceptance. Defect classes and escalation authority are defined once in `AGENTS.md` §10.1.
+
+A Slice is eligible for `Accepted` only when:
+
+- no known `S0`, `S1`, or `S2` remains;
+- every required automated gate passes;
+- applicable manual, browser, accessibility, lifecycle, and performance evidence exists and matches the tested revision;
+- source conflicts, scope deviations, and negative requirements have been reviewed;
+- no ownerless deferral or known-defective foundation is passed to a dependent Slice.
+
+`S3` must not create a correction cycle by itself. `S4` is neither reported nor tracked. A failed command, missing mandatory evidence, or materially misleading test is at least `S2` until resolved.
+
 ## 15. Readiness
 
 The dependency lockfile, repository configuration scaffold, and verification-command contract are approved and verified.
