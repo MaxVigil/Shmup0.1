@@ -119,13 +119,13 @@ The current smoke tests prove the scaffold and toolchain, not unimplemented feat
 - 67 generic skills plus router were classified.
 - Phaser package skills were classified.
 - Arcade/Matter Physics, persistence, audio, future strategy, alternate-engine, genre-template, and publishing routes are blocked for MVP.
-- no `memory-bank/`, PLAN/STATUS mirror, automatic commit, automatic push, or parallel requirement authority is approved.
+- no `memory-bank/`, PLAN/STATUS mirror, implementation-agent automatic commit/push, or parallel requirement authority is approved; the later Product Owner standing authorization for the independent acceptance reviewer is recorded in `AGENTS.md` and the Slice Registry.
 
 ## 8. Accepted non-blocking boundaries
 
 The following are not blockers:
 
-- production hosting provider remains intentionally unselected;
+- localhost is the approved complete-MVP delivery environment; no hosting provider, external deployment, or public URL is required;
 - final feature-level bundle tuning waits for actual feature measurements;
 - reference-device performance evidence is a recurring implementation and milestone gate because no complete game exists yet;
 - visual, control-feel, lifecycle, accessibility, and five-mission manual evidence becomes applicable as the relevant features exist;
@@ -146,7 +146,7 @@ For every slice, DeepSeek must:
 5. implement only that slice;
 6. run the required verification gates;
 7. report evidence and unresolved risks;
-8. avoid commit, push, deployment, or external publication unless separately authorized.
+8. avoid commit, push, deployment, or external publication unless separately authorized; implementation agents are not covered by the acceptance reviewer's standing commit/push authorization.
 
 An implementation finding that exposes a missing or conflicting S0–S2 behaviour re-blocks only the affected slice until a Product Owner decision is recorded.
 

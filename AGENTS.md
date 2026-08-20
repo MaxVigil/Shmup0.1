@@ -193,6 +193,8 @@ The Product Owner is a non-technical relay between the implementation agent and 
 - Do not rerun gates solely for commit when relevant files have not changed since accepted verification.
 - Use `feat(sxx): <slice outcome>` for the first accepted Slice commit, or an explicitly assigned message.
 - After commit, report only the commit hash, commit subject, whether relevant files changed after accepted verification, and exact remaining working-tree entries.
+- The Product Owner has given the independent acceptance reviewer standing authorization to commit accepted Slices and push only to the existing `origin/main` when the working tree is clean and the push is fast-forward. This authorization does not apply to the implementation agent.
+- No agent may push another branch or remote, force push, publish, deploy, or create a PR under that standing authorization.
 - Do not push, publish, deploy, create a remote, open a PR, or contact an external system unless explicitly requested.
 - Never combine unrelated user changes into an agent commit.
 - Do not claim a local commit is externally available.

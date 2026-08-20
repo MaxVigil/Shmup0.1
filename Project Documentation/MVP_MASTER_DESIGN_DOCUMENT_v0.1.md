@@ -35,7 +35,7 @@ For the approved MVP, authority is applied in this order:
 10. `MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md` for commands, automated gates, and manual evidence.
 11. `MVP_DEEPSEEK_GOVERNANCE_AND_SKILL_ROUTING_v0.1.md` for implementation-agent authority and skill routing.
 12. `MVP_FINAL_TECHNICAL_AUDIT_v0.1.md` for implementation-readiness evidence and authorization.
-13. `MVP_DELIVERY_SPEC_v0.1.md` for production-build and deployment acceptance.
+13. `MVP_DELIVERY_SPEC_v0.1.md` for production-mode build and localhost-delivery acceptance.
 14. `MVP_GLOSSARY_v0.1.md` for canonical vocabulary.
 15. `MVP_TRACEABILITY_MATRIX_v0.1.md` for requirements coverage.
 16. Repository `AGENTS.md` and project-specific implementation skills.
@@ -88,7 +88,7 @@ The MVP validates:
 | Browser Lifecycle | Focus, visibility, resize, refresh | Combat and Base specifications | Master audit approved |
 | Design System | UI tokens, primitives, composition, assets, governance | Design System Specification | Master audit approved |
 | Performance Verification | Runtime, interaction, transfer, and lifecycle budgets | Master and Combat specifications | Master audit approved |
-| Production Delivery | Static production build and deployment acceptance | Delivery Specification | Master audit approved |
+| Local Delivery | Static production-mode build and localhost acceptance | Delivery Specification | Master audit approved |
 | Canonical Terminology | One vocabulary across product, UI, tests, and implementation | Glossary | Master audit approved |
 | Requirements Traceability | Normative-section to acceptance-criteria coverage | Traceability Matrix | Master audit approved |
 | Narrative Foundation | PRC, Ukrainian, and Russia-absence content constraints | Narrative Rules | Approved; no new MVP feature scope |
@@ -409,17 +409,17 @@ Combat sustained floor:        not below 50 FPS
 - After each of five consecutive missions, no obsolete Combat-owned entity, timer, schedule, listener, or Screen instance may remain. Post-cleanup memory must not show monotonic growth attributable to retained Combat state.
 - Exact framework-specific chunk, tree-shaking, and dependency rules remain deferred until the repository configuration and delivery-command contract are approved; they must satisfy these product-level budgets.
 
-### 7.11 Production delivery boundary
+### 7.11 Local delivery boundary
 
-The production artifact is a client-only static web application with one entry URL. Detailed acceptance is defined in `MVP_DELIVERY_SPEC_v0.1.md`.
+The production-mode artifact is a client-only static web application with one entry URL, delivered only for local play through `localhost`. Detailed acceptance is defined in `MVP_DELIVERY_SPEC_v0.1.md`.
 
 - No backend, database, account, authentication, analytics, advertising, telemetry, remote content API, or runtime CDN is part of MVP.
-- Production runs over HTTPS on a static host; local development and verification may use HTTP through a local server.
+- Development and final acceptance run through documented local HTTP servers on `localhost`.
 - Direct `file://` execution is unsupported.
-- The deployable output contains production runtime files only and excludes source JPEGs, test files, development-only assets, and Debug UI activation.
+- The locally servable output contains production runtime files only and excludes source JPEGs, test files, development-only assets, and Debug UI activation.
 - `DEV_MODE = false` in production and `F1` has no product effect.
 - One build identifier is available for console diagnostics and performance records but is not shown in normal player UI.
-- Hosting-provider selection and stack-specific build commands remain part of the later joint technology decision, not implementation freedom.
+- Hosting-provider selection, external deployment, public URL, publication, and release-channel work are outside the MVP. GitHub is source backup only.
 
 ## 8. Master acceptance criteria defined so far
 
@@ -513,11 +513,11 @@ The production artifact is a client-only static web application with one entry U
 **when** recorded performance evidence is reviewed,  
 **then** transfer, startup, interaction, main-thread, frame-rate, and cleanup measurements satisfy every approved budget before the milestone is complete.
 
-### MASTER-AC-016 — Production delivery boundary
+### MASTER-AC-016 — Local delivery boundary
 
 **Given** a production build is created,  
-**when** its deployable output and runtime network activity are inspected,  
-**then** it is a client-only static application with Debug Mode disabled, no prohibited source or development assets, and no backend, telemetry, remote-content, or CDN dependency.
+**when** its locally servable output and runtime network activity are inspected,  
+**then** it runs through the documented localhost static server as a client-only application with Debug Mode disabled, no prohibited source or development assets, and no backend, telemetry, remote-content, CDN, external-hosting, or public-URL dependency.
 
 ## 9. Master-audit closure
 
@@ -528,7 +528,7 @@ The master audit closed all identified product and cross-system categories:
 - Combat presentation and damage feedback;
 - Settings and browser lifecycle integration;
 - accessibility and keyboard traversal;
-- whole-application performance and production delivery;
+- whole-application performance and localhost delivery;
 - canonical terminology;
 - full requirements-to-acceptance traceability.
 

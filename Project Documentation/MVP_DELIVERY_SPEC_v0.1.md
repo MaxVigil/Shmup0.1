@@ -1,20 +1,20 @@
 # MVP Delivery Specification v0.1
 
 **Product:** Shmup  
-**Scope:** Production build and deployment acceptance  
+**Scope:** Localhost delivery and production-mode build acceptance  
 **Status:** READY FOR IMPLEMENTATION  
 
 ## 1. Delivery model
 
-The MVP is delivered as one client-only static web application with one entry URL.
+The MVP is delivered for local play through `localhost` as one client-only static web application with one entry URL.
 
-- It requires a static HTTP(S) host.
-- Production hosting uses HTTPS.
-- Local development and verification may use HTTP through a local static server.
+- Development play uses the documented Vite localhost server.
+- Final acceptance uses the production-mode artifact served through a local HTTP static server on `localhost`.
 - Direct execution through `file://` is unsupported.
 - The MVP has no client-side routes that require server rewrite rules.
+- External hosting, deployment, a public URL, publication, and a release channel are not part of the MVP.
 
-Hosting-provider selection remains intentionally deferred. The approved architecture is defined by `MVP_TECHNICAL_FOUNDATION_v0.1.md`; it does not authorize a hosting provider.
+No hosting provider will be selected for the MVP. Adding external availability later requires an explicit post-MVP scope decision.
 
 ## 2. Runtime boundary
 
@@ -33,7 +33,7 @@ All required game content is packaged with the production artifact.
 
 ## 3. Supported environment
 
-The production acceptance environment is:
+The local acceptance environment is:
 
 ```text
 platform: Windows 10 64-bit
@@ -54,9 +54,9 @@ Mobile, touch, portrait layout, and browsers outside this acceptance set are not
 - A build identifier is available in console diagnostics and performance records but is not displayed in normal player UI.
 - Fatal startup errors may write technical detail to the console while showing only the approved player-facing fatal view.
 
-## 5. Deployable output
+## 5. Local production-mode output
 
-The deployable directory contains only files required at production runtime.
+The locally served production-mode directory contains only files required at runtime.
 
 It must not contain:
 
@@ -67,7 +67,7 @@ It must not contain:
 - unrelated source documents or speculative game assets;
 - dependency installation directories.
 
-Runtime asset paths must work under the approved hosting base path and must not depend on a developer's absolute filesystem path.
+Runtime asset paths must work from the local static-server base path and must not depend on a developer's absolute filesystem path.
 
 ## 6. Build contract
 
@@ -81,7 +81,7 @@ Runtime asset paths must work under the approved hosting base path and must not 
 
 ## 7. Required release verification
 
-Before a build is handed to testers, record:
+Before the complete MVP is accepted for local play, record:
 
 ```text
 build identifier
@@ -113,7 +113,7 @@ The smoke test must cover:
 
 ## 8. Negative requirements
 
-The implementation agent must not select or configure a production hosting provider, backend, analytics product, CDN, Service Worker, deployment account, domain, or release channel without a later explicit decision.
+The implementation agent must not select or configure a hosting provider, external deployment, public URL, backend, analytics product, CDN, Service Worker, deployment account, domain, or release channel. GitHub is source backup only and must not be treated as game hosting or publication.
 
 ## 9. Acceptance criteria
 
@@ -121,11 +121,11 @@ The implementation agent must not select or configure a production hosting provi
 
 **Given** a clean checkout and approved dependency lock,  
 **when** the documented production build command runs,  
-**then** it succeeds without manual edits and produces one deployable static application directory.
+**then** it succeeds without manual edits and produces one locally servable static application directory.
 
 ### DELIVERY-AC-002 — Client-only runtime
 
-**Given** the production artifact is served from a static host,  
+**Given** the production artifact is served from the documented local static server,  
 **when** the complete MVP loop runs,  
 **then** it requires no backend, database, authentication, analytics, telemetry, remote content API, or runtime CDN.
 
@@ -137,12 +137,18 @@ The implementation agent must not select or configure a production hosting provi
 
 ### DELIVERY-AC-004 — Artifact hygiene
 
-**Given** the deployable directory is inspected,  
+**Given** the locally servable production directory is inspected,  
 **when** its files are compared with the approved runtime requirements,  
 **then** it contains no source JPEG, test artifact, development-only enabled configuration, complete icon/font package, dependency installation directory, or speculative asset.
 
 ### DELIVERY-AC-005 — Release evidence
 
-**Given** a build is proposed for external testing,  
-**when** release readiness is reviewed,  
+**Given** the complete MVP is proposed for local acceptance testing,  
+**when** local readiness is reviewed,  
 **then** every required build, browser, performance, lifecycle, keyboard, and Design System record is present and passing.
+
+## 10. Decision record
+
+| ID | Date | Status | Decision | Consequence |
+|---|---|---|---|---|
+| DELIVERY-DEC-001 | 2026-08-21 | Approved | The complete MVP is playable only through localhost; GitHub stores a source backup. | Hosting-provider selection, external deployment, public URL, PR-based release flow, and publication are outside MVP. Production-mode build and local static-server verification remain mandatory. |

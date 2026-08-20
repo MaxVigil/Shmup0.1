@@ -64,7 +64,7 @@ An implementation report cannot mark a Slice `Accepted`; acceptance remains a re
 | S11 | Collision, Damage and Destruction | Deterministic AABB passes, projectile/contact damage, cooldown, destruction, and approved feedback | L | S09, S10 | Work items permitted |
 | S12 | Mission Resolution and Return Loop | Success/Defeat/Aborted, result commitment, reward/Hull effects, recovery, Result Overlay, and repeatable return | L | S06, S11 | Work items permitted |
 | S13 | Pause, Debug and Browser Lifecycle | Pause/Settings, development Debug commands, focus/visibility/resize/refresh behaviour, and recovery | L | S12 | Work items permitted |
-| S14 | Full-MVP Hardening and Delivery | End-to-end, accessibility, cleanup, lazy chunk, performance, reference-device, and production evidence | L | S01–S13 | Work items permitted |
+| S14 | Full-MVP Hardening and Local Delivery | End-to-end, accessibility, cleanup, lazy chunk, performance, reference-device, and localhost production-mode evidence | L | S01–S13 | Work items permitted |
 
 ## 4. Slice contracts
 
@@ -234,13 +234,13 @@ An implementation report cannot mark a Slice `Accepted`; acceptance remains a re
 **Skill:** `shmup-mvp-cross-system` plus `shmup-mvp-combat`; restricted `input-systems` only if needed.  
 **Gates:** `npm run verify`, `npm run verify:browser`; mandatory manual lifecycle and development/production Debug evidence.
 
-### S14 — Full-MVP Hardening and Delivery
+### S14 — Full-MVP Hardening and Local Delivery
 
-**Outcome:** The complete MVP satisfies cross-system behaviour, accessibility, lifecycle, performance, cleanup, and production-artifact requirements with recorded evidence.
+**Outcome:** The complete MVP satisfies cross-system behaviour, accessibility, lifecycle, performance, cleanup, and localhost production-mode requirements with recorded evidence.
 
 **In scope:** complete end-to-end flows, keyboard-only audit, Design System audit, five consecutive missions, lazy Combat chunk inspection, reference-device budgets, cleanup/memory evidence, asset/request boundaries, production Debug exclusion, artifact hygiene, and final regression closure.
 
-**Out of scope:** hosting-provider selection, deployment, backend, analytics, accounts, telemetry, CDN, audio, new polish/features, or weakening gates to accept failures.
+**Out of scope:** hosting-provider selection, external deployment, public URL, publication, PR-based release flow, backend, analytics, accounts, telemetry, CDN, audio, new polish/features, or weakening gates to accept failures.
 
 **Primary AC:** `MASTER-AC-006–007`, `MASTER-AC-011`, `MASTER-AC-015–016`; `Combat AC-047–048`; `DELIVERY-AC-001–005`; all earlier source AC as regression coverage where applicable.  
 **Skill:** `shmup-mvp-cross-system` plus the relevant subsystem skill for a measured defect; `performance-optimization` only for measured work.  
@@ -319,7 +319,7 @@ RELAY TO ACCEPTANCE REVIEWER:
 
 The default history unit is one accepted Slice, including its corrections. Commit is a mechanical post-acceptance operation and must not trigger another design discussion.
 
-If the Product Owner gives an agent standing authorization to commit accepted Slices, that agent may commit immediately after an `Accepted` verdict under `AGENTS.md` without another implementation-agent cycle. Standing commit authorization never includes push, publish, deploy, PR creation, destructive history editing, or unrelated files.
+The Product Owner has authorized the independent acceptance reviewer to commit an accepted Slice immediately after the `Accepted` verdict and push it to the existing `origin/main` only when the working tree is clean and the push is fast-forward. This authorization does not extend to the implementation agent and never includes another remote or branch, force push, publication, deployment, PR creation, destructive history editing, or unrelated files.
 
 ## 7. Current status
 

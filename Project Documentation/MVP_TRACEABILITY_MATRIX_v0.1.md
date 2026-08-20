@@ -33,7 +33,7 @@ A row is complete only when:
 | Combat entry geometry | Master §7.8 | MASTER-AC-010 | No hidden offsets or entry effects | Covered |
 | Accessibility boundary | Master §7.9 | MASTER-AC-011 | Non-visual Combat and formal certification not claimed | Covered |
 | Whole-app performance | Master §7.10; Combat §14 | MASTER-AC-015; Combat AC-047–048 | Deferred optimization and unverified milestones prohibited | Covered |
-| Production delivery | Master §7.11; Delivery §§1–8 | MASTER-AC-016; DELIVERY-AC-001–005 | No backend, telemetry, CDN, Debug production UI, or unapproved hosting | Covered |
+| Local delivery | Master §7.11; Delivery §§1–8 | MASTER-AC-016; DELIVERY-AC-001–005 | No backend, telemetry, CDN, external hosting, public URL, publication, or Debug production UI | Covered |
 | Durable narrative constraints | Narrative Rules §§2–7 | NARRATIVE-AC-001–005 | No forced MVP narrative features, hidden national bonuses, or Russian representation | Covered |
 
 ## 3. Base and pre-Combat coverage
