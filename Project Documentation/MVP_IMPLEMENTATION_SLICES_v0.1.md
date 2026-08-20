@@ -248,31 +248,84 @@ An implementation report cannot mark a Slice `Accepted`; acceptance remains a re
 
 ## 5. Handoff contract
 
-Every Slice or Work Item handoff must contain:
+Global execution, communication, review, verification, and commit rules live in `AGENTS.md` and must not be copied into each task. A Slice handoff carries only the variable contract:
 
 ```text
-Задача: [Slice Sxx or Work Item Sxx-WIyy within Slice Sxx — name]
+Задача: [Slice Sxx — canonical name]
 Підсистема: Base / Combat / Cross-system / Build-Tooling
-Outcome: [complete observable result]
-Скоуп (ЩО зробити): [scope plus canonical source sections]
-НЕ робити (negative scope): [explicit exclusions]
-AC: [source-qualified IDs; Slice technical criteria where applicable]
-Dependencies / entry conditions: [required accepted slices and repository state]
-Файли/директорії: [expected ownership locations]
-Скіл: [project skill]
-Гейти: npm run verify | verify:browser | verify:all
-Manual evidence: [required record or none]
-Reporting: [changed files, evidence, assumptions, blockers]
+Canonical contract: MVP_IMPLEMENTATION_SLICES_v0.1.md §[slice section]
+Explicit additions or overrides: [None unless explicitly approved]
+Dependencies: [accepted Slice IDs]
 Status: READY FOR IMPLEMENTATION
 ```
 
-A Work Item must additionally state which parent-Slice criteria it advances and which remain explicitly incomplete. Its final line cannot claim the parent Slice is complete.
+The Slice Registry supplies the outcome, scope, negative scope, primary sources, AC/TC, skill, gates, and manual evidence. The implementation agent resolves those fields from the repository rather than asking the Product Owner to restate them.
 
-## 6. Initial status
+A separately assigned Work Item uses:
+
+```text
+Задача: Work Item Sxx-WIyy within Slice Sxx — name
+Parent criteria advanced: [IDs]
+Scope delta: [exact bounded correction or checkpoint]
+Still incomplete in parent Slice: [IDs or areas]
+Status: READY FOR IMPLEMENTATION
+```
+
+Its final report cannot claim the parent Slice is accepted or complete.
+
+## 6. Relay and cost-control protocol
+
+There is no direct communication channel between the implementation agent and the acceptance reviewer. The non-technical Product Owner relays unchanged messages and is never responsible for technical interpretation.
+
+### 6.1 Normal Slice cycle
+
+```text
+1. Acceptance reviewer supplies one ready-to-copy Slice handoff.
+2. Product Owner relays it unchanged to the implementation agent.
+3. Implementation agent completes the whole Slice, including internal Work Items, self-review, gates, and evidence.
+4. Implementation agent returns one compact Slice report.
+5. Product Owner relays the report unchanged to the acceptance reviewer.
+6. Reviewer returns Accepted or one consolidated correction handoff.
+7. After acceptance, an authorized agent creates the local Slice commit.
+8. Only then is the next Slice assigned.
+```
+
+No routine relay is required between internal Work Items. Mandatory intermediate review exists only when the Slice contract explicitly declares a high-risk checkpoint or an S0–S2 blocker appears.
+
+### 6.2 Blocker cycle
+
+The implementation agent does not ask the Product Owner to choose code. It returns one consolidated blocker report containing:
+
+```text
+Blocked scope:
+Conflicting or missing canonical sources:
+Player/product impact:
+Technical impact:
+Safe independent work completed:
+Recommendation:
+RELAY TO ACCEPTANCE REVIEWER:
+[copyable concise decision request]
+```
+
+### 6.3 Acceptance and corrections
+
+- Automated gates do not equal acceptance.
+- The reviewer inspects implementation, scope, boundaries, tests, and evidence.
+- Review produces one verdict, not a sequence of exploratory questions.
+- When correction is required, the reviewer consolidates all findings discoverable in that review into one Work Item handoff.
+- The implementation agent fixes that Work Item and returns one revised report.
+
+### 6.4 Commit efficiency
+
+The default history unit is one accepted Slice, including its corrections. Commit is a mechanical post-acceptance operation and must not trigger another design discussion.
+
+If the Product Owner gives an agent standing authorization to commit accepted Slices, that agent may commit immediately after an `Accepted` verdict under `AGENTS.md` without another implementation-agent cycle. Standing commit authorization never includes push, publish, deploy, PR creation, destructive history editing, or unrelated files.
+
+## 7. Current status
 
 | Slice | Status |
 |---|---|
-| S01 | Not Started |
+| S01 | Accepted |
 | S02–S14 | Not Started |
 
 Status changes require implementation evidence and review. This document is not an agent-maintained progress log; approved status changes are recorded deliberately rather than rewritten speculatively.

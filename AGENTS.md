@@ -42,7 +42,7 @@ Also read:
 - `MVP_DESIGN_SYSTEM_SPEC_v0.1.md` for any player-visible UI or HUD work;
 - `MVP_NARRATIVE_RULES_v1.0.md` before adding or changing names, copy, people, factions, countries, technologies, or localization;
 - `MVP_DELIVERY_SPEC_v0.1.md` for build, production, asset, or release work;
-- `MVP_TRACEABILITY_MATRIX_v0.1.md` when selecting or reporting Acceptance Criteria.
+- `MVP_TRACEABILITY_MATRIX_v0.1.md` when selecting or reporting Acceptance Criteria;
 - `MVP_IMPLEMENTATION_SLICES_v0.1.md` before planning or implementing any Slice or Work Item.
 
 Read the selected skill's complete `SKILL.md` before acting. Read only relevant supporting references.
@@ -122,8 +122,11 @@ Before editing:
 
 1. inspect repository status and preserve unrelated work;
 2. read the required sources and selected skill;
-3. state the exact in-scope outcome, Acceptance Criteria, negative requirements, and files likely affected;
-4. report any blocker before creating dependent code.
+3. resolve the assigned Slice or Work Item against the canonical Slice Registry;
+4. verify its dependencies, exact in-scope outcome, AC/TC, negative requirements, gates, and evidence;
+5. report only a material blocker before creating dependent code.
+
+Do not send a planning summary, restate canonical requirements, or request confirmation for an implementation choice that is already within agent authority.
 
 During implementation:
 
@@ -134,14 +137,38 @@ During implementation:
 - check performance when adding a per-frame or player-visible system;
 - do not rewrite canonical documentation unless the approved contract itself changed.
 
+For a Slice executed through multiple Work Items:
+
+- plan and complete the Work Items sequentially inside the same assigned Slice;
+- do not request relay, acceptance, or commit after each Work Item unless the handoff declares a mandatory checkpoint;
+- run narrow tests while working and the Slice-level gates once after integration;
+- stop and report only when an S0–S2 blocker prevents safe continuation;
+- never continue into the next Slice.
+
 After implementation:
 
 1. run the required gates from the Verification specification;
 2. inspect the diff for scope creep and boundary violations;
-3. report changed files, observable outcome, tests/evidence, assumptions, and remaining risks;
-4. do not describe unrun checks as passing.
+3. perform a self-review against every assigned AC/TC and negative requirement;
+4. correct self-discovered in-scope defects before reporting;
+5. send exactly one compact Slice report using section 11;
+6. do not describe unrun checks as passing;
+7. set the result to `Awaiting Acceptance Review`, never `Accepted`.
 
-## 8. Verification
+## 8. Communication and relay efficiency
+
+The Product Owner is a non-technical relay between the implementation agent and the independent acceptance reviewer. Do not require the Product Owner to inspect code, compare technical alternatives, rewrite instructions, or determine whether evidence is sufficient.
+
+- Treat canonical repository documents as already available; task messages reference them and include only Slice-specific scope or explicit overrides.
+- Do not repeat reading lists, global architecture rules, standard negative scope, verification rules, reporting rules, or commit rules in every handoff.
+- Do not ask about helper names, file-local decomposition, equivalent test techniques, or other reversible choices within the approved architecture.
+- If several material blockers exist, return them in one report rather than one message per question.
+- A blocker report must explain the observable impact, provide a recommendation, and end with one copyable `RELAY TO ACCEPTANCE REVIEWER` block. Do not ask the Product Owner to choose a technical implementation.
+- A completion report must be copyable unchanged to the acceptance reviewer and contain no request for the Product Owner to interpret test output.
+- Do not send progress narration unless a tool approval is required or the assigned environment requires it to continue.
+- Work on the next Slice begins only from a new explicit assignment after the current Slice is accepted.
+
+## 9. Verification
 
 - Every code increment: `npm run verify`.
 - Browser/player-visible/lifecycle/build work: also `npm run verify:browser`.
@@ -149,32 +176,47 @@ After implementation:
 - Performance-sensitive work: record proportional evidence at implementation time.
 - Failed required gates block completion. Do not weaken a gate to accept a failure.
 
-## 9. Git and external actions
+## 10. Acceptance and correction
+
+- The implementation agent supplies evidence but cannot accept its own Slice.
+- The independent acceptance reviewer returns either `Accepted` or one consolidated correction task.
+- A correction is named `Sxx-WIyy within Slice Sxx`; it is not a new Slice.
+- Complete all corrections, rerun affected Slice gates, and return one revised report.
+- Do not begin the next Slice while acceptance is pending or corrections remain.
+
+## 11. Git and external actions
 
 - Do not commit unless explicitly requested.
+- The standard authorization command is `Commit Sxx under the standing protocol.`
+- A Slice commit occurs only after independent acceptance and contains the accepted Slice plus its correction Work Items.
+- Before commit, inspect repository status and diff; exclude unrelated changes, temporary probes, test output, reports, and generated artifacts.
+- Do not rerun gates solely for commit when relevant files have not changed since accepted verification.
+- Use `feat(sxx): <slice outcome>` for the first accepted Slice commit, or an explicitly assigned message.
+- After commit, report only the commit hash, commit subject, whether relevant files changed after accepted verification, and exact remaining working-tree entries.
 - Do not push, publish, deploy, create a remote, open a PR, or contact an external system unless explicitly requested.
 - Never combine unrelated user changes into an agent commit.
 - Do not claim a local commit is externally available.
 
-## 10. Documentation and status
+## 12. Documentation and status
 
 - `Project Documentation/` is the only durable product/technical memory.
 - Do not create `memory-bank/`, `PLAN.md`, `STATUS.md`, balance mirrors, entity mirrors, or repeated requirement summaries as parallel authority.
 - A temporary plan may exist in the agent conversation, not as canonical product state.
 - When an approved contract changes, update its canonical document and affected traceability in the same authorized change.
 
-## 11. Required handoff report
+## 13. Required Slice report
 
-Keep the report concise and factual:
+Return exactly one concise, factual report designed to be relayed unchanged:
 
 ```text
 Outcome:
-Changed files:
-Acceptance Criteria covered:
-Commands run and results:
-Manual evidence:
-Assumptions:
-Remaining risks or blockers:
+Slice status: Awaiting Acceptance Review | Correction Required
+Changed files: [paths grouped by ownership; no file-by-file prose when the path is self-explanatory]
+AC/TC: [IDs covered; identify any uncovered ID]
+Gates: [command → pass/fail; test counts where applicable]
+Manual evidence: [completed evidence or Not required]
+Deviations: [material deviation only, or None]
+Blockers: [material blocker only, or None]
 ```
 
-Omit empty sections except `Outcome`, `Changed files`, and `Commands run and results`.
+Do not repeat canonical values, test names, implementation walkthroughs, assumptions already fixed by documentation, or generic quality claims. Include technical detail only for a failure, deviation, newly discovered risk, or compatibility-affecting decision.
