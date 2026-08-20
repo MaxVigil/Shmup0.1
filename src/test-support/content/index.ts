@@ -1,0 +1,1 @@
+export { contentCatalogueWith } from './catalogue';

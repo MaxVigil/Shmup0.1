@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@bootstrap/*": ["./src/bootstrap/*"],
+      "@domain/*": ["./src/domain/*"],
+      "@content/*": ["./src/content/*"],
+      "@application/*": ["./src/application/*"],
+      "@ui/*": ["./src/ui/*"],
+      "@combat-presentation/*": ["./src/combat-presentation/*"],
+      "@platform/*": ["./src/platform/*"],
+      "@test-support/*": ["./src/test-support/*"]
+    }
+  },
+  "include": ["src"]
+}
