@@ -330,6 +330,7 @@ The Product Owner has authorized the independent acceptance reviewer to commit a
 | S03 | Accepted |
 | S04 | Accepted |
 | S05 | Accepted |
-| S06–S14 | Not Started |
+| S06 | Accepted |
+| S07–S14 | Not Started |
 
 Status changes require implementation evidence and review. This document is not an agent-maintained progress log; approved status changes are recorded deliberately rather than rewritten speculatively.

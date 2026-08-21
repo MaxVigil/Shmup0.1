@@ -140,4 +140,73 @@ describe('createSessionStore', () => {
       } as unknown as Parameters<typeof sessionReducer>[1]),
     ).toThrow('Unhandled session action');
   });
+
+  it('applies Repair atomically: one Credit spent and Hull restored to 100 (Base AC-028)', () => {
+    const store = createSessionStore();
+    store.dispatch({
+      type: 'session/initialized',
+      session: {
+        ...initializeSession(3735928559, CONTENT_CATALOGUE),
+        hullIntegrity: 40,
+      },
+    });
+    store.dispatch({ type: 'session/repair' });
+    expect(store.getState()?.credits).toBe(0);
+    expect(store.getState()?.hullIntegrity).toBe(100);
+  });
+
+  it('hides Repair spending at full Hull Integrity (Base AC-025)', () => {
+    const store = initializedStore();
+    const before = store.getState();
+    store.dispatch({ type: 'session/repair' });
+    expect(store.getState()).toBe(before);
+    expect(store.getState()?.credits).toBe(1);
+  });
+
+  it('never spends a Credit without enough Credits (Base AC-027, AC-030)', () => {
+    const store = createSessionStore();
+    store.dispatch({
+      type: 'session/initialized',
+      session: {
+        ...initializeSession(3735928559, CONTENT_CATALOGUE),
+        credits: 0,
+        hullIntegrity: 40,
+      },
+    });
+    store.dispatch({ type: 'session/repair' });
+    expect(store.getState()?.credits).toBe(0);
+    expect(store.getState()?.hullIntegrity).toBe(40);
+  });
+
+  it('treats repeated Repair input as a no-op after the first application (Base AC-029)', () => {
+    const store = createSessionStore();
+    store.dispatch({
+      type: 'session/initialized',
+      session: {
+        ...initializeSession(3735928559, CONTENT_CATALOGUE),
+        hullIntegrity: 40,
+      },
+    });
+    store.dispatch({ type: 'session/repair' });
+    const afterFirst = store.getState();
+    store.dispatch({ type: 'session/repair' });
+    expect(store.getState()).toBe(afterFirst);
+    expect(store.getState()?.credits).toBe(0);
+  });
+
+  it('equips a selected weapon only through Confirm (Base AC-022, §7.6)', () => {
+    const store = initializedStore();
+    store.dispatch({ type: 'session/equip-weapon', weapon: 'cannon' });
+    expect(store.getState()?.equippedWeapon).toBe('cannon');
+    // The equipped weapon is retained by a later navigation.
+    store.dispatch({ type: 'session/navigate', target: 'hangar' });
+    expect(store.getState()?.equippedWeapon).toBe('cannon');
+  });
+
+  it('treats confirming the already equipped weapon as a no-op', () => {
+    const store = initializedStore();
+    const before = store.getState();
+    store.dispatch({ type: 'session/equip-weapon', weapon: 'machine-gun' });
+    expect(store.getState()).toBe(before);
+  });
 });

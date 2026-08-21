@@ -118,6 +118,80 @@ test('Mission Details has no document overflow and a fully visible initial-actio
   expect(metrics.ring.bottom).toBeLessThanOrEqual(metrics.clientHeight);
 });
 
+test('Hangar and Weapon Selection keep destination focus rings inside 1280x600', async ({
+  page,
+}) => {
+  await page.setViewportSize(MINIMUM_VIEWPORT);
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await page.getByRole('button', { name: 'Hangar' }).click();
+  await expect(page.getByRole('heading', { name: 'Hangar' })).toBeFocused();
+
+  const measureFocusedRing = async (
+    expectedText: string,
+    ringOwnerSelector?: string,
+  ): Promise<void> => {
+    const metrics = await page.evaluate(
+      ({ expectedText, ringOwnerSelector }) => {
+        const doc = document.scrollingElement as HTMLElement;
+        const active =
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+        const ringOwner =
+          ringOwnerSelector === undefined
+            ? active
+            : (active?.closest<HTMLElement>(ringOwnerSelector) ?? null);
+        const rect = ringOwner?.getBoundingClientRect() ?? null;
+        const style = ringOwner === null ? null : getComputedStyle(ringOwner);
+        const ext =
+          style === null
+            ? 0
+            : parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+        return {
+          matchesExpectedText:
+            active?.textContent?.trim() === expectedText ||
+            active?.getAttribute('aria-label')?.includes(expectedText) ===
+              true ||
+            ringOwner?.textContent?.includes(expectedText) === true,
+          scrollWidth: doc.scrollWidth,
+          scrollHeight: doc.scrollHeight,
+          clientWidth: doc.clientWidth,
+          clientHeight: doc.clientHeight,
+          ring:
+            rect === null || style === null
+              ? null
+              : {
+                  top: rect.top - ext,
+                  left: rect.left - ext,
+                  right: rect.right + ext,
+                  bottom: rect.bottom + ext,
+                },
+        };
+      },
+      { expectedText, ringOwnerSelector },
+    );
+
+    expect(metrics.matchesExpectedText).toBe(true);
+    expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
+    expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight);
+    expect(metrics.ring).not.toBeNull();
+    if (metrics.ring === null) {
+      throw new Error(`Expected focused ${expectedText} ring geometry.`);
+    }
+    expect(metrics.ring.top).toBeGreaterThanOrEqual(0);
+    expect(metrics.ring.left).toBeGreaterThanOrEqual(0);
+    expect(metrics.ring.right).toBeLessThanOrEqual(metrics.clientWidth);
+    expect(metrics.ring.bottom).toBeLessThanOrEqual(metrics.clientHeight);
+  };
+
+  await measureFocusedRing('Hangar');
+
+  await page.getByRole('button', { name: 'Change Weapon' }).click();
+  await expect(page.getByRole('radio', { name: /Machine Gun/ })).toBeFocused();
+  await measureFocusedRing('Machine Gun', '.ds-weapon-option');
+});
+
 test('Boot View has no document overflow at 1280x600', async ({ page }) => {
   await page.setViewportSize(MINIMUM_VIEWPORT);
   // Hold the approved Boot preload font requests pending so the Boot View

@@ -11,6 +11,7 @@ import { createSessionStore } from '@application/session';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
+import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
 import { MissionDetailsOverlay } from './mission-details-overlay';
 
@@ -26,7 +27,9 @@ function renderOverlay(
 ): void {
   const preparedAssets: AssetPreloadResult = [];
   render(
-    <ApplicationContext.Provider value={{ store, preparedAssets }}>
+    <ApplicationContext.Provider
+      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
+    >
       <MissionDetailsOverlay open={open} onClose={onClose} />
     </ApplicationContext.Provider>,
   );
@@ -124,12 +127,16 @@ describe('MissionDetailsOverlay', () => {
     });
     const onClose = vi.fn();
     const { rerender } = render(
-      <ApplicationContext.Provider value={{ store, preparedAssets: [] }}>
+      <ApplicationContext.Provider
+        value={{ store, preparedAssets: [], content: CONTENT_CATALOGUE }}
+      >
         <MissionDetailsOverlay open={false} onClose={onClose} />
       </ApplicationContext.Provider>,
     );
     rerender(
-      <ApplicationContext.Provider value={{ store, preparedAssets: [] }}>
+      <ApplicationContext.Provider
+        value={{ store, preparedAssets: [], content: CONTENT_CATALOGUE }}
+      >
         <MissionDetailsOverlay open onClose={onClose} />
       </ApplicationContext.Provider>,
     );

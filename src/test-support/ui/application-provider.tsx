@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from 'react';
 import { createSessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
+import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '@ui/application-context';
 
 /** All six approved Phosphor icons marked ready for UI tests. */
@@ -63,7 +64,9 @@ export function WithApplication({
 }): ReactElement {
   const store = createSessionStore();
   return (
-    <ApplicationContext.Provider value={{ store, preparedAssets: assets }}>
+    <ApplicationContext.Provider
+      value={{ store, preparedAssets: assets, content: CONTENT_CATALOGUE }}
+    >
       {children}
     </ApplicationContext.Provider>
   );

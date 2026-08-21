@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
+import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
 import { OperationsScreen } from './operations-screen';
 
@@ -28,7 +29,9 @@ const BACKGROUND_READY: AssetPreloadResult = [
 function renderScreen(assets: AssetPreloadResult): void {
   const store = createInitializedSessionStore();
   render(
-    <ApplicationContext.Provider value={{ store, preparedAssets: assets }}>
+    <ApplicationContext.Provider
+      value={{ store, preparedAssets: assets, content: CONTENT_CATALOGUE }}
+    >
       <OperationsScreen />
     </ApplicationContext.Provider>,
   );

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
+import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
 import { SettingsOverlay } from './settings-overlay';
 
@@ -19,7 +20,9 @@ afterEach(() => {
 function renderOverlay(store: SessionStore, onClose: () => void): void {
   const preparedAssets: AssetPreloadResult = [];
   render(
-    <ApplicationContext.Provider value={{ store, preparedAssets }}>
+    <ApplicationContext.Provider
+      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
+    >
       <SettingsOverlay open onClose={onClose} />
     </ApplicationContext.Provider>,
   );

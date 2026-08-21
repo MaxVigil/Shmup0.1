@@ -1,3 +1,5 @@
+export { AircraftConfigurationPanel } from './aircraft-configuration-panel';
+export type { AircraftConfigurationPanelProps } from './aircraft-configuration-panel';
 export { BaseNavigation } from './base-navigation';
 export type { BaseNavigationProps } from './base-navigation';
 export { CreditsPanel } from './credits-panel';
@@ -12,3 +14,5 @@ export { NavigationItem } from './navigation-item';
 export type { NavigationItemProps } from './navigation-item';
 export { SettingsButton } from './settings-button';
 export type { SettingsButtonProps } from './settings-button';
+export { WeaponOption } from './weapon-option';
+export type { WeaponOptionProps } from './weapon-option';

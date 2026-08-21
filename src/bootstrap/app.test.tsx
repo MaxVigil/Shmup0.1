@@ -20,7 +20,9 @@ function renderReadyApp(): { store: SessionStore } {
   });
   const preparedAssets: AssetPreloadResult = [];
   render(
-    <ApplicationContext.Provider value={{ store, preparedAssets }}>
+    <ApplicationContext.Provider
+      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
+    >
       <App phase="ready" onReload={vi.fn()} />
     </ApplicationContext.Provider>,
   );
@@ -74,7 +76,9 @@ describe('App', () => {
       return null;
     }
     render(
-      <ApplicationContext.Provider value={{ store, preparedAssets }}>
+      <ApplicationContext.Provider
+        value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
+      >
         <Capture />
         <App phase="ready" onReload={vi.fn()} />
       </ApplicationContext.Provider>,

@@ -25,7 +25,9 @@ function mount(
 ): void {
   root.render(
     <StrictMode>
-      <ApplicationContext.Provider value={{ store, preparedAssets }}>
+      <ApplicationContext.Provider
+        value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
+      >
         <App
           phase={phase}
           onReload={() => {

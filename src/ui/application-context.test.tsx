@@ -2,6 +2,7 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
 import { createSessionStore } from '@application/session';
+import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext, useApplication } from './application-context';
 
 afterEach(() => {
@@ -40,7 +41,9 @@ describe('useApplication', () => {
       return null;
     }
     render(
-      <ApplicationContext.Provider value={{ store, preparedAssets }}>
+      <ApplicationContext.Provider
+        value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
+      >
         <Capture />
       </ApplicationContext.Provider>,
     );

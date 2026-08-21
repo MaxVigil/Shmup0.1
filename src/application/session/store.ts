@@ -1,10 +1,10 @@
+import type { WeaponType } from '@domain/index';
 import type { BaseScreenId, SessionState } from './session-state';
 
 /**
  * Named session actions. Mutations occur only through the store dispatch and
- * are reduced by `sessionReducer`. S04 adds Base navigation and the shared
- * Settings update; the canonical `assertNever` exhaustiveness guard keeps the
- * union closed.
+ * are reduced by `sessionReducer`. S04 added Base navigation and the shared
+ * Settings update; S06 adds the Hangar Repair and weapon-equip transactions.
  */
 export type SessionAction =
   | { readonly type: 'session/initialized'; readonly session: SessionState }
@@ -12,7 +12,9 @@ export type SessionAction =
   | {
       readonly type: 'session/set-mouse-movement-enabled';
       readonly enabled: boolean;
-    };
+    }
+  | { readonly type: 'session/repair' }
+  | { readonly type: 'session/equip-weapon'; readonly weapon: WeaponType };
 
 export interface SessionStore {
   /** Returns the session, or `null` before the session is initialized. */
@@ -48,6 +50,22 @@ export function sessionReducer(
       return state.mouseMovementEnabled === action.enabled
         ? state
         : { ...state, mouseMovementEnabled: action.enabled };
+    case 'session/repair':
+      // Repair (Base §8): exactly `Credits -= 1` and `Hull Integrity = 100`,
+      // applied atomically. No-op when the aircraft is at full Hull or Credits
+      // are insufficient (AC-025, AC-027, AC-030); idempotency also covers
+      // repeated-input protection (AC-029).
+      if (state === null || state.hullIntegrity >= 100 || state.credits < 1) {
+        return state;
+      }
+      return { ...state, credits: state.credits - 1, hullIntegrity: 100 };
+    case 'session/equip-weapon':
+      // Weapon selection transaction (Base §7): only `Confirm` equips; the
+      // equipped weapon persists across Base navigation (AC-022, §7.6).
+      if (state === null || state.equippedWeapon === action.weapon) {
+        return state;
+      }
+      return { ...state, equippedWeapon: action.weapon };
     default:
       return assertNever(action);
   }

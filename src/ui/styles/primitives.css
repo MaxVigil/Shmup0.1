@@ -380,6 +380,147 @@
   width: clamp(24rem, 36vw, 32rem);
 }
 
+/* --- Hangar Screen (Base §6) --- */
+.ds-hangar-screen {
+  position: relative;
+}
+
+/* Hangar background from the prepared runtime asset; solid dark fallback. */
+.ds-hangar-background {
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-canvas);
+  background-size: cover;
+  background-position: center;
+}
+
+.ds-hangar-screen__content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.ds-hangar-screen__layout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+}
+
+.ds-hangar-screen__aircraft {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* German Fighter visual (Base §6.4): scales preserving aspect ratio within
+ * the approved viewport-height bound (leaving room for the Screen heading);
+ * no rotation, drag, zoom, or animation. */
+.ds-hangar-aircraft {
+  max-width: 100%;
+  max-height: calc(100vh - var(--space-12) * 2);
+  width: auto;
+  height: auto;
+}
+
+/* --- Aircraft Configuration Panel (DS §8.13) --- */
+.ds-aircraft-configuration-panel {
+  width: clamp(18rem, 24vw, 22rem);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.ds-aircraft-configuration-panel__section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+/* --- Weapon Option (DS §8.14, §9.4): native radio selection --- */
+.ds-weapon-option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-control);
+  background-color: transparent;
+  cursor: pointer;
+}
+
+.ds-weapon-option:hover {
+  background-color: var(--color-surface-interactive);
+}
+
+.ds-weapon-option--selected {
+  background-color: var(--color-surface-interactive);
+  border-color: var(--color-border-strong);
+}
+
+.ds-weapon-option__input {
+  position: absolute;
+  width: var(--space-1);
+  height: var(--space-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+  opacity: 0;
+}
+
+.ds-weapon-option__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ds-weapon-option:has(.ds-weapon-option__input:focus-visible) {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.ds-weapon-option__indicator {
+  width: var(--space-3);
+  height: var(--space-3);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  flex-shrink: 0;
+}
+
+.ds-weapon-option--selected .ds-weapon-option__indicator {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.ds-weapon-option__name {
+  font-size: var(--text-control-size);
+  font-weight: var(--text-control-weight);
+  line-height: var(--text-control-line-height);
+  color: var(--color-text-primary);
+}
+
+.ds-weapon-option__stats {
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Weapon Selection Overlay (DS §8.18) --- */
+.ds-weapon-selection-overlay {
+  width: clamp(32rem, 50vw, 44rem);
+}
+
+.ds-weapon-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
 .ds-boot-view {
   min-height: 100vh;
   display: flex;
