@@ -249,6 +249,32 @@ Acceptance requires no known `S0`–`S2`, passing required gates, proportionate 
 
 After each accepted Slice, the independent reviewer silently checks correction causes, repeated defects, redundant reading or gates, relay steps, and candidates for a test, lint rule, validator, or hook. Raise a process proposal only when it removes a cycle, prevents a recurring defect class, materially reduces context, or reduces Product Owner involvement. Do not produce a routine process report when no useful change exists.
 
+### 10.3 Micro-correction lane
+
+The Product Owner authorizes the independent acceptance reviewer (Codex) to implement a local micro-correction autonomously within an `Accepted` or `Awaiting Acceptance Review` Slice when every condition below holds:
+
+- the approved product contract already determines the correct result;
+- no product, scope, architecture, state-ownership, dependency, or content decision is introduced;
+- the cause is known and the correction is limited to one to three logically related tracked files;
+- no new system, component family, dependency, persistence, or speculative abstraction is added;
+- a regression test covers the defect class;
+- every applicable gate passes after the correction.
+
+Flow:
+
+```text
+local defect
+→ reviewer confirms micro-correction eligibility and root cause
+→ reviewer implements the smallest canonical-owner fix plus regression
+→ applicable full gates pass
+→ reviewer creates a `fix(sxx): ...` amendment commit
+→ reviewer may push only under the existing clean-working-tree, existing-origin/main, fast-forward authorization
+```
+
+A micro-correction does not create a DeepSeek handoff, Product Owner relay, separate defect backlog, or product discussion. Severity and execution path are separate: a narrowly bounded AC defect may be `S2` yet use this lane when all eligibility conditions hold.
+
+Do not use this lane when the cause is uncertain, more than three logical files are required, an existing contract must change, multiple systems or owners are affected, manual product judgement is needed, or the correction changes Combat/economy/state semantics. Route those cases through one consolidated correction Work Item. If scope expands while fixing, stop the micro-correction and reclassify it; do not stretch the file limit or hide architectural work inside the amendment.
+
 ## 11. Git and external actions
 
 - Do not commit unless explicitly requested.
@@ -259,6 +285,7 @@ After each accepted Slice, the independent reviewer silently checks correction c
 - Use `feat(sxx): <slice outcome>` for the first accepted Slice commit, or an explicitly assigned message.
 - After commit, report only the commit hash, commit subject, whether relevant files changed after accepted verification, and exact remaining working-tree entries.
 - The Product Owner has given the independent acceptance reviewer standing authorization to commit accepted Slices and push only to the existing `origin/main` when the working tree is clean and the push is fast-forward. This authorization does not apply to the implementation agent.
+- The same reviewer authorization covers eligible micro-correction amendment commits under §10.3 after applicable gates pass.
 - No agent may push another branch or remote, force push, publish, deploy, or create a PR under that standing authorization.
 - Do not push, publish, deploy, create a remote, open a PR, or contact an external system unless explicitly requested.
 - Never combine unrelated user changes into an agent commit.

@@ -249,6 +249,20 @@ A Slice is eligible for `Accepted` only when:
 
 `S3` must not create a correction cycle by itself. `S4` is neither reported nor tracked. A failed command, missing mandatory evidence, or materially misleading test is at least `S2` until resolved.
 
+An eligible local defect may use the reviewer-owned Micro-correction lane in `AGENTS.md` §10.3 instead of a separate implementation-agent cycle. Acceptance still requires the defect to be fixed, covered by regression, and verified; the lane reduces relay cost but never lowers the threshold.
+
+### 14.2 UI viewport and focus baseline
+
+Every Slice that creates or materially changes a full-viewport Screen must extend the shared browser regression in `e2e/viewport-bounds.spec.ts` for each affected supported Screen state. At the minimum `1280 × 600` viewport, evidence must assert:
+
+- no unintended horizontal document overflow;
+- no unintended vertical document overflow when the Screen contract does not permit scrolling;
+- the complete focus ring of the programmatically focused destination, including outline width and positive offset, remains inside the viewport;
+- the measured element is the expected active element;
+- viewport screenshots are captured as viewport evidence when manual visual evidence applies; a full-page screenshot alone cannot prove viewport fit.
+
+Use numeric DOM geometry for pass/fail. Screenshots supplement these assertions; they do not replace them. Add the state to the existing test owner rather than creating a one-off probe that survives in product files.
+
 ## 15. Readiness
 
 The dependency lockfile, repository configuration scaffold, and verification-command contract are approved and verified.
