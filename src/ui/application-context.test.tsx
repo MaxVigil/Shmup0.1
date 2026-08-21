@@ -26,6 +26,7 @@ describe('useApplication', () => {
         id: 'icon-gear',
         kind: 'icon' as const,
         sourcePath: 'assets/runtime/icons/gear.svg',
+        url: '/icons/gear.svg',
         status: 'ready' as const,
       },
     ];

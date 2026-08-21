@@ -7,6 +7,7 @@ import { CONTENT_CATALOGUE } from '@content/index';
 import { createBrowserAssetPreload } from '@platform/assets/preload';
 import { createBrowserSessionSeedSource } from '@platform/browser/session-seed-source';
 import { ApplicationContext } from '@ui/application-context';
+import '@ui/styles/index.css';
 import { App } from './app';
 import type { AppPhase } from './app';
 

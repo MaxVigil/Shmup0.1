@@ -1,0 +1,96 @@
+/*
+ * Base element defaults and shared behaviour. All design values reference the
+ * canonical tokens in tokens.css (DS-AC-001).
+ */
+:root {
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-canvas);
+  color: var(--color-text-primary);
+  font-family: var(--font-family);
+  font-size: var(--text-body-size);
+  font-weight: var(--text-body-weight);
+  line-height: var(--text-body-line-height);
+  font-variant-ligatures: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Canonical focus-visible indication (DS §9.1, DS-AC-004). */
+:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+/* Reduced motion (DS §6.6, DS-AC-011). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Typography presentation roles used by the Text primitive (DS §8.1). */
+.ds-text {
+  font-family: var(--font-family);
+}
+
+.ds-text--caption {
+  font-size: var(--text-caption-size);
+  font-weight: var(--text-caption-weight);
+  line-height: var(--text-caption-line-height);
+}
+
+.ds-text--body {
+  font-size: var(--text-body-size);
+  font-weight: var(--text-body-weight);
+  line-height: var(--text-body-line-height);
+}
+
+.ds-text--control {
+  font-size: var(--text-control-size);
+  font-weight: var(--text-control-weight);
+  line-height: var(--text-control-line-height);
+}
+
+.ds-text--heading {
+  font-size: var(--text-heading-size);
+  font-weight: var(--text-heading-weight);
+  line-height: var(--text-heading-line-height);
+}
+
+.ds-text--title {
+  font-size: var(--text-title-size);
+  font-weight: var(--text-title-weight);
+  line-height: var(--text-title-line-height);
+}
+
+.ds-text-tone--primary {
+  color: var(--color-text-primary);
+}
+
+.ds-text-tone--secondary {
+  color: var(--color-text-secondary);
+}
+
+.ds-text-tone--disabled {
+  color: var(--color-text-disabled);
+}
+
+.ds-text-tone--danger {
+  color: var(--color-danger);
+}

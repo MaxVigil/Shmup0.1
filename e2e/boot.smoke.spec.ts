@@ -10,6 +10,18 @@ test('boot reaches Operations without page errors', async ({ page }) => {
   expect(pageErrors).toEqual([]);
 });
 
+test('boot moves programmatic focus to the Operations heading', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  const activeText = await page.evaluate(
+    () => document.activeElement?.textContent ?? '',
+  );
+  expect(activeText).toBe('Operations');
+});
+
 test('boot reaches Operations when a non-critical asset fails', async ({
   page,
 }) => {

@@ -14,6 +14,8 @@ export interface PreparedRuntimeAsset {
   readonly id: string;
   readonly kind: RuntimeAssetKind;
   readonly sourcePath: string;
+  /** Runtime URL below the configured base (S03 prepared-catalogue consumption). */
+  readonly url: string;
   readonly status: 'ready' | 'fallback';
 }
 

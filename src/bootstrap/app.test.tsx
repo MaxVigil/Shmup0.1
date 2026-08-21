@@ -43,6 +43,7 @@ describe('App', () => {
         id: 'icon-gear',
         kind: 'icon',
         sourcePath: 'assets/runtime/icons/gear.svg',
+        url: '/icons/gear.svg',
         status: 'ready',
       },
     ];

@@ -29,6 +29,7 @@ export function buildFallbackPreloadResult(): AssetPreloadResult {
     id: entry.id,
     kind: entry.kind,
     sourcePath: entry.sourcePath,
+    url: resolveRuntimeAssetUrl(entry.sourcePath),
     status: 'fallback',
   }));
 }
@@ -61,6 +62,7 @@ export function preloadRuntimeAssets(): Promise<
           id: entry.id,
           kind: entry.kind,
           sourcePath: entry.sourcePath,
+          url: resolveRuntimeAssetUrl(entry.sourcePath),
           status: results[index] === true ? 'ready' : 'fallback',
         }),
       );
