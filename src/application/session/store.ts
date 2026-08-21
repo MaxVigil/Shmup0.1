@@ -1,15 +1,18 @@
-import type { SessionState } from './session-state';
+import type { BaseScreenId, SessionState } from './session-state';
 
 /**
  * Named session actions. Mutations occur only through the store dispatch and
- * are reduced by `sessionReducer`. New actions are added by later slices; the
- * canonical `assertNever` exhaustiveness guard is introduced when the union
- * has more than one member (see `sessionReducer`).
+ * are reduced by `sessionReducer`. S04 adds Base navigation and the shared
+ * Settings update; the canonical `assertNever` exhaustiveness guard keeps the
+ * union closed.
  */
-export type SessionAction = {
-  readonly type: 'session/initialized';
-  readonly session: SessionState;
-};
+export type SessionAction =
+  | { readonly type: 'session/initialized'; readonly session: SessionState }
+  | { readonly type: 'session/navigate'; readonly target: BaseScreenId }
+  | {
+      readonly type: 'session/set-mouse-movement-enabled';
+      readonly enabled: boolean;
+    };
 
 export interface SessionStore {
   /** Returns the session, or `null` before the session is initialized. */
@@ -26,13 +29,32 @@ export function sessionReducer(
     case 'session/initialized':
       // Idempotent: a repeated initialization is ignored (MASTER-AC-002).
       return state === null ? action.session : state;
+    case 'session/navigate':
+      // Base §3.4 / AC-003: selecting the current Screen must not reload,
+      // reset, or change the session — returning the same state object makes
+      // the change invisible to subscribers.
+      if (state === null) {
+        return state;
+      }
+      return state.currentScreen === action.target
+        ? state
+        : { ...state, currentScreen: action.target };
+    case 'session/set-mouse-movement-enabled':
+      // Shared Settings (Base §3.6, §9.3): updates immediately and keeps the
+      // single authoritative value; an unchanged value is a no-op.
+      if (state === null) {
+        return state;
+      }
+      return state.mouseMovementEnabled === action.enabled
+        ? state
+        : { ...state, mouseMovementEnabled: action.enabled };
     default:
-      // The action union currently has exactly one member, so this default is
-      // unreachable. TS 6.0.3 does not narrow a single-member union to `never`,
-      // so the canonical `assertNever` exhaustiveness guard is introduced when
-      // later slices widen `SessionAction` (S04+).
-      return state;
+      return assertNever(action);
   }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled session action: ${JSON.stringify(value)}`);
 }
 
 export function createSessionStore(): SessionStore {

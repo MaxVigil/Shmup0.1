@@ -320,6 +320,25 @@
   padding: var(--space-4);
 }
 
+/* --- Base shell (Base §3.2, DS §8.6): persistent left Navigation, remaining
+ * --- viewport area for the current Base Screen, Settings upper-right. --- */
+.ds-base-shell {
+  position: relative;
+  display: flex;
+  min-height: 100vh;
+}
+
+.ds-base-shell__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.ds-base-shell__settings {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+}
+
 .ds-boot-view {
   min-height: 100vh;
   display: flex;

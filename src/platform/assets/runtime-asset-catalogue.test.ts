@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   RUNTIME_ASSET_MANIFEST,
+  normalizeRuntimeAssetUrl,
   resolveRuntimeAssetUrl,
 } from './runtime-asset-catalogue';
 
@@ -55,5 +56,28 @@ describe('resolveRuntimeAssetUrl', () => {
         'assets/runtime/backgrounds/operations-background.webp',
       ),
     ).toBe(`${import.meta.env.BASE_URL}backgrounds/operations-background.webp`);
+  });
+});
+
+describe('normalizeRuntimeAssetUrl', () => {
+  it('keeps root-relative URLs unchanged', () => {
+    expect(
+      normalizeRuntimeAssetUrl('/icons/gear.svg', 'http://localhost:4174/'),
+    ).toBe('/icons/gear.svg');
+  });
+
+  it('resolves a relative ./ URL against the document base (production build)', () => {
+    // S04 regression: with `base: './'` the production build produced
+    // `./icons/...`, which CSS mask-image consumers resolve against the
+    // stylesheet origin (`/assets/icons/...`) instead of the document base.
+    expect(
+      normalizeRuntimeAssetUrl('./icons/gear.svg', 'http://localhost:4174/'),
+    ).toBe('http://localhost:4174/icons/gear.svg');
+  });
+
+  it('resolves a relative ../ URL against the document base', () => {
+    expect(
+      normalizeRuntimeAssetUrl('../icons/gear.svg', 'http://localhost:4174/'),
+    ).toBe('http://localhost:4174/icons/gear.svg');
   });
 });

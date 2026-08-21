@@ -94,10 +94,31 @@ export const RUNTIME_ASSET_MANIFEST: readonly RuntimeAssetManifestEntry[] = [
  * Resolves an approved manifest source path to a runtime URL below the
  * configured Vite base. The `assets/runtime/` prefix is the public directory,
  * so the file is served relative to the base path.
+ *
+ * A relative `BASE_URL` (for example `./` in the production build) must not
+ * produce a relative runtime URL: CSS `url()` consumers such as the icon
+ * `mask-image` resolve relative URLs against the stylesheet origin instead of
+ * the document, which breaks the path and causes repeated requests. The URL is
+ * therefore normalized against the document base so every consumer (fetch,
+ * `img`, `FontFace`, `mask-image`) uses the local static-server base path
+ * (Delivery §1; S04 regression: production mask-icon path and resize/visibility
+ * request continuity).
  */
 export function resolveRuntimeAssetUrl(sourcePath: string): string {
-  return `${import.meta.env.BASE_URL}${sourcePath.replace(
+  const url = `${import.meta.env.BASE_URL}${sourcePath.replace(
     'assets/runtime/',
     '',
   )}`;
+  return normalizeRuntimeAssetUrl(url, document.baseURI);
+}
+
+/** Pure URL-normalization rule used by `resolveRuntimeAssetUrl`. */
+export function normalizeRuntimeAssetUrl(
+  url: string,
+  documentBase: string,
+): string {
+  if (url.startsWith('./') || url.startsWith('../')) {
+    return new URL(url, documentBase).href;
+  }
+  return url;
 }

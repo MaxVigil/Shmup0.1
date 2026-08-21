@@ -12,17 +12,36 @@ afterEach(() => {
   cleanup();
 });
 
+function renderReadyApp(): { store: SessionStore } {
+  const store = createSessionStore();
+  store.dispatch({
+    type: 'session/initialized',
+    session: initializeSession(3735928559, CONTENT_CATALOGUE),
+  });
+  const preparedAssets: AssetPreloadResult = [];
+  render(
+    <ApplicationContext.Provider value={{ store, preparedAssets }}>
+      <App phase="ready" onReload={vi.fn()} />
+    </ApplicationContext.Provider>,
+  );
+  return { store };
+}
+
 describe('App', () => {
   it('renders the Boot View while booting', () => {
     render(<App phase="boot" onReload={vi.fn()} />);
     expect(screen.getByTestId('boot-view').textContent).toBe('Loading…');
   });
 
-  it('renders the Operations screen when ready', () => {
-    render(<App phase="ready" onReload={vi.fn()} />);
+  it('renders the Base shell with Operations when ready', () => {
+    renderReadyApp();
     expect(screen.getByTestId('operations-screen').textContent).toBe(
       'Operations',
     );
+    expect(
+      screen.getByRole('navigation', { name: 'Base Navigation' }),
+    ).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeDefined();
   });
 
   it('renders the fatal view and wires Reload', () => {

@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { BootView, FatalStartupView, OperationsScreen } from '@ui/screens';
+import { BootView, FatalStartupView, BaseShell } from '@ui/screens';
 
 export type AppPhase = 'boot' | 'ready' | 'fatal';
 
@@ -15,5 +15,5 @@ export function App({ phase, onReload }: AppProps): ReactElement {
   if (phase === 'fatal') {
     return <FatalStartupView onReload={onReload} />;
   }
-  return <OperationsScreen />;
+  return <BaseShell />;
 }
