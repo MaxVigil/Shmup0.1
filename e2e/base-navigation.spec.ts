@@ -186,18 +186,23 @@ test('closing Settings restores focus to the Settings button (Base AC-051)', asy
   await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();
 });
 
-test('Base sequential focus order is Navigation then Settings (Base AC-049)', async ({
+test('Base sequential focus order is Navigation, Screen actions, then Settings (Base AC-049)', async ({
   page,
 }) => {
   await page.goto('/');
   await expect(page.getByTestId('operations-screen')).toBeVisible();
 
   // Measure the approved sequential order from the first focusable control:
-  // Base Navigation (Operations, Hangar), then Settings (Base §9.9).
+  // Base Navigation (Operations, Hangar), Operations Screen action (Mission
+  // Point), then Settings (Base §9.9).
   await page.getByRole('button', { name: 'Operations' }).focus();
   await expect(page.getByRole('button', { name: 'Operations' })).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: 'Hangar' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(
+    page.getByRole('button', { name: 'Interception' }),
+  ).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();
 });

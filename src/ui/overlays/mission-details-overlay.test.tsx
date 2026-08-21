@@ -1,0 +1,145 @@
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as mission from '@application/mission';
+import { createSessionStore } from '@application/session';
+import type { SessionStore } from '@application/session';
+import type { AssetPreloadResult } from '@application/ports';
+import { createInitializedSessionStore } from '@test-support/session';
+import { ApplicationContext } from '../application-context';
+import { MissionDetailsOverlay } from './mission-details-overlay';
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+function renderOverlay(
+  store: SessionStore,
+  onClose: () => void,
+  open = true,
+): void {
+  const preparedAssets: AssetPreloadResult = [];
+  render(
+    <ApplicationContext.Provider value={{ store, preparedAssets }}>
+      <MissionDetailsOverlay open={open} onClose={onClose} />
+    </ApplicationContext.Provider>,
+  );
+}
+
+describe('MissionDetailsOverlay', () => {
+  it('displays the approved content and action order (Base AC-010, DS §8.17)', () => {
+    const store = createInitializedSessionStore();
+    renderOverlay(store, vi.fn());
+    const dialog = screen.getByRole('dialog');
+    expect(screen.getByRole('heading', { name: 'Interception' })).toBeDefined();
+    expect(screen.getByText('Resolve the incoming enemy wave.')).toBeDefined();
+    expect(screen.getByText('Reward')).toBeDefined();
+    expect(screen.getByText('1 Credit')).toBeDefined();
+    const start = screen.getByRole('button', { name: 'Start Mission' });
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    expect(start.className).toContain('ds-button--primary');
+    expect(cancel.className).toContain('ds-button--secondary');
+    // Exactly the two approved actions; no aircraft selector or Open Hangar.
+    expect(dialog.querySelectorAll('button')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Open Hangar' })).toBeNull();
+  });
+
+  it('moves initial focus to Start Mission (DS §10.4)', () => {
+    const store = createInitializedSessionStore();
+    renderOverlay(store, vi.fn());
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Start Mission' }),
+    );
+  });
+
+  it('closes through Cancel and Esc without changing Operations (Base AC-011)', () => {
+    const store = createInitializedSessionStore();
+    const onClose = vi.fn();
+    renderOverlay(store, onClose);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(
+      document.querySelector('.ds-overlay__surface') as Element,
+      { key: 'Escape' },
+    );
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not close when clicking outside the Overlay (Base AC-012)', () => {
+    const store = createInitializedSessionStore();
+    const onClose = vi.fn();
+    renderOverlay(store, onClose);
+    fireEvent.click(document.querySelector('.ds-overlay__scrim') as Element);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('disables Start Mission and emits exactly one accepted start request (Base AC-013, §5.5)', () => {
+    const store = createInitializedSessionStore();
+    const spy = vi.spyOn(mission, 'requestMissionStart').mockReturnValue({
+      kind: 'accepted',
+    });
+    renderOverlay(store, vi.fn());
+    const start = screen.getByRole('button', {
+      name: 'Start Mission',
+    }) as HTMLButtonElement;
+
+    act(() => {
+      fireEvent.click(start);
+    });
+    expect(start.disabled).toBe(true);
+    // A repeated click on the disabled action cannot emit a second request.
+    act(() => {
+      fireEvent.click(start);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(store.getState()?.credits).toBe(1);
+  });
+
+  it('shows the failure message, keeps the Overlay open, and re-enables Start Mission on rejection (Base AC-014)', () => {
+    const store = createSessionStore();
+    renderOverlay(store, vi.fn());
+    const start = screen.getByRole('button', {
+      name: 'Start Mission',
+    }) as HTMLButtonElement;
+
+    act(() => {
+      fireEvent.click(start);
+    });
+    expect(screen.getByText('Unable to start mission.')).toBeDefined();
+    expect(start.disabled).toBe(false);
+    expect(screen.getByRole('dialog')).toBeDefined();
+  });
+
+  it('resets the request state when the Overlay opens again', () => {
+    const store = createInitializedSessionStore();
+    const spy = vi.spyOn(mission, 'requestMissionStart').mockReturnValue({
+      kind: 'accepted',
+    });
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <ApplicationContext.Provider value={{ store, preparedAssets: [] }}>
+        <MissionDetailsOverlay open={false} onClose={onClose} />
+      </ApplicationContext.Provider>,
+    );
+    rerender(
+      <ApplicationContext.Provider value={{ store, preparedAssets: [] }}>
+        <MissionDetailsOverlay open onClose={onClose} />
+      </ApplicationContext.Provider>,
+    );
+    const start = screen.getByRole('button', {
+      name: 'Start Mission',
+    }) as HTMLButtonElement;
+    expect(start.disabled).toBe(false);
+    act(() => {
+      fireEvent.click(start);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});

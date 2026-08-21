@@ -64,6 +64,60 @@ test('Operations has no document overflow and a fully visible heading ring at 12
   expect(ring.bottom).toBeLessThanOrEqual(metrics.clientHeight);
 });
 
+test('Mission Details has no document overflow and a fully visible initial-action ring at 1280x600', async ({
+  page,
+}) => {
+  await page.setViewportSize(MINIMUM_VIEWPORT);
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await page.getByRole('button', { name: 'Interception' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Start Mission' }),
+  ).toBeFocused();
+
+  const metrics = await page.evaluate(() => {
+    const doc = document.scrollingElement as HTMLElement;
+    const active =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const rect = active?.getBoundingClientRect() ?? null;
+    const style = active === null ? null : getComputedStyle(active);
+    const ext =
+      style === null
+        ? 0
+        : parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+    return {
+      scrollWidth: doc.scrollWidth,
+      scrollHeight: doc.scrollHeight,
+      clientWidth: doc.clientWidth,
+      clientHeight: doc.clientHeight,
+      focusedControl: active?.textContent?.trim() ?? null,
+      ring:
+        rect === null || style === null
+          ? null
+          : {
+              top: rect.top - ext,
+              left: rect.left - ext,
+              right: rect.right + ext,
+              bottom: rect.bottom + ext,
+            },
+    };
+  });
+
+  expect(metrics.focusedControl).toBe('Start Mission');
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
+  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight);
+  expect(metrics.ring).not.toBeNull();
+  if (metrics.ring === null) {
+    throw new Error('Expected focused Start Mission ring geometry.');
+  }
+  expect(metrics.ring.top).toBeGreaterThanOrEqual(0);
+  expect(metrics.ring.left).toBeGreaterThanOrEqual(0);
+  expect(metrics.ring.right).toBeLessThanOrEqual(metrics.clientWidth);
+  expect(metrics.ring.bottom).toBeLessThanOrEqual(metrics.clientHeight);
+});
+
 test('Boot View has no document overflow at 1280x600', async ({ page }) => {
   await page.setViewportSize(MINIMUM_VIEWPORT);
   // Hold the approved Boot preload font requests pending so the Boot View

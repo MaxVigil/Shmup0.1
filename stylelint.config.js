@@ -54,9 +54,10 @@ export default {
       outline: ['/^(?!var\\()/'],
       'outline-offset': ['/^(?!var\\()/'],
       // Sizing / component height (approved structural exceptions: 100%,
-      // 100vh, calc(...), 0, auto)
+      // 100vh, calc(...), clamp(...), 0, auto; clamp(...) covers the approved
+      // bounded fluid composition widths, DS §7–8)
       height: ['/^(?!var\\(|100%$|100vh$|0$|auto$)/'],
-      width: ['/^(?!var\\(|100%$|100vh$|0$|auto$)/'],
+      width: ['/^(?!var\\(|100%$|100vh$|0$|auto$|clamp\\()/'],
       'min-height': ['/^(?!var\\(|100vh$|0$)/'],
       'max-height': ['/^(?!var\\(|calc\\(|none$|0$)/'],
       'min-width': ['/^(?!var\\(|100%$|0$|auto$)/'],

@@ -1,18 +1,54 @@
-import { useRef } from 'react';
-import type { ReactElement } from 'react';
-import { useScreenHeadingFocus } from '../hooks';
+import { useRef, useState } from 'react';
+import type { CSSProperties, ReactElement } from 'react';
+import { useApplication } from '../application-context';
+import { CreditsPanel, MissionPoint } from '../components';
+import { useScreenHeadingFocus, useSessionState } from '../hooks';
+import { MissionDetailsOverlay } from '../overlays';
 import { Text } from '../primitives';
 
-// Minimum S02 destination shell, now on the Design System shell (S03).
-// DS-AC-015: programmatic focus moves to the Screen heading (tabindex="-1").
+/**
+ * Operations Screen composition (Base §4, AC-007): the strategic-map
+ * background (prepared runtime asset or solid dark fallback), one static
+ * `Interception` Mission Point at `50% × 50%` of the content area, and the
+ * compact Credits Panel in the upper-left. Selecting the Mission Point opens
+ * the blocking Mission Details Overlay (AC-009).
+ */
 export function OperationsScreen(): ReactElement {
   const headingRef = useRef<HTMLHeadingElement>(null);
   useScreenHeadingFocus(headingRef);
+  const { preparedAssets } = useApplication();
+  const session = useSessionState();
+  const [missionDetailsOpen, setMissionDetailsOpen] = useState(false);
+
+  const background = preparedAssets.find(
+    (asset) => asset.id === 'operations-background',
+  );
+  const backgroundStyle: CSSProperties | undefined =
+    background?.status === 'ready'
+      ? { backgroundImage: `url("${background.url}")` }
+      : undefined;
+
   return (
-    <main data-testid="operations-screen" className="ds-screen">
-      <Text as="h1" ref={headingRef} tabIndex={-1} style="heading">
-        Operations
-      </Text>
+    <main
+      data-testid="operations-screen"
+      className="ds-screen ds-operations-screen"
+    >
+      <div
+        className="ds-operations-background"
+        style={backgroundStyle}
+        aria-hidden="true"
+      />
+      <div className="ds-operations-screen__content">
+        <Text as="h1" ref={headingRef} tabIndex={-1} style="heading">
+          Operations
+        </Text>
+        <CreditsPanel credits={session.credits} />
+      </div>
+      <MissionPoint onPress={() => setMissionDetailsOpen(true)} />
+      <MissionDetailsOverlay
+        open={missionDetailsOpen}
+        onClose={() => setMissionDetailsOpen(false)}
+      />
     </main>
   );
 }

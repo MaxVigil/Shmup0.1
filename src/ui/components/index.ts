@@ -1,9 +1,13 @@
 export { BaseNavigation } from './base-navigation';
 export type { BaseNavigationProps } from './base-navigation';
+export { CreditsPanel } from './credits-panel';
+export type { CreditsPanelProps } from './credits-panel';
 export { FieldRow } from './field-row';
 export type { FieldRowProps } from './field-row';
 export { HullIntegrityBar } from './hull-integrity-bar';
 export type { HullIntegrityBarProps } from './hull-integrity-bar';
+export { MissionPoint } from './mission-point';
+export type { MissionPointProps } from './mission-point';
 export { NavigationItem } from './navigation-item';
 export type { NavigationItemProps } from './navigation-item';
 export { SettingsButton } from './settings-button';
