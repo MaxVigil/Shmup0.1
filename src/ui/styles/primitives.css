@@ -521,6 +521,46 @@
   gap: var(--space-3);
 }
 
+/* --- Combat Screen shell (S07) --- */
+.ds-combat-screen {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-canvas);
+}
+
+.ds-combat-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.ds-combat-canvas canvas {
+  display: block;
+}
+
+/* --- Combat HUD bridge (Combat §4.3, Technical Foundation §6.1): the
+ * --- imperative Hull Integrity bar element owned by CombatHudBridge. --- */
+.ds-combat-hud {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: var(--layer-hud);
+}
+
+.ds-combat-hud__track {
+  width: 100%;
+  height: var(--progress-bar-height);
+  background-color: var(--color-surface-interactive);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.ds-combat-hud__fill {
+  width: 0;
+  height: 100%;
+  background-color: var(--color-accent);
+}
+
 .ds-boot-view {
   min-height: 100vh;
   display: flex;

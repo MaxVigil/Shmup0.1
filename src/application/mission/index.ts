@@ -1,2 +1,3 @@
-export { requestMissionStart } from './request-mission-start';
-export type { MissionStartRequestResult } from './request-mission-start';
+export { startMission } from './start-mission';
+export type { MissionStartResult } from './start-mission';
+export type { MissionSnapshot } from './snapshot';

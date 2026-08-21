@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
 import { useApplication } from '../application-context';
 import { CreditsPanel, MissionPoint } from '../components';
@@ -11,14 +11,29 @@ import { Text } from '../primitives';
  * background (prepared runtime asset or solid dark fallback), one static
  * `Interception` Mission Point at `50% × 50%` of the content area, and the
  * compact Credits Panel in the upper-left. Selecting the Mission Point opens
- * the blocking Mission Details Overlay (AC-009).
+ * the blocking Mission Details Overlay (AC-009). After a Combat initialization
+ * failure the Overlay reopens with `Unable to start mission.` (Base AC-014).
  */
 export function OperationsScreen(): ReactElement {
+  const { store, preparedAssets } = useApplication();
   const headingRef = useRef<HTMLHeadingElement>(null);
   useScreenHeadingFocus(headingRef);
-  const { preparedAssets } = useApplication();
   const session = useSessionState();
   const [missionDetailsOpen, setMissionDetailsOpen] = useState(false);
+  const [missionStartError, setMissionStartError] = useState(false);
+
+  useEffect(() => {
+    if (session.missionStartFailed) {
+      setMissionDetailsOpen(true);
+      setMissionStartError(true);
+      store.dispatch({ type: 'mission/start-failure-consumed' });
+    }
+  }, [session.missionStartFailed, store]);
+
+  const handleOpenMissionDetails = (): void => {
+    setMissionStartError(false);
+    setMissionDetailsOpen(true);
+  };
 
   const background = preparedAssets.find(
     (asset) => asset.id === 'operations-background',
@@ -44,10 +59,11 @@ export function OperationsScreen(): ReactElement {
         </Text>
         <CreditsPanel credits={session.credits} />
       </div>
-      <MissionPoint onPress={() => setMissionDetailsOpen(true)} />
+      <MissionPoint onPress={handleOpenMissionDetails} />
       <MissionDetailsOverlay
         open={missionDetailsOpen}
         onClose={() => setMissionDetailsOpen(false)}
+        initialError={missionStartError}
       />
     </main>
   );

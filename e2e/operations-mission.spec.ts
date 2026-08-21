@@ -158,7 +158,7 @@ test('clicking outside Mission Details does not close it (Base AC-012)', async (
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
-test('Start Mission disables immediately and emits one request without spending Credits (Base AC-013, §5.5)', async ({
+test('Start Mission crosses into Combat without spending Credits (Base AC-013, §5.5; S07)', async ({
   page,
 }) => {
   await page.goto('/');
@@ -168,18 +168,11 @@ test('Start Mission disables immediately and emits one request without spending 
 
   const start = page.getByRole('button', { name: 'Start Mission' });
   await start.click();
-  await expect(start).toBeDisabled();
-  // A repeated click on the disabled action cannot emit a second request.
-  await start.click({ force: true });
-  await expect(start).toBeDisabled();
-  await expect(page.getByText('Credits: 1')).toBeVisible();
-
-  // The Overlay remains open while the accepted request awaits S07's
-  // Snapshot/Combat transition; Cancel still returns to unchanged Operations.
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  // Base UI closes and Combat opens; Credits are untouched.
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
+  await expect(page.getByTestId('operations-screen')).toBeHidden();
+  await expect(page.getByText('Credits: 1')).not.toBeVisible();
   await expect(page.getByRole('dialog')).toBeHidden();
-  await expect(page.getByTestId('operations-screen')).toBeVisible();
 });
 
 test('no document overflow on Operations or with Mission Details open at 1280x600 (Base AC-041, DS-AC-007)', async ({

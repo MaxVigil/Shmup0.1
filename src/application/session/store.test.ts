@@ -2,6 +2,25 @@ import { describe, expect, it, vi } from 'vitest';
 import { CONTENT_CATALOGUE } from '@content/index';
 import { initializeSession } from './initialize-session';
 import { createSessionStore, sessionReducer } from './store';
+import type { MissionSnapshot } from '../mission/snapshot';
+
+function snapshotFor(
+  store: ReturnType<typeof createSessionStore>,
+): MissionSnapshot {
+  const session = store.getState();
+  if (session === null) {
+    throw new Error('Expected an initialized session.');
+  }
+  return {
+    missionInstanceOrdinal: 0,
+    combatMissionSeed: 1234,
+    aircraftId: session.aircraftId,
+    hullIntegrity: session.hullIntegrity,
+    equippedWeapon: session.equippedWeapon,
+    pilot: session.pilot,
+    mouseMovementEnabled: session.mouseMovementEnabled,
+  };
+}
 
 function initializedStore(): ReturnType<typeof createSessionStore> {
   const store = createSessionStore();
@@ -208,5 +227,45 @@ describe('createSessionStore', () => {
     const before = store.getState();
     store.dispatch({ type: 'session/equip-weapon', weapon: 'machine-gun' });
     expect(store.getState()).toBe(before);
+  });
+
+  it('records one accepted mission start and increments the instance ordinal (S07, Base §9.4)', () => {
+    const store = initializedStore();
+    const snapshot = snapshotFor(store);
+    store.dispatch({ type: 'mission/start', snapshot });
+    expect(store.getState()?.activeMission).toBe(snapshot);
+    expect(store.getState()?.missionInstanceCount).toBe(1);
+    expect(store.getState()?.missionStartFailed).toBe(false);
+  });
+
+  it('ignores a second mission start while a mission is active (Base AC-035)', () => {
+    const store = initializedStore();
+    const first = snapshotFor(store);
+    const second = { ...first, combatMissionSeed: 999 };
+    store.dispatch({ type: 'mission/start', snapshot: first });
+    const before = store.getState();
+    store.dispatch({ type: 'mission/start', snapshot: second });
+    expect(store.getState()).toBe(before);
+    expect(store.getState()?.missionInstanceCount).toBe(1);
+  });
+
+  it('clears the active mission and signals the failure on Combat initialization failure (Base AC-014)', () => {
+    const store = initializedStore();
+    store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+    store.dispatch({ type: 'mission/start-failed' });
+    expect(store.getState()?.activeMission).toBe('none');
+    expect(store.getState()?.missionStartFailed).toBe(true);
+    // Base state (Credits, Hull, weapon, Pilot, Settings) is unchanged.
+    expect(store.getState()?.credits).toBe(1);
+    expect(store.getState()?.hullIntegrity).toBe(100);
+  });
+
+  it('clears the failure signal once Base has reopened Mission Details', () => {
+    const store = initializedStore();
+    store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+    store.dispatch({ type: 'mission/start-failed' });
+    store.dispatch({ type: 'mission/start-failure-consumed' });
+    expect(store.getState()?.missionStartFailed).toBe(false);
+    expect(store.getState()?.activeMission).toBe('none');
   });
 });

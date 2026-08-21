@@ -13,6 +13,9 @@ describe('initializeSession', () => {
     expect(session.mouseMovementEnabled).toBe(true);
     expect(session.missionAvailable).toBe(true);
     expect(session.activeMission).toBe('none');
+    expect(session.missionInstanceCount).toBe(0);
+    expect(session.missionStartFailed).toBe(false);
+    expect(session.sessionSeed).toBe(3735928559);
     expect(session.aircraftId).toBe('german-fighter');
   });
 

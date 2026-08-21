@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import { requestMissionStart } from '@application/mission';
+import { startMission } from '@application/mission';
 import { useApplication } from '../application-context';
 import { FieldRow } from '../components';
 import { Button, Overlay, Text } from '../primitives';
@@ -8,6 +8,8 @@ import { Button, Overlay, Text } from '../primitives';
 export interface MissionDetailsOverlayProps {
   readonly open: boolean;
   readonly onClose: () => void;
+  /** Show the Combat-initialization failure message when returning to Base (Base AC-014). */
+  readonly initialError?: boolean;
 }
 
 /**
@@ -19,13 +21,15 @@ export interface MissionDetailsOverlayProps {
  * `Start Mission` (the first focusable control, DS §10.4).
  *
  * Start Mission immediately disables to prevent duplicate request emission
- * (Base §5.5) and sends one accepted start request to the application boundary
- * (`requestMissionStart`). A rejected request keeps the Overlay open, re-enables
- * the action, and displays `Unable to start mission.` (Base AC-014 structure).
+ * (Base §5.5) and sends one accepted start command (`startMission`), which
+ * records the immutable Mission Snapshot and transitions the application to
+ * Combat. A rejected command keeps the Overlay open, re-enables the action,
+ * and displays `Unable to start mission.` (Base AC-014 structure).
  */
 export function MissionDetailsOverlay({
   open,
   onClose,
+  initialError = false,
 }: MissionDetailsOverlayProps): ReactElement | null {
   const { store } = useApplication();
   const [startRequested, setStartRequested] = useState(false);
@@ -34,16 +38,16 @@ export function MissionDetailsOverlay({
   useEffect(() => {
     if (open) {
       setStartRequested(false);
-      setStartError(false);
+      setStartError(initialError);
     }
-  }, [open]);
+  }, [open, initialError]);
 
   const handleStart = (): void => {
     if (startRequested) {
       return;
     }
     setStartRequested(true);
-    const result = requestMissionStart(store);
+    const result = startMission(store);
     if (result.kind === 'rejected') {
       setStartRequested(false);
       setStartError(true);

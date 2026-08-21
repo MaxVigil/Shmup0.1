@@ -1,10 +1,12 @@
 import type { WeaponType } from '@domain/index';
+import type { MissionSnapshot } from '../mission/snapshot';
 import type { BaseScreenId, SessionState } from './session-state';
 
 /**
  * Named session actions. Mutations occur only through the store dispatch and
- * are reduced by `sessionReducer`. S04 added Base navigation and the shared
- * Settings update; S06 adds the Hangar Repair and weapon-equip transactions.
+ * are reduced by `sessionReducer`. S04 added Base navigation and Settings;
+ * S06 added Repair and weapon equip; S07 adds the one-accepted mission start
+ * and the Combat-initialization-failure return signal.
  */
 export type SessionAction =
   | { readonly type: 'session/initialized'; readonly session: SessionState }
@@ -14,7 +16,10 @@ export type SessionAction =
       readonly enabled: boolean;
     }
   | { readonly type: 'session/repair' }
-  | { readonly type: 'session/equip-weapon'; readonly weapon: WeaponType };
+  | { readonly type: 'session/equip-weapon'; readonly weapon: WeaponType }
+  | { readonly type: 'mission/start'; readonly snapshot: MissionSnapshot }
+  | { readonly type: 'mission/start-failed' }
+  | { readonly type: 'mission/start-failure-consumed' };
 
 export interface SessionStore {
   /** Returns the session, or `null` before the session is initialized. */
@@ -66,6 +71,34 @@ export function sessionReducer(
         return state;
       }
       return { ...state, equippedWeapon: action.weapon };
+    case 'mission/start':
+      // One accepted start (Base §9.4, S07): the snapshot is recorded exactly
+      // once; while an active mission exists a second command is ignored
+      // (AC-035), and the instance ordinal increments once per acceptance.
+      if (state === null || state.activeMission !== 'none') {
+        return state;
+      }
+      return {
+        ...state,
+        activeMission: action.snapshot,
+        missionInstanceCount: state.missionInstanceCount + 1,
+        missionStartFailed: false,
+      };
+    case 'mission/start-failed':
+      // Combat initialization failure (Base AC-014): no active mission
+      // remains and Base state is unchanged; the failure is signalled so the
+      // Mission Details Overlay can reopen with the approved message.
+      if (state === null || state.activeMission === 'none') {
+        return state;
+      }
+      return { ...state, activeMission: 'none', missionStartFailed: true };
+    case 'mission/start-failure-consumed':
+      // The Base UI has reopened the Mission Details Overlay with the failure
+      // message; clear the transient signal.
+      if (state === null || !state.missionStartFailed) {
+        return state;
+      }
+      return { ...state, missionStartFailed: false };
     default:
       return assertNever(action);
   }

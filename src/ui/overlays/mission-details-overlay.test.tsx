@@ -7,6 +7,7 @@ import {
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as mission from '@application/mission';
+import type { MissionStartResult } from '@application/mission';
 import { createSessionStore } from '@application/session';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
@@ -19,6 +20,27 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+
+/** An accepted start result derived from the store session (the Overlay only
+ *  observes the `kind`; S07's snapshot recording is covered by startMission). */
+function acceptedResult(store: SessionStore): MissionStartResult {
+  const session = store.getState();
+  if (session === null) {
+    throw new Error('Expected an initialized session.');
+  }
+  return {
+    kind: 'accepted',
+    snapshot: {
+      missionInstanceOrdinal: 0,
+      combatMissionSeed: 0,
+      aircraftId: session.aircraftId,
+      hullIntegrity: session.hullIntegrity,
+      equippedWeapon: session.equippedWeapon,
+      pilot: session.pilot,
+      mouseMovementEnabled: session.mouseMovementEnabled,
+    },
+  };
+}
 
 function renderOverlay(
   store: SessionStore,
@@ -83,11 +105,11 @@ describe('MissionDetailsOverlay', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('disables Start Mission and emits exactly one accepted start request (Base AC-013, §5.5)', () => {
+  it('disables Start Mission and emits exactly one accepted start command (Base AC-013, §5.5)', () => {
     const store = createInitializedSessionStore();
-    const spy = vi.spyOn(mission, 'requestMissionStart').mockReturnValue({
-      kind: 'accepted',
-    });
+    const spy = vi
+      .spyOn(mission, 'startMission')
+      .mockReturnValue(acceptedResult(store));
     renderOverlay(store, vi.fn());
     const start = screen.getByRole('button', {
       name: 'Start Mission',
@@ -122,9 +144,9 @@ describe('MissionDetailsOverlay', () => {
 
   it('resets the request state when the Overlay opens again', () => {
     const store = createInitializedSessionStore();
-    const spy = vi.spyOn(mission, 'requestMissionStart').mockReturnValue({
-      kind: 'accepted',
-    });
+    const spy = vi
+      .spyOn(mission, 'startMission')
+      .mockReturnValue(acceptedResult(store));
     const onClose = vi.fn();
     const { rerender } = render(
       <ApplicationContext.Provider

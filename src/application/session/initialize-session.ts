@@ -40,6 +40,11 @@ export function initializeSession(
     mouseMovementEnabled: true,
     missionAvailable: true,
     activeMission: 'none',
+    // The session seed is retained so later Combat mission streams can be
+    // derived deterministically (Technical Foundation §8).
+    sessionSeed,
+    missionInstanceCount: 0,
+    missionStartFailed: false,
     pilot,
   };
 }
