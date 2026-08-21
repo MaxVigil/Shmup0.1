@@ -309,9 +309,15 @@
   gap: var(--space-2);
 }
 
-/* --- Screen shell --- */
+/* --- Screen shell (DS §8.8/8.9: Base content sits space-4 from the edges) ---
+ * The shell owns the canonical content gutter. At the minimum 1280×600
+ * viewport the inset keeps the focused Screen heading's complete canonical
+ * outline (2px ring + 2px offset) inside the viewport on every edge, and with
+ * the typography margin reset (base.css) prevents document overflow
+ * (S03-WI02). box-sizing: border-box keeps min-height: 100vh exact. */
 .ds-screen {
   min-height: 100vh;
+  padding: var(--space-4);
 }
 
 .ds-boot-view {

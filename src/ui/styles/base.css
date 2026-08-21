@@ -44,9 +44,14 @@ button {
   }
 }
 
-/* Typography presentation roles used by the Text primitive (DS §8.1). */
+/* Typography presentation roles used by the Text primitive (DS §8.1).
+ * The primitive owns typography presentation: UA heading/paragraph margins
+ * are not Design Tokens and are reset here so layout spacing comes only from
+ * token-driven composition (S03-WI02: collapsed UA h1 margins otherwise push
+ * the document scrollHeight past the 1280×600 viewport). */
 .ds-text {
   font-family: var(--font-family);
+  margin: 0;
 }
 
 .ds-text--caption {
