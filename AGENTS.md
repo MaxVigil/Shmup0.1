@@ -139,6 +139,13 @@ During implementation:
 - check performance when adding a per-frame or player-visible system;
 - do not rewrite canonical documentation unless the approved contract itself changed.
 
+For a correction Work Item, treat the assignment as a repair budget:
+
+- preserve every valid part of the parent Slice;
+- modify only the named canonical owners and their direct regressions;
+- do not perform incidental refactoring, rewrite the subsystem, or introduce a generalized framework;
+- if the correction requires additional production owners or a materially larger design surface, stop and report the expansion instead of silently broadening the diff.
+
 For a Slice executed through multiple Work Items:
 
 - plan and complete the Work Items sequentially inside the same assigned Slice;
@@ -153,7 +160,7 @@ After implementation:
 2. inspect the diff for scope creep and boundary violations;
 3. perform a self-review against every assigned AC/TC and negative requirement;
 4. correct self-discovered in-scope defects before reporting;
-5. send exactly one compact Slice report using section 11;
+5. write the required Slice report using section 13; when filesystem handoff is active, `result.json` is that report and the user-facing message remains the single line required by section 8.1;
 6. do not describe unrun checks as passing;
 7. set the result to `Awaiting Acceptance Review`, never `Accepted`.
 
@@ -207,11 +214,14 @@ The Product Owner relays only `DeepSeek completed the cycle.` The independent re
 
 ## 9. Verification
 
-- Every code increment: `npm run verify`.
-- Browser/player-visible/lifecycle/build work: also `npm run verify:browser`.
+- During implementation, run the narrowest relevant tests. Before handoff, run `npm run verify` once against the final unchanged revision.
+- Browser/player-visible/lifecycle/build work also runs `npm run verify:browser` once against the final unchanged revision.
 - Milestone or test-build handoff: `npm run verify:all` plus applicable manual evidence.
 - Performance-sensitive work: record proportional evidence at implementation time.
 - Failed required gates block completion. Do not weaken a gate to accept a failure.
+- Do not rerun a passing full gate when code, configuration, dependencies, or the relevant environment have not changed. A repeat requires a concrete flaky-test or environment investigation recorded in evidence.
+- After a failed gate, change the code/environment or identify a materially different diagnostic before rerunning it. Two identical failures trigger root-cause review rather than an unbounded retry loop.
+- Verify exact formulas, deterministic sequences, bounds, and balance values at unit level. Browser tests cover representative cross-layer wiring and browser-only behaviour; do not repeat every unit-level permutation in end-to-end tests unless an Acceptance Criterion specifically requires browser-observable evidence.
 
 ## 10. Acceptance and correction
 
@@ -300,7 +310,7 @@ Do not use this lane when the cause is uncertain, more than three logical files 
 
 ## 13. Required Slice report
 
-Return exactly one concise, factual report designed to be relayed unchanged:
+When filesystem handoff is not active, return exactly one concise, factual report designed to be relayed unchanged:
 
 ```text
 Outcome:
@@ -312,5 +322,7 @@ Manual evidence: [completed evidence or Not required]
 Deviations: [material deviation only, or None]
 Blockers: [material blocker only, or None]
 ```
+
+When `.agent-handoff/control.json` is active, encode this report only in `.agent-handoff/result.json` and send the Product Owner only the one-line notification required by section 8.1. Do not duplicate the report in chat.
 
 Do not repeat canonical values, test names, implementation walkthroughs, assumptions already fixed by documentation, or generic quality claims. Include technical detail only for a failure, deviation, newly discovered risk, or compatibility-affecting decision.
