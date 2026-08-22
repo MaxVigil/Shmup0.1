@@ -182,7 +182,7 @@ An implementation report cannot mark a Slice `Accepted`; acceptance remains a re
 
 **Out of scope:** enemy hits, damage resolution, additional weapons, ammunition, manual fire binding, upgrades, particles, audio, or pooling without measurement.
 
-**Primary AC:** `Combat AC-019–023`, `Combat AC-025–027`, `Combat AC-050`, `Combat AC-055`, `Combat AC-076–077`.  
+**Primary AC:** `Combat AC-019`, `Combat AC-021–022`, `Combat AC-027`, `Combat AC-050`, `Combat AC-055`, `Combat AC-076–077`; content and simulation prerequisites only for `Combat AC-020`, `Combat AC-023`, and `Combat AC-025–026`. Full pause behaviour for `AC-020` belongs to S13; enemy-hit and damage resolution for `AC-023` and `AC-025–026` belongs to S11.
 **Skill:** `shmup-mvp-combat`.  
 **Gates:** `npm run verify`, `npm run verify:browser`; manual cadence/selection and cleanup evidence.
 
@@ -206,7 +206,7 @@ An implementation report cannot mark a Slice `Accepted`; acceptance remains a re
 
 **Out of scope:** knockback, overlap resolution after destroyed-enemy contact, enemy contact cooldown, enemy weapons, damage numbers, hit-stop, shake, particles, audio, or physics plugins.
 
-**Primary AC:** `Combat AC-010–013`, `Combat AC-024`, `Combat AC-051`, `Combat AC-058–062`; `MASTER-AC-007`.  
+**Primary AC:** `Combat AC-010–013`, `Combat AC-023–026`, `Combat AC-051`, `Combat AC-058–062`; `MASTER-AC-007`.
 **Skill:** `shmup-mvp-combat`; restricted `physics-tuning` only for fixed-step/tunnelling analysis.  
 **Gates:** `npm run verify`, `npm run verify:browser`; manual feedback, immediate-resolution, and collision-order evidence.
 
@@ -230,7 +230,7 @@ An implementation report cannot mark a Slice `Accepted`; acceptance remains a re
 
 **Out of scope:** production cheats, debug persistence, extra diagnostics, save/resume, telemetry, rebinding, or unsupported device controls.
 
-**Primary AC:** `MASTER-AC-008–009`; `Combat AC-037–046`, `Combat AC-052`, `Combat AC-061`, `Combat AC-063–069`, `Combat AC-079–080`, `Combat AC-082`; applicable Base lifecycle AC.  
+**Primary AC:** `MASTER-AC-008–009`; `Combat AC-020`, `Combat AC-037–046`, `Combat AC-052`, `Combat AC-061`, `Combat AC-063–069`, `Combat AC-079–080`, `Combat AC-082`; applicable Base lifecycle AC.
 **Skill:** `shmup-mvp-cross-system` plus `shmup-mvp-combat`; restricted `input-systems` only if needed.  
 **Gates:** `npm run verify`, `npm run verify:browser`; mandatory manual lifecycle and development/production Debug evidence.
 
