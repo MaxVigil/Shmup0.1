@@ -245,17 +245,20 @@
   height: var(--icon-large);
 }
 
-/* --- Navigation (DS §8.6, §8.7, §9.4) --- */
+/* --- Navigation (DS §8.6, §8.7, §9.4): transparent, borderless layer; only
+ * --- the individual Navigation Items are opaque (Base §3.2, AC-002). --- */
 .ds-base-navigation {
+  position: relative;
+  z-index: var(--layer-hud);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   width: var(--navigation-width);
   height: 100%;
   padding: var(--space-4);
-  background-color: var(--color-panel-surface);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-surface);
+  background-color: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 .ds-navigation-item {
@@ -316,27 +319,28 @@
  * the typography margin reset (base.css) prevents document overflow
  * (S03-WI02). box-sizing: border-box keeps min-height: 100vh exact. */
 .ds-screen {
+  position: absolute;
+  inset: 0;
   min-height: 100vh;
-  padding: var(--space-4);
 }
 
-/* --- Base shell (Base §3.2, DS §8.6): persistent left Navigation, remaining
- * --- viewport area for the current Base Screen, Settings upper-right. --- */
+/* --- Base shell (Base §3.2, DS §8.6): persistent left Navigation, full-viewport
+ * --- Screen background beneath it, Settings upper-right. --- */
 .ds-base-shell {
   position: relative;
-  display: flex;
   min-height: 100vh;
 }
 
 .ds-base-shell__content {
-  flex: 1;
-  min-width: 0;
+  position: absolute;
+  inset: 0;
 }
 
 .ds-base-shell__settings {
   position: absolute;
   top: var(--space-4);
   right: var(--space-4);
+  z-index: var(--layer-utility);
 }
 
 /* --- Operations Screen (Base §4) --- */
@@ -345,7 +349,8 @@
 }
 
 /* Strategic-map background from the prepared runtime asset; solid dark
- * fallback when the asset is not ready (Base AC-008). */
+ * fallback when the asset is not ready (Base AC-008). The background fills the
+ * complete viewport, including the area beneath Base Navigation (Base AC-007). */
 .ds-operations-background {
   position: absolute;
   inset: 0;
@@ -354,20 +359,23 @@
   background-position: center;
 }
 
-/* Content paints above the positioned background via document order. */
+/* Foreground content uses the safe area beside Base Navigation. */
 .ds-operations-screen__content {
-  position: relative;
+  position: absolute;
+  top: var(--space-4);
+  left: calc(var(--navigation-width) + var(--space-4));
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-2);
 }
 
-/* --- Mission Point (DS §8.10): centred at 50% × 50% of the content area --- */
+/* --- Mission Point (DS §8.10): centred at 50% × 50% of the foreground
+ * --- content area (the viewport safe area right of Base Navigation). --- */
 .ds-mission-point {
   position: absolute;
   top: 50%;
-  left: 50%;
+  left: calc(50% + var(--navigation-width) / 2);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -385,7 +393,8 @@
   position: relative;
 }
 
-/* Hangar background from the prepared runtime asset; solid dark fallback. */
+/* Hangar background from the prepared runtime asset; solid dark fallback.
+ * Fills the complete viewport beneath Base Navigation (Base AC-015). */
 .ds-hangar-background {
   position: absolute;
   inset: 0;
@@ -394,40 +403,46 @@
   background-position: center;
 }
 
+/* Aircraft Configuration Panel sits immediately right of Base Navigation. */
 .ds-hangar-screen__content {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
+  position: absolute;
+  top: var(--space-4);
+  left: calc(var(--navigation-width) + var(--space-4));
 }
 
-.ds-hangar-screen__layout {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-6);
-}
-
+/* German Fighter visual (Base §6.4): centred at the complete viewport centre
+ * and scaled down as required so it never overlaps Base Navigation, the
+ * Aircraft Configuration Panel, or the Settings Button; it is never shifted
+ * away from the viewport centre. The symmetric safe box reserves the
+ * navigation + panel band horizontally and the Settings Button band
+ * vertically; the image keeps its aspect ratio inside it. */
 .ds-hangar-screen__aircraft {
-  flex: 1;
-  min-width: 0;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: var(--hangar-aircraft-safe-vertical) var(--hangar-aircraft-safe-side);
+
+  /* Presentation layer only: the aircraft is not interactive, so the
+   * full-viewport box must never intercept pointer events from the foreground
+   * Configuration Panel or Settings controls. */
+  pointer-events: none;
 }
 
-/* German Fighter visual (Base §6.4): scales preserving aspect ratio within
- * the approved viewport-height bound (leaving room for the Screen heading);
- * no rotation, drag, zoom, or animation. */
 .ds-hangar-aircraft {
   max-width: 100%;
-  max-height: calc(100vh - var(--space-12) * 2);
+
+  /* The safe box reserves the Settings Button band vertically: top and
+   * bottom padding of (space-4 + control-height) each. */
+  max-height: calc(100vh - 2 * (var(--space-4) + var(--control-height)));
   width: auto;
   height: auto;
 }
 
 /* --- Aircraft Configuration Panel (DS §8.13) --- */
 .ds-aircraft-configuration-panel {
-  width: clamp(18rem, 24vw, 22rem);
+  width: var(--hangar-panel-width);
   display: flex;
   flex-direction: column;
   gap: var(--space-6);

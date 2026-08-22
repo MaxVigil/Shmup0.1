@@ -21,7 +21,13 @@ test.beforeEach(async ({ page }) => {
 test('Hangar shows the background, Configuration Panel, and centred aircraft (Base AC-015, AC-016)', async ({
   page,
 }) => {
-  await expect(page.getByRole('heading', { name: 'Hangar' })).toBeVisible();
+  // No duplicate visible Hangar heading; the Screen keeps its accessible name.
+  await expect(page.getByRole('heading', { name: 'Hangar' })).toHaveCount(0);
+  await expect(page.getByRole('main', { name: 'Hangar' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Hangar' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
   await expect(page.getByText('German Fighter')).toBeVisible();
   await expect(page.getByText('Pilot')).toBeVisible();
   await expect(page.getByText('Hull Integrity')).toBeVisible();

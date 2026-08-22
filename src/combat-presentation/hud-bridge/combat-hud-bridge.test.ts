@@ -28,9 +28,9 @@ describe('createCombatHudBridge', () => {
       hullRatio: 1,
       viewportShortSide: 600,
     });
-    expect(bridge.element.style.left).toBe(`${640 - (74.7 * 0.8) / 2}px`);
+    expect(bridge.element.style.left).toBe(`${640 - (74.7 * 0.65) / 2}px`);
     expect(bridge.element.style.top).toBe(`${516 + 600 * 0.01}px`);
-    expect(bridge.element.style.width).toBe(`${74.7 * 0.8}px`);
+    expect(bridge.element.style.width).toBe(`${74.7 * 0.65}px`);
     const fill = bridge.element.querySelector(
       '.ds-combat-hud__fill',
     ) as HTMLElement;

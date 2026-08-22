@@ -1,7 +1,7 @@
 /**
  * Combat presentation configuration (S07). Geometry and colours follow the
- * Combat specification: aircraft height is `12%` of the viewport short side,
- * the Hull bar is `80%` of the rendered aircraft width with a `1%` short-side
+ * Combat specification: aircraft height is `8%` of the viewport short side,
+ * the Hull bar is `65%` of the rendered aircraft width with a `1%` short-side
  * gap, and the background uses the resolved approved canvas token. Tokens are
  * read from the Design System CSS custom properties and cached (Technical
  * Foundation §6.2). The aircraft fallback triangle is an approved light-grey
@@ -32,9 +32,9 @@ export function resolveCombatGeometry(viewport: {
     viewportHeight: viewport.height,
     shortSide,
     backgroundColor: readColorToken('--color-canvas', '#080b0e'),
-    aircraftHeightPx: shortSide * 0.12,
+    aircraftHeightPx: shortSide * 0.08,
     aircraftAspectRatio: GERMAN_FIGHTER_ASPECT_RATIO,
-    hullBarWidthRatio: 0.8,
+    hullBarWidthRatio: 0.65,
     hullBarGapRatio: 0.01,
     aircraftFallbackColor: '#cccccc',
   };

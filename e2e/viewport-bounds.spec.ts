@@ -3,13 +3,13 @@ import { expect, test } from '@playwright/test';
 /**
  * S03-WI02 regression coverage at the minimum supported viewport
  * (DS-AC-007, DS §6.7). The real application is measured, not a fixture:
- * document overflow and the focused heading focus-ring geometry are asserted
- * against the live document.scrollingElement and the focused element's
- * computed outline (2px ring + 2px positive offset).
+ * document overflow and the focused Navigation Item focus-ring geometry are
+ * asserted against the live document.scrollingElement and the focused
+ * element's computed outline (2px ring + 2px positive offset).
  */
 const MINIMUM_VIEWPORT = { width: 1280, height: 600 };
 
-test('Operations has no document overflow and a fully visible heading ring at 1280x600', async ({
+test('Operations has no document overflow and a fully visible active Navigation Item ring at 1280x600', async ({
   page,
 }) => {
   await page.setViewportSize(MINIMUM_VIEWPORT);
@@ -18,11 +18,12 @@ test('Operations has no document overflow and a fully visible heading ring at 12
 
   const metrics = await page.evaluate(() => {
     const doc = document.scrollingElement as HTMLElement;
-    const active = document.activeElement;
-    const heading =
-      active instanceof HTMLElement && active.tagName === 'H1' ? active : null;
-    const rect = heading?.getBoundingClientRect() ?? null;
-    const style = heading === null ? null : getComputedStyle(heading);
+    const active =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const rect = active?.getBoundingClientRect() ?? null;
+    const style = active === null ? null : getComputedStyle(active);
     const ext =
       style === null
         ? 0
@@ -32,7 +33,9 @@ test('Operations has no document overflow and a fully visible heading ring at 12
       scrollHeight: doc.scrollHeight,
       clientWidth: doc.clientWidth,
       clientHeight: doc.clientHeight,
-      focusedHeadingText: heading?.textContent ?? null,
+      focusedText: active?.textContent?.trim() ?? null,
+      focusedIsNavItem:
+        active?.classList.contains('ds-navigation-item') ?? false,
       ring:
         rect === null || style === null
           ? null
@@ -45,8 +48,10 @@ test('Operations has no document overflow and a fully visible heading ring at 12
     };
   });
 
-  // Programmatic focus is on the Operations heading (DS-AC-015).
-  expect(metrics.focusedHeadingText).toBe('Operations');
+  // Programmatic focus is on the active Operations Navigation Item (AC-052,
+  // DS-AC-015); no Screen heading is a focus target.
+  expect(metrics.focusedIsNavItem).toBe(true);
+  expect(metrics.focusedText).toBe('Operations');
   // No horizontal or vertical document overflow at the minimum viewport.
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
   expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight);
@@ -56,7 +61,7 @@ test('Operations has no document overflow and a fully visible heading ring at 12
   const ring = metrics.ring;
   expect(ring).not.toBeNull();
   if (ring === null) {
-    throw new Error('Expected focused-heading ring geometry.');
+    throw new Error('Expected focused Navigation Item ring geometry.');
   }
   expect(ring.top).toBeGreaterThanOrEqual(0);
   expect(ring.left).toBeGreaterThanOrEqual(0);
@@ -125,7 +130,7 @@ test('Hangar and Weapon Selection keep destination focus rings inside 1280x600',
   await page.goto('/');
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await page.getByRole('button', { name: 'Hangar' }).click();
-  await expect(page.getByRole('heading', { name: 'Hangar' })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Hangar' })).toBeFocused();
 
   const measureFocusedRing = async (
     expectedText: string,

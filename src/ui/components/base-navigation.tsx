@@ -1,21 +1,23 @@
-import type { ReactElement, ReactNode } from 'react';
-import { Panel } from '../primitives';
+import type { ReactElement, ReactNode, Ref } from 'react';
 
 export interface BaseNavigationProps {
   readonly children?: ReactNode;
+  readonly ref?: Ref<HTMLElement>;
 }
 
 /**
- * Canonical Base Navigation shell (DS §8.6): vertical panel on the left,
- * composed of Navigation Items. Behaviour (active state, transitions) is wired
+ * Canonical Base Navigation shell (DS §8.6, Base §3.2): a transparent,
+ * borderless vertical layer on the left, composed of individually opaque
+ * Navigation Items. Behaviour (active state, screen-transition focus) is wired
  * by the Base slices.
  */
 export function BaseNavigation({
   children,
+  ref,
 }: BaseNavigationProps): ReactElement {
   return (
-    <Panel as="nav" className="ds-base-navigation" aria-label="Base Navigation">
+    <nav ref={ref} className="ds-base-navigation" aria-label="Base Navigation">
       {children}
-    </Panel>
+    </nav>
   );
 }

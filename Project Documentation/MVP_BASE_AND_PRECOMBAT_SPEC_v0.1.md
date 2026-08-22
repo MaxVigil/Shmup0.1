@@ -37,8 +37,11 @@ The `Combat Screen` is not a Base Screen and does not use `Base Navigation`.
 
 ### 3.2 Layout
 
-- `Base Navigation` is a persistent vertical panel on the left side of every Base Screen.
-- Base Screen content occupies the remaining viewport area.
+- `Base Navigation` is a persistent transparent navigation layer on the left side of every Base Screen.
+- The current Base Screen background fills the complete viewport and remains visible beneath `Base Navigation`.
+- The navigation layer has no opaque container surface, outer border, or enclosing panel treatment.
+- Each individual Navigation Item is opaque and remains visually distinct from the background.
+- Foreground Screen content uses the safe area beside `Base Navigation`; only the background extends beneath it.
 - `Base Navigation` is not displayed on the `Combat Screen`.
 
 ### 3.3 Navigation items
@@ -132,6 +135,11 @@ The content area contains only:
 - a compact `Credits Panel`;
 - the global `Settings Button`.
 
+- The strategic-map background fills the complete viewport, including the area beneath the transparent `Base Navigation`.
+- The runtime image uses aspect-ratio-preserving `cover` behaviour; it may crop at an edge but must not stretch or deform.
+- The Screen does not render a visible `Operations` heading because the active Navigation Item already identifies the current Screen.
+- The Screen retains an accessible semantic name without creating a hidden focus target.
+
 If the background asset fails to load, the screen displays a solid dark fallback while keeping the mission point and `Credits Panel` functional.
 
 The implementation must load the runtime background asset from:
@@ -202,6 +210,8 @@ After mission Success, Defeat, or `Aborted`:
 ### 4.7 Negative requirements
 
 The `Operations Screen` does not display:
+
+- a duplicate visible `Operations` Screen heading;
 
 - aircraft;
 - Hull Integrity;
@@ -302,10 +312,14 @@ The `Hangar Screen` is used only to inspect aircraft state, view the Pilot, sele
 
 ### 6.2 Composition
 
-- The Hangar background fills the Base Screen content area.
+- The Hangar background fills the complete viewport, including the area beneath the transparent `Base Navigation`.
+- The runtime image uses aspect-ratio-preserving `cover` behaviour; it may crop at an edge but must not stretch or deform.
 - `Aircraft Configuration Panel` is positioned immediately to the right of `Base Navigation`.
-- The aircraft image is centered in the remaining content area.
+- The aircraft image centre is exactly the centre of the complete viewport, not the centre of the remaining layout area.
+- The aircraft scales down as required to avoid overlapping `Base Navigation`, `Aircraft Configuration Panel`, or `Settings Button`; it must not be shifted away from the viewport centre to create clearance.
 - The global `Settings Button` remains in the upper-right corner.
+- The Screen does not render a visible `Hangar` heading because the active Navigation Item already identifies the current Screen.
+- The Screen retains an accessible semantic name without creating a hidden focus target.
 
 ### 6.3 Aircraft Configuration Panel
 
@@ -338,6 +352,7 @@ Cost: 1 Credit
 
 - The approved `German Fighter` image is used.
 - It scales while preserving its aspect ratio.
+- Its centre remains at `50%` of viewport width and `50%` of viewport height at every supported viewport size.
 - It must not overlap `Aircraft Configuration Panel`, `Base Navigation`, or `Settings Button`.
 - The aircraft visual has no rotation, drag, zoom, or animation.
 - If the asset fails to load, a neutral placeholder labelled `German Fighter` is displayed while UI remains functional.
@@ -685,7 +700,7 @@ The MVP has no Save, autosave, or persistence between sessions.
 - Sequential focus order is Base Navigation (`Operations`, then `Hangar`), current Screen actions in visual order, then `Settings Button`.
 - Operations Screen includes `Mission Point` as its Screen action.
 - Hangar Screen includes `Change Weapon`, then visible enabled `Repair`; disabled Repair is skipped; Settings follows.
-- After navigation to Operations or Hangar, programmatic focus moves to the new Screen heading using `tabindex="-1"`.
+- After navigation to Operations or Hangar, programmatic focus moves to the active Navigation Item that visibly identifies the new Screen.
 - Closing a Base Overlay restores focus to its still-existing opener.
 - Starting Combat does not restore focus to `Mission Point` because the Base context is removed.
 - Every Base Screen and Overlay must pass the approved keyboard-only audit.
@@ -708,7 +723,7 @@ The MVP has no Save, autosave, or persistence between sessions.
 
 **Given** either Base Screen is open,  
 **when** `Base Navigation` is displayed,  
-**then** it appears vertically on the left with `Operations` followed by `Hangar`, each with an icon and text label, and no future navigation placeholders.
+**then** it appears as a transparent, borderless vertical layer on the left with the complete Screen background visible beneath it, `Operations` followed by `Hangar` as individually opaque Navigation Items with an icon and text label, and no future navigation placeholders.
 
 ### AC-003 — Active navigation item
 
@@ -746,7 +761,7 @@ The MVP has no Save, autosave, or persistence between sessions.
 
 **Given** the `Operations Screen` is open,  
 **when** its content renders,  
-**then** it displays the strategic-map background, one `Interception` mission point at `50% × 50%` of content area, `Credits Panel` in the upper-left, and `Settings Button` in the upper-right.
+**then** the strategic-map background fills the complete viewport beneath the transparent `Base Navigation`, one `Interception` mission point appears at `50% × 50%` of the foreground content area, `Credits Panel` is in the foreground upper-left, `Settings Button` is in the upper-right, and no duplicate visible `Operations` heading is rendered.
 
 ### AC-008 — Operations background fallback
 
@@ -794,7 +809,7 @@ The MVP has no Save, autosave, or persistence between sessions.
 
 **Given** the `Hangar Screen` is open,  
 **when** it renders,  
-**then** it displays the Hangar background, `Aircraft Configuration Panel` immediately right of navigation, centered German Fighter visual in the remaining area, and `Settings Button` in the upper-right.
+**then** the Hangar background fills the complete viewport beneath the transparent `Base Navigation`, `Aircraft Configuration Panel` appears immediately right of navigation, the German Fighter is centred at `50% × 50%` of the complete viewport and scales down rather than shifting or overlapping protected UI, `Settings Button` is in the upper-right, and no duplicate visible `Hangar` heading is rendered.
 
 ### AC-016 — Hangar panel content
 
@@ -1016,7 +1031,7 @@ The MVP has no Save, autosave, or persistence between sessions.
 
 **Given** Base Navigation or a result flow opens Operations or Hangar,  
 **when** the new Screen becomes current,  
-**then** programmatic focus moves to its heading without placing the heading in sequential Tab order.
+**then** programmatic focus moves to the active Navigation Item that visibly identifies the new Screen, and no hidden Screen heading becomes a focus target.
 
 ### AC-053 — Base uses prepared assets
 

@@ -43,7 +43,7 @@ describe('BaseShell', () => {
     expect(screen.getByRole('button', { name: 'Settings' })).toBeDefined();
   });
 
-  it('navigates to Hangar, updates the active item, and focuses the new heading (Base AC-004, AC-052)', () => {
+  it('navigates to Hangar, updates the active item, and focuses the active Navigation Item (Base AC-004, AC-052)', () => {
     const store = createInitializedSessionStore();
     renderShell(store);
     act(() => {
@@ -62,7 +62,7 @@ describe('BaseShell', () => {
         .getByRole('button', { name: 'Operations' })
         .getAttribute('aria-current'),
     ).toBeNull();
-    // Screen-transition focus moves to the new heading (Base AC-052).
+    // Screen-transition focus moves to the active Navigation Item (AC-052).
     expect(document.activeElement?.textContent).toBe('Hangar');
   });
 

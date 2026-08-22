@@ -456,11 +456,12 @@ padding:  space-4
 item gap: space-2
 ```
 
-- It uses the canonical `Panel` foundation.
+- It is a transparent structural navigation layer and does not use a Panel surface, enclosing border, radius, or shadow.
 - It touches the left viewport edge without an external margin.
 - `Operations` and `Hangar` are aligned at the top.
 - It has no logo, heading, decorative footer, or scrolling at a supported viewport.
-- Base content width accounts for the current bounded Navigation width.
+- The current Base Screen background fills the viewport beneath it; foreground content uses the safe area beside it.
+- Only the individual Navigation Items are opaque within this layer.
 
 ### 8.7 Navigation Item
 
@@ -473,7 +474,7 @@ icon size:      medium
 typography:     text-control
 ```
 
-- Default uses secondary text.
+- Default uses an opaque `surface` background and secondary text.
 - Hover uses `surface-interactive`.
 - Active uses `surface-interactive`, primary text, and a left accent line.
 - Active does not use a filled-blue background.
@@ -868,7 +869,8 @@ Debug Overlay             God Mode
 - `Tab` and `Shift+Tab` cycle within the open Overlay.
 - Closing a Base Overlay restores focus to its still-existing opener.
 - A transition that removes the opener does not restore focus to a detached element.
-- After navigation to Operations or Hangar, programmatic focus moves to the new Base Screen heading using `tabindex="-1"`; the heading is not added to sequential Tab order.
+- Operations and Hangar do not repeat their active Navigation Item label as a visible Screen heading.
+- After navigation to Operations or Hangar, programmatic focus moves to the active Navigation Item that visibly identifies the new Screen; no hidden Screen heading becomes a focus target.
 
 ### 10.5 Base sequential focus order
 
@@ -1172,7 +1174,7 @@ The implementation agent must:
 
 **Given** navigation or a result flow opens Operations or Hangar,  
 **when** the previous focused control no longer owns the current context,  
-**then** programmatic focus moves to the new Base Screen heading without adding that heading to sequential Tab order.
+**then** programmatic focus moves to the active Navigation Item that visibly identifies the new Base Screen, no duplicate visible Screen heading is rendered, and no hidden Screen heading becomes a focus target.
 
 ### DS-AC-016 — Accessible Hull state
 

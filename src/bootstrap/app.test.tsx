@@ -37,7 +37,8 @@ describe('App', () => {
 
   it('renders the Base shell with Operations when ready', () => {
     renderReadyApp();
-    expect(screen.getByRole('heading', { name: 'Operations' })).toBeDefined();
+    expect(screen.getByRole('main', { name: 'Operations' })).toBeDefined();
+    expect(screen.queryByRole('heading', { name: 'Operations' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Interception' })).toBeDefined();
     expect(
       screen.getByRole('navigation', { name: 'Base Navigation' }),

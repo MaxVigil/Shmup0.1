@@ -45,9 +45,10 @@ function renderScreen(assets: AssetPreloadResult): void {
 }
 
 describe('HangarScreen', () => {
-  it('renders the heading, Configuration Panel, and aircraft visual (Base AC-015, AC-016)', () => {
+  it('renders the accessible Screen name, Configuration Panel, and aircraft visual (Base AC-015, AC-016)', () => {
     renderScreen(HANGAR_ASSETS);
-    expect(screen.getByRole('heading', { name: 'Hangar' })).toBeDefined();
+    expect(screen.getByRole('main', { name: 'Hangar' })).toBeDefined();
+    expect(screen.queryByRole('heading', { name: 'Hangar' })).toBeNull();
     expect(screen.getByText('German Fighter')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Change Weapon' })).toBeDefined();
     const image = document.querySelector(

@@ -35,7 +35,7 @@ export function createCombatHudBridge(): CombatHudBridge {
   return {
     element,
     update(values) {
-      const width = values.aircraftWidth * 0.8;
+      const width = values.aircraftWidth * 0.65;
       const gap = values.viewportShortSide * 0.01;
       const clamped = Math.max(0, Math.min(1, values.hullRatio));
       element.style.left = `${values.aircraftCenterX - width / 2}px`;

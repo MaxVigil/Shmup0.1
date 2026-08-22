@@ -1,23 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
 import { useApplication } from '../application-context';
 import { CreditsPanel, MissionPoint } from '../components';
-import { useScreenHeadingFocus, useSessionState } from '../hooks';
+import { useSessionState } from '../hooks';
 import { MissionDetailsOverlay } from '../overlays';
-import { Text } from '../primitives';
 
 /**
  * Operations Screen composition (Base §4, AC-007): the strategic-map
- * background (prepared runtime asset or solid dark fallback), one static
- * `Interception` Mission Point at `50% × 50%` of the content area, and the
- * compact Credits Panel in the upper-left. Selecting the Mission Point opens
- * the blocking Mission Details Overlay (AC-009). After a Combat initialization
- * failure the Overlay reopens with `Unable to start mission.` (Base AC-014).
+ * background (prepared runtime asset or solid dark fallback) filling the
+ * complete viewport beneath Base Navigation, one static `Interception` Mission
+ * Point at `50% × 50%` of the foreground content area, and the compact Credits
+ * Panel in the upper-left safe area. No duplicate visible `Operations` heading
+ * is rendered; the `main` region carries the accessible Screen name and no
+ * hidden focus target exists. Selecting the Mission Point opens the blocking
+ * Mission Details Overlay (AC-009). After a Combat initialization failure the
+ * Overlay reopens with `Unable to start mission.` (Base AC-014).
  */
 export function OperationsScreen(): ReactElement {
   const { store, preparedAssets } = useApplication();
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  useScreenHeadingFocus(headingRef);
   const session = useSessionState();
   const [missionDetailsOpen, setMissionDetailsOpen] = useState(false);
   const [missionStartError, setMissionStartError] = useState(false);
@@ -47,6 +47,7 @@ export function OperationsScreen(): ReactElement {
     <main
       data-testid="operations-screen"
       className="ds-screen ds-operations-screen"
+      aria-label="Operations"
     >
       <div
         className="ds-operations-background"
@@ -54,9 +55,6 @@ export function OperationsScreen(): ReactElement {
         aria-hidden="true"
       />
       <div className="ds-operations-screen__content">
-        <Text as="h1" ref={headingRef} tabIndex={-1} style="heading">
-          Operations
-        </Text>
         <CreditsPanel credits={session.credits} />
       </div>
       <MissionPoint onPress={handleOpenMissionDetails} />

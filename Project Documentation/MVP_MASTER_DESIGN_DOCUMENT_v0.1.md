@@ -289,7 +289,7 @@ discard current session and Active Mission without reward
 ### 7.1 Player aircraft
 
 - Asset: `assets/runtime/aircraft/german-fighter.png`.
-- Rendered height: `12% of viewport short side`.
+- Rendered height: `8% of viewport short side`.
 - Width preserves source aspect ratio.
 - The aircraft points upward and is not cropped, deformed, rotated, or animated.
 - Asset failure uses the approved light-grey upward-triangle fallback with unchanged gameplay geometry.
@@ -311,7 +311,7 @@ The same margin applies to every edge and constrains the complete rendered aircr
 ### 7.4 Combat Hull Integrity Bar
 
 ```text
-barWidth = 80% of rendered aircraft width
+barWidth = 65% of rendered aircraft width
 barHeight = 0.5rem
 barGap = 1% of viewport short side
 bar horizontal centre = aircraft horizontal centre
@@ -375,7 +375,7 @@ The Bar follows the aircraft, retains Hull ratio on resize, and does not affect 
 - All focused interactive controls use visible focus; disabled controls are skipped and cannot activate.
 - Base follows the approved Navigation–Screen actions–Settings focus order.
 - Each Overlay has an explicit initial control, traps sequential focus, and restores focus when its opener remains in context.
-- Base Screen transitions move programmatic focus to the new Screen heading without adding it to sequential Tab order.
+- Base Screens do not repeat the current Screen name as a visible heading; transitions move programmatic focus to the active Navigation Item that visibly identifies the destination.
 - Combat Pause and Settings controls are keyboard reachable; Tab alone does not pause gameplay, while `Enter` or `Space` activates the focused control.
 - Blocking Combat Overlays suppress gameplay shortcuts except their explicitly approved operation or closing key.
 - Hull Integrity Bar exposes `0–100` progress semantics without a visible numeric value.

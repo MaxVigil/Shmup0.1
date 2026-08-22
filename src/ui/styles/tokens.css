@@ -85,5 +85,10 @@
   --icon-large: 1.5rem;
   --progress-bar-height: 0.5rem;
   --navigation-width: clamp(12rem, 15vw, 15rem);
+  --hangar-panel-width: clamp(18rem, 24vw, 22rem);
+  --hangar-aircraft-safe-vertical: calc(var(--space-4) + var(--control-height));
+  --hangar-aircraft-safe-side: calc(
+    var(--navigation-width) + var(--space-4) + var(--hangar-panel-width)
+  );
   --field-row-min-height: 2rem;
 }

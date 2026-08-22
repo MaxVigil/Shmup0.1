@@ -98,7 +98,7 @@ The bar must:
 Its geometry and positioning are:
 
 ```text
-barWidth = 80% of rendered aircraft width
+barWidth = 65% of rendered aircraft width
 barHeight = 0.5rem
 barGap = 1% of viewport short side
 bar horizontal centre = aircraft horizontal centre
@@ -133,7 +133,7 @@ assets/runtime/aircraft/german-fighter.png
 
 The rendered aircraft:
 
-- has height equal to `12% of viewport short side`;
+- has height equal to `8% of viewport short side`;
 - derives its width from the source asset aspect ratio;
 - points toward the top of the screen;
 - preserves its aspect ratio;
@@ -1244,7 +1244,7 @@ If the check is missing or the approved budget is violated, the affected system 
 
 **Given** Combat renders the player aircraft,  
 **when** the viewport is initialized or resized,  
-**then** `german-fighter.png` renders pointing upward at `12% of viewport short side` in height, preserves its aspect ratio, and is not cropped, deformed, rotated, or animated.
+**then** `german-fighter.png` renders pointing upward at `8% of viewport short side` in height, preserves its aspect ratio, and is not cropped, deformed, rotated, or animated.
 
 ### AC-054 — Basic Drone presentation
 
@@ -1268,7 +1268,7 @@ If the check is missing or the approved budget is violated, the affected system 
 
 **Given** the player aircraft is rendered,  
 **when** the Hull Integrity bar is positioned or the viewport is resized,  
-**then** the bar is horizontally centred below the aircraft, has width equal to `80%` of rendered aircraft width, height `0.5rem`, gap equal to `1% of viewport short side`, retains the current Hull ratio, and does not affect collision or Movement Bounds.
+**then** the bar is horizontally centred below the aircraft, has width equal to `65%` of rendered aircraft width, height `0.5rem`, gap equal to `1% of viewport short side`, retains the current Hull ratio, and does not affect collision or Movement Bounds.
 
 ### AC-058 — Non-destroying enemy-hit feedback
 

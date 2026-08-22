@@ -24,27 +24,30 @@ test('Operations renders background, Mission Point, Credits Panel, and Settings 
   await expect(page.getByText('Credits: 1')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
 
-  // The Mission Point sits at 50% × 50% of the content area.
+  // The Mission Point sits at 50% × 50% of the foreground content area
+  // (the viewport safe area right of Base Navigation, Base AC-007).
   const position = await page.evaluate(() => {
-    const screen = document.querySelector('[data-testid="operations-screen"]');
+    const nav = document.querySelector('.ds-base-navigation');
     const point = document.querySelector('.ds-mission-point');
-    if (screen === null || point === null) {
+    if (nav === null || point === null) {
       return null;
     }
-    const screenRect = screen.getBoundingClientRect();
+    const navRect = nav.getBoundingClientRect();
     const pointRect = point.getBoundingClientRect();
+    const contentLeft = navRect.right;
+    const contentWidth = window.innerWidth - contentLeft;
     return {
       centerX: pointRect.left + pointRect.width / 2,
       centerY: pointRect.top + pointRect.height / 2,
-      screenCenterX: screenRect.left + screenRect.width / 2,
-      screenCenterY: screenRect.top + screenRect.height / 2,
+      contentCenterX: contentLeft + contentWidth / 2,
+      contentCenterY: window.innerHeight / 2,
     };
   });
   expect(position).not.toBeNull();
-  expect(position!.centerX).toBeGreaterThan(position!.screenCenterX - 4);
-  expect(position!.centerX).toBeLessThan(position!.screenCenterX + 4);
-  expect(position!.centerY).toBeGreaterThan(position!.screenCenterY - 4);
-  expect(position!.centerY).toBeLessThan(position!.screenCenterY + 4);
+  expect(position!.centerX).toBeGreaterThan(position!.contentCenterX - 4);
+  expect(position!.centerX).toBeLessThan(position!.contentCenterX + 4);
+  expect(position!.centerY).toBeGreaterThan(position!.contentCenterY - 4);
+  expect(position!.centerY).toBeLessThan(position!.contentCenterY + 4);
 });
 
 test('a failed background keeps the solid dark fallback with functional controls (Base AC-008)', async ({

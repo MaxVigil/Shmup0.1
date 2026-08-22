@@ -33,7 +33,7 @@ test('Base Navigation renders Operations then Hangar with the active state', asy
   await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
 });
 
-test('selecting Hangar opens it and moves focus to its heading (Base AC-004, AC-052)', async ({
+test('selecting Hangar opens it and moves focus to the active Navigation Item (Base AC-004, AC-052)', async ({
   page,
 }) => {
   await page.goto('/');
@@ -47,10 +47,14 @@ test('selecting Hangar opens it and moves focus to its heading (Base AC-004, AC-
     'aria-current',
     'page',
   );
-  const activeText = await page.evaluate(
-    () => document.activeElement?.textContent ?? '',
-  );
-  expect(activeText).toBe('Hangar');
+  const active = await page.evaluate(() => ({
+    text: document.activeElement?.textContent?.trim() ?? '',
+    isNavItem:
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement.classList.contains('ds-navigation-item'),
+  }));
+  expect(active.isNavItem).toBe(true);
+  expect(active.text).toBe('Hangar');
 });
 
 test('selecting the active navigation item does not reload or reset the Screen (Base AC-003)', async ({

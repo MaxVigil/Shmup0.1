@@ -46,9 +46,10 @@ function backgroundElement(): HTMLElement {
 }
 
 describe('OperationsScreen', () => {
-  it('renders the heading, Credits Panel, Mission Point, and background (Base AC-007)', () => {
+  it('renders the accessible Screen name, Credits Panel, Mission Point, and background (Base AC-007)', () => {
     renderScreen(BACKGROUND_READY);
-    expect(screen.getByRole('heading', { name: 'Operations' })).toBeDefined();
+    expect(screen.getByRole('main', { name: 'Operations' })).toBeDefined();
+    expect(screen.queryByRole('heading', { name: 'Operations' })).toBeNull();
     expect(screen.getByText('Credits: 1')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Interception' })).toBeDefined();
     expect(backgroundElement().style.backgroundImage).toContain(
@@ -67,6 +68,6 @@ describe('OperationsScreen', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Interception' }));
     });
     expect(screen.getByRole('dialog')).toBeDefined();
-    expect(screen.getByRole('heading', { name: 'Operations' })).toBeDefined();
+    expect(screen.getByRole('main', { name: 'Operations' })).toBeDefined();
   });
 });

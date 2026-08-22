@@ -84,13 +84,13 @@ test('Combat shows only the Hull Integrity bar below the aircraft with approved 
     };
   });
   expect(geometry).not.toBeNull();
-  // 1280x600: short side 600 → aircraft height 72, width 72 * 1278/1231,
-  // bar width = 80% of that ≈ 59.8, gap = 1% short side = 6,
-  // aircraft center (640, 480) → bar top ≈ 516 + 6 = 522.
-  expect(geometry!.width).toBeGreaterThan(55);
-  expect(geometry!.width).toBeLessThan(65);
+  // 1280x600: short side 600 → aircraft height 48, width 48 * 1278/1231,
+  // bar width = 65% of that ≈ 32.4, gap = 1% short side = 6,
+  // aircraft center (640, 480) → bar top ≈ 504 + 6 = 510.
+  expect(geometry!.width).toBeGreaterThan(28);
+  expect(geometry!.width).toBeLessThan(37);
   expect(Math.abs(geometry!.left + geometry!.width / 2 - 640)).toBeLessThan(3);
-  expect(Math.abs(geometry!.top - 522)).toBeLessThan(3);
+  expect(Math.abs(geometry!.top - 510)).toBeLessThan(3);
   expect(geometry!.height).toBeCloseTo(8, 0); // 0.5rem at the 16px base font
   expect(geometry!.fillWidthRatio).toBeCloseTo(1, 1);
 
@@ -145,37 +145,37 @@ test('Combat recalibrates the canvas, aircraft, and Hull bar on viewport resize 
       };
     });
 
-  // Resize 1 → 1280x900 (short side 900, aspect 1.42): aircraft height 108,
-  // bar width ≈ 89.7, gap 9, aircraft centre (640, 720) → bar top ≈ 783.
+  // Resize 1 → 1280x900 (short side 900, aspect 1.42): aircraft height 72,
+  // bar width ≈ 48.6, gap 9, aircraft centre (640, 720) → bar top ≈ 765.
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect
     .poll(async () => (await readCombat())?.canvas, { timeout: 5000 })
     .toEqual({ width: 1280, height: 900 });
   let state = await readCombat();
   expect(state).not.toBeNull();
-  expect(state!.hull.width).toBeGreaterThan(84);
-  expect(state!.hull.width).toBeLessThan(96);
+  expect(state!.hull.width).toBeGreaterThan(44);
+  expect(state!.hull.width).toBeLessThan(53);
   expect(Math.abs(state!.hull.left + state!.hull.width / 2 - 640)).toBeLessThan(
     3,
   );
-  expect(Math.abs(state!.hull.top - 783)).toBeLessThan(3);
+  expect(Math.abs(state!.hull.top - 765)).toBeLessThan(3);
   expect(state!.hull.height).toBeCloseTo(8, 0);
   expect(state!.fillRatio).toBeCloseTo(1, 1);
   expect(state!.ariaNow).toBe('100'); // Hull ratio retained across resize
 
-  // Resize 2 → 1500x800 (short side 800, aspect 1.875): aircraft height 96,
-  // bar width ≈ 79.7, gap 8, aircraft centre (750, 640) → bar top ≈ 696.
+  // Resize 2 → 1500x800 (short side 800, aspect 1.875): aircraft height 64,
+  // bar width ≈ 43.2, gap 8, aircraft centre (750, 640) → bar top ≈ 680.
   await page.setViewportSize({ width: 1500, height: 800 });
   await expect
     .poll(async () => (await readCombat())?.canvas)
     .toEqual({ width: 1500, height: 800 });
   state = await readCombat();
-  expect(state!.hull.width).toBeGreaterThan(74);
-  expect(state!.hull.width).toBeLessThan(86);
+  expect(state!.hull.width).toBeGreaterThan(39);
+  expect(state!.hull.width).toBeLessThan(48);
   expect(Math.abs(state!.hull.left + state!.hull.width / 2 - 750)).toBeLessThan(
     3,
   );
-  expect(Math.abs(state!.hull.top - 696)).toBeLessThan(3);
+  expect(Math.abs(state!.hull.top - 680)).toBeLessThan(3);
   expect(state!.hull.height).toBeCloseTo(8, 0);
   expect(state!.fillRatio).toBeCloseTo(1, 1);
   expect(state!.ariaNow).toBe('100');

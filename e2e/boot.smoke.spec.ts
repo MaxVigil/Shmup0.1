@@ -10,16 +10,23 @@ test('boot reaches Operations without page errors', async ({ page }) => {
   expect(pageErrors).toEqual([]);
 });
 
-test('boot moves programmatic focus to the Operations heading', async ({
+test('boot moves programmatic focus to the active Operations Navigation Item', async ({
   page,
 }) => {
   await page.goto('/');
 
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  const activeText = await page.evaluate(
-    () => document.activeElement?.textContent ?? '',
-  );
-  expect(activeText).toBe('Operations');
+  const active = await page.evaluate(() => {
+    const element = document.activeElement;
+    return {
+      text: element?.textContent?.trim() ?? '',
+      isNavItem:
+        element instanceof HTMLElement &&
+        element.classList.contains('ds-navigation-item'),
+    };
+  });
+  expect(active.isNavItem).toBe(true);
+  expect(active.text).toBe('Operations');
 });
 
 test('boot reaches Operations when a non-critical asset fails', async ({
