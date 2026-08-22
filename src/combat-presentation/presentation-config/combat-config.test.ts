@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCombatGeometry } from './combat-config';
+import { COMBAT_RENDER_DEPTH, resolveCombatGeometry } from './combat-config';
 
 describe('resolveCombatGeometry', () => {
   it('derives aircraft height from the viewport short side', () => {
@@ -23,5 +23,16 @@ describe('resolveCombatGeometry', () => {
     expect(a.hullBarGapRatio).toBe(0.01);
     expect(b.hullBarWidthRatio).toBe(0.65);
     expect(b.hullBarGapRatio).toBe(0.01);
+  });
+});
+
+describe('COMBAT_RENDER_DEPTH', () => {
+  it('keeps the canonical enemy → projectile → aircraft render order', () => {
+    expect(COMBAT_RENDER_DEPTH.enemy).toBeLessThan(
+      COMBAT_RENDER_DEPTH.projectile,
+    );
+    expect(COMBAT_RENDER_DEPTH.projectile).toBeLessThan(
+      COMBAT_RENDER_DEPTH.aircraft,
+    );
   });
 });

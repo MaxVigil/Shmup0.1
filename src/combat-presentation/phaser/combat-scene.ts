@@ -9,7 +9,10 @@ import {
 } from '@application/combat';
 import type { CombatHudBridge } from '../hud-bridge/combat-hud-bridge';
 import type { CombatGeometry } from '../presentation-config/combat-config';
-import { resolveCombatGeometry } from '../presentation-config/combat-config';
+import {
+  COMBAT_RENDER_DEPTH,
+  resolveCombatGeometry,
+} from '../presentation-config/combat-config';
 
 export interface CombatSceneContext {
   readonly geometry: CombatGeometry;
@@ -48,6 +51,13 @@ export class CombatScene extends Phaser.Scene {
   private aircraftLoadStarted = false;
   private isShuttingDown = false;
   private simState: CombatSimulationState;
+  /** Read-only stable-ID visual map for player projectiles (S09): Phaser
+   *  reflects the authoritative snapshot each frame and never owns projectile
+   *  lifetime, firing cadence, damage, position, or removal. */
+  private readonly projectileVisuals = new Map<
+    number,
+    Phaser.GameObjects.Rectangle
+  >();
 
   constructor(context: CombatSceneContext) {
     super({ key: 'combat' });
@@ -64,6 +74,9 @@ export class CombatScene extends Phaser.Scene {
     // Architecture §9 cleanup).
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.isShuttingDown = true;
+      // Projectile visuals are scene-owned and destroyed with it; the map is
+      // cleared so no stale id → destroyed-object references survive (S09).
+      this.projectileVisuals.clear();
       this.removeCombatListeners();
     });
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleScaleResize, this);
@@ -81,6 +94,7 @@ export class CombatScene extends Phaser.Scene {
       this.simState.aircraft.centerX,
       this.simState.aircraft.centerY,
     );
+    this.syncProjectileVisuals();
   }
 
   /** The rendered aircraft aspect ratio (image texture, or approved fallback). */
@@ -225,6 +239,7 @@ export class CombatScene extends Phaser.Scene {
     });
     this.simState = this.context.getSimulationState();
     this.layoutAircraft();
+    this.syncProjectileVisuals();
   }
 
   private layoutAircraft(): void {
@@ -256,6 +271,45 @@ export class CombatScene extends Phaser.Scene {
     this.updateHud(centerX, centerY, width);
   }
 
+  /**
+   * Reflects the authoritative projectile snapshot into the stable-ID visual
+   * map (S09): a rectangle is created for each new projectile id, existing
+   * visuals are repositioned and resized, and visuals whose id left the
+   * simulation are destroyed. Cadence, lifetime, damage, position, and removal
+   * all remain application-owned.
+   */
+  private syncProjectileVisuals(): void {
+    if (this.isShuttingDown) {
+      return;
+    }
+    const { projectiles, projectileWidth, projectileHeight } = this.simState;
+    const seen = new Set<number>();
+    for (const projectile of projectiles) {
+      seen.add(projectile.id);
+      let visual = this.projectileVisuals.get(projectile.id);
+      if (visual === undefined) {
+        visual = this.add.rectangle(
+          projectile.centerX,
+          projectile.centerY,
+          projectileWidth,
+          projectileHeight,
+          hexToNumber(this.geometry.projectileColor),
+        );
+        visual.setDepth(COMBAT_RENDER_DEPTH.projectile);
+        this.projectileVisuals.set(projectile.id, visual);
+      } else {
+        visual.setPosition(projectile.centerX, projectile.centerY);
+        visual.setSize(projectileWidth, projectileHeight);
+      }
+    }
+    for (const [id, visual] of this.projectileVisuals) {
+      if (!seen.has(id)) {
+        visual.destroy();
+        this.projectileVisuals.delete(id);
+      }
+    }
+  }
+
   private placeAircraft(): void {
     if (this.aircraftLoadStarted) {
       return;
@@ -264,6 +318,7 @@ export class CombatScene extends Phaser.Scene {
     const { aircraftUrl } = this.context;
     if (aircraftUrl === null) {
       this.fallbackGraphics = this.add.graphics();
+      this.fallbackGraphics.setDepth(COMBAT_RENDER_DEPTH.aircraft);
       this.layoutAircraft();
       return;
     }
@@ -275,11 +330,13 @@ export class CombatScene extends Phaser.Scene {
       }
       if (this.textures.addImage(AIRCRAFT_TEXTURE_KEY, image) === null) {
         this.fallbackGraphics = this.add.graphics();
+        this.fallbackGraphics.setDepth(COMBAT_RENDER_DEPTH.aircraft);
         this.layoutAircraft();
         return;
       }
       this.aircraftAspectRatio = image.naturalWidth / image.naturalHeight;
       this.aircraftImage = this.add.image(0, 0, AIRCRAFT_TEXTURE_KEY);
+      this.aircraftImage.setDepth(COMBAT_RENDER_DEPTH.aircraft);
       // Re-layout from the current geometry so a resize that raced the asset
       // load is honoured without re-fetching the prepared texture.
       this.layoutAircraft();
@@ -287,6 +344,7 @@ export class CombatScene extends Phaser.Scene {
     image.onerror = () => {
       if (!this.isShuttingDown) {
         this.fallbackGraphics = this.add.graphics();
+        this.fallbackGraphics.setDepth(COMBAT_RENDER_DEPTH.aircraft);
         this.layoutAircraft();
       }
     };

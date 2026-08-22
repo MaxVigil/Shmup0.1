@@ -5,7 +5,8 @@
  * gap, and the background uses the resolved approved canvas token. Tokens are
  * read from the Design System CSS custom properties and cached (Technical
  * Foundation §6.2). The aircraft fallback triangle is an approved light-grey
- * presentation value (Combat AC-056).
+ * presentation value (Combat AC-056) and the projectile uses the approved
+ * `text-primary` token as its solid fill (Combat §8.3, S09).
  */
 export interface CombatGeometry {
   readonly viewportWidth: number;
@@ -17,7 +18,20 @@ export interface CombatGeometry {
   readonly hullBarWidthRatio: number;
   readonly hullBarGapRatio: number;
   readonly aircraftFallbackColor: string;
+  readonly projectileColor: string;
 }
+
+/**
+ * Explicit Phaser depths keep the canonical Combat render order deterministic
+ * even when prepared images finish decoding asynchronously. Enemy visuals are
+ * introduced by S10; reserving their already-approved layer here prevents
+ * later presentation code from relying on object-creation timing.
+ */
+export const COMBAT_RENDER_DEPTH = Object.freeze({
+  enemy: 10,
+  projectile: 20,
+  aircraft: 30,
+});
 
 /** Canonical source asset aspect ratio (width/height) for the fallback bounds. */
 const GERMAN_FIGHTER_ASPECT_RATIO = 1278 / 1231;
@@ -37,6 +51,7 @@ export function resolveCombatGeometry(viewport: {
     hullBarWidthRatio: 0.65,
     hullBarGapRatio: 0.01,
     aircraftFallbackColor: '#cccccc',
+    projectileColor: readColorToken('--color-text-primary', '#f1f5f7'),
   };
 }
 

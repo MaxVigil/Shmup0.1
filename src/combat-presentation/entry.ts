@@ -37,6 +37,8 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     viewportHeight: geometry.viewportHeight,
     aircraftWidth: geometry.aircraftHeightPx * geometry.aircraftAspectRatio,
     aircraftHeight: geometry.aircraftHeightPx,
+    weapon: input.weapon,
+    projectile: input.projectile,
   });
 
   const submitCommand = (command: CombatInputCommand): void => {

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
+import type { WeaponDefinition } from '@content/weapons';
 import {
   advanceSimulationFrames,
   createCombatSimulation,
@@ -19,6 +21,7 @@ const AIRCRAFT_HEIGHT = 48;
 
 function createState(
   mode: 'mouse' | 'keyboard' = 'mouse',
+  weapon: WeaponDefinition = MACHINE_GUN,
 ): CombatSimulationState {
   return createCombatSimulation({
     initialMode: mode,
@@ -26,6 +29,8 @@ function createState(
     viewportHeight: 600,
     aircraftWidth: AIRCRAFT_WIDTH,
     aircraftHeight: AIRCRAFT_HEIGHT,
+    weapon,
+    projectile: PLAYER_PROJECTILE,
   });
 }
 
@@ -436,6 +441,8 @@ describe('mode exclusivity (AC-006)', () => {
         viewportHeight: 600,
         aircraftWidth: AIRCRAFT_WIDTH,
         aircraftHeight: AIRCRAFT_HEIGHT,
+        weapon: MACHINE_GUN,
+        projectile: PLAYER_PROJECTILE,
       });
       runtime.submit({ type: 'combat/keyboard', key: 'up', pressed: true });
       runtime.advance(0.5);
@@ -576,6 +583,8 @@ describe('fixed-step/runtime boundary hardening (S08-WI01)', () => {
           viewportHeight: 600,
           aircraftWidth: 49.83,
           aircraftHeight: 48,
+          weapon: MACHINE_GUN,
+          projectile: PLAYER_PROJECTILE,
         }),
       ).toThrow(/positive finite/);
     }
@@ -590,6 +599,8 @@ describe('fixed-step accumulator reset on accepted resize (S08-WI01)', () => {
       viewportHeight: 600,
       aircraftWidth: AIRCRAFT_WIDTH,
       aircraftHeight: AIRCRAFT_HEIGHT,
+      weapon: MACHINE_GUN,
+      projectile: PLAYER_PROJECTILE,
     });
     runtime.submit({
       type: 'combat/keyboard',

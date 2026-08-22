@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ReactElement } from 'react';
-import { loadCombatSession } from '@application/combat';
+import { loadCombatSession, resolveEquippedWeapon } from '@application/combat';
 import type { CombatSession } from '@application/combat';
 import { useApplication } from '../application-context';
 import { useSessionState } from '../hooks';
@@ -9,12 +9,14 @@ import { useSessionState } from '../hooks';
  * Combat Screen host (S07): the full-viewport black canvas container. When an
  * active Mission Snapshot exists, the lazy Combat boundary is entered through
  * the application seam (Phaser is dynamically imported); unmounting disposes
- * the Phaser Game/Scene, HUD bridge, and all Combat-owned resources. A Combat
- * initialization failure clears the active mission and signals the failure so
- * Base reopens Mission Details with `Unable to start mission.` (Base AC-014).
+ * the Phaser Game/Scene, HUD bridge, and all Combat-owned resources. The
+ * immutable snapshot's `equippedWeapon` is resolved against the validated
+ * catalogue at the seam (S09, AC-019). A Combat initialization failure clears
+ * the active mission and signals the failure so Base reopens Mission Details
+ * with `Unable to start mission.` (Base AC-014).
  */
 export function CombatScreen(): ReactElement | null {
-  const { store, preparedAssets } = useApplication();
+  const { store, preparedAssets, content } = useApplication();
   const session = useSessionState();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -29,6 +31,7 @@ export function CombatScreen(): ReactElement | null {
     }
     let disposed = false;
     let owner: CombatSession | null = null;
+    const weapon = resolveEquippedWeapon(content, snapshot.equippedWeapon);
     // Defer the lazy load one microtask: React StrictMode in development
     // mounts, cleans up, and remounts the effect synchronously, so the first
     // effect must not create a Phaser Game that is destroyed before its boot
@@ -42,6 +45,8 @@ export function CombatScreen(): ReactElement | null {
         snapshot,
         preparedAssets,
         container,
+        weapon,
+        projectile: content.projectile,
         dispatch: store.dispatch,
       })
         .then((loaded) => {
@@ -62,7 +67,7 @@ export function CombatScreen(): ReactElement | null {
       owner?.dispose();
       owner = null;
     };
-  }, [session.activeMission, preparedAssets, store]);
+  }, [session.activeMission, preparedAssets, store, content]);
 
   if (session.activeMission === 'none') {
     return null;

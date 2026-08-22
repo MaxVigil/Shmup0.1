@@ -9,9 +9,10 @@ import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
 import { SessionRouter } from './session-router';
 
-vi.mock('@application/combat', () => ({
-  loadCombatSession: vi.fn(),
-}));
+vi.mock('@application/combat', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@application/combat')>();
+  return { ...actual, loadCombatSession: vi.fn() };
+});
 
 afterEach(() => {
   cleanup();

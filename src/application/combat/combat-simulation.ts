@@ -1,7 +1,21 @@
+import type {
+  WeaponDefinition,
+  PlayerProjectileConfig,
+} from '@application/content';
+import type { WeaponType } from '@domain/index';
 import type { CombatInputCommand, CombatControlMode } from './input-command';
 import { isPointerInsideViewport } from './input-command';
 import type { MovementConfig } from './movement-config';
 import { resolveMovementConfig, brakingDistance } from './movement-config';
+import {
+  advanceProjectile,
+  isProjectileRemoved,
+  projectileGeometry,
+  projectileSpeedPxPerSecond,
+  resolveWeaponFireProfile,
+  spawnProjectile,
+  type CombatProjectile,
+} from './projectiles';
 
 /**
  * Application-owned deterministic Combat simulation (Repository Architecture
@@ -49,6 +63,26 @@ export interface CombatSimulationState {
   readonly keys: Record<CombatMovementKeyLike, boolean>;
   readonly config: MovementConfig;
   readonly bounds: CombatBounds;
+  /** Selected weapon captured from the Mission Snapshot (S09, AC-019). */
+  readonly equippedWeaponType: WeaponType;
+  /** Damage copied to every spawned projectile (Combat §8.1). */
+  readonly weaponDamage: number;
+  /** Canonical shots per second from the selected weapon. */
+  readonly weaponFireRate: number;
+  /** Exact fixed-step spacing between shots (Combat §8.2). */
+  readonly stepsPerShot: number;
+  /** Steps until the next projectile; never advances outside stepping. */
+  readonly firingStepsRemaining: number;
+  /** Shared player-projectile lifetime (Combat §8.1 `2 s`). */
+  readonly projectileMaxLifetimeSeconds: number;
+  readonly projectileSpeedPxPerSecond: number;
+  /** Viewport-short-side-derived rendered/hitbox bounds (Combat §8.3). */
+  readonly projectileWidth: number;
+  readonly projectileHeight: number;
+  /** Authoritative active projectiles in stable deterministic order. */
+  readonly projectiles: readonly CombatProjectile[];
+  /** Stable monotonic id source for projectile identity. */
+  readonly nextProjectileId: number;
 }
 
 export interface CombatSimulationInput {
@@ -58,6 +92,10 @@ export interface CombatSimulationInput {
   /** Rendered aircraft size (px) — derived by the presentation from Combat §4.4. */
   readonly aircraftWidth: number;
   readonly aircraftHeight: number;
+  /** Selected weapon definition (read-only content input, S09). */
+  readonly weapon: WeaponDefinition;
+  /** Shared player-projectile configuration (read-only content input, S09). */
+  readonly projectile: PlayerProjectileConfig;
 }
 
 export interface SimulationFrameResult {
@@ -68,13 +106,16 @@ export interface SimulationFrameResult {
 export function createCombatSimulation(
   input: CombatSimulationInput,
 ): CombatSimulationState {
-  // Construction-boundary invariant (S08-WI01): invalid or non-positive
-  // geometry cannot proceed safely, so initialization fails explicitly rather
-  // than silently retaining NaN/Infinity in authoritative state.
+  // Construction-boundary invariants (S08-WI01, S09): invalid or non-positive
+  // geometry, a missing/zero-rate weapon, or an invalid projectile config
+  // cannot proceed safely, so initialization fails explicitly rather than
+  // silently retaining NaN/Infinity in authoritative state.
   assertPositiveFinite(input.viewportWidth, 'viewportWidth');
   assertPositiveFinite(input.viewportHeight, 'viewportHeight');
   assertPositiveFinite(input.aircraftWidth, 'aircraftWidth');
   assertPositiveFinite(input.aircraftHeight, 'aircraftHeight');
+  assertValidWeapon(input.weapon);
+  assertValidProjectile(input.projectile);
   const shortSide = Math.min(input.viewportWidth, input.viewportHeight);
   const config = resolveMovementConfig(shortSide);
   const bounds = computeBounds(
@@ -86,6 +127,18 @@ export function createCombatSimulation(
   );
   const centerX = clamp(input.viewportWidth * 0.5, bounds.minX, bounds.maxX);
   const centerY = clamp(input.viewportHeight * 0.8, bounds.minY, bounds.maxY);
+  const geometry = projectileGeometry(shortSide);
+  const profile = resolveWeaponFireProfile(input.weapon, FIXED_STEP_SECONDS);
+  // AC-019: the first projectile is created immediately when active Combat
+  // begins, then deterministic fixed-step scheduling fires one projectile
+  // every `stepsPerShot` steps (Machine Gun 6/s, Cannon 2/s).
+  const firstProjectile = spawnProjectile(
+    0,
+    profile.damage,
+    centerX,
+    centerY - input.aircraftHeight / 2,
+    geometry,
+  );
   return {
     mode: input.initialMode,
     viewportWidth: input.viewportWidth,
@@ -98,6 +151,20 @@ export function createCombatSimulation(
     keys: { up: false, down: false, left: false, right: false },
     config,
     bounds,
+    equippedWeaponType: input.weapon.type,
+    weaponDamage: profile.damage,
+    weaponFireRate: profile.fireRate,
+    stepsPerShot: profile.stepsPerShot,
+    firingStepsRemaining: profile.stepsPerShot,
+    projectileMaxLifetimeSeconds: input.projectile.maximumLifetimeSeconds,
+    projectileSpeedPxPerSecond: projectileSpeedPxPerSecond(
+      input.viewportHeight,
+      input.projectile,
+    ),
+    projectileWidth: geometry.width,
+    projectileHeight: geometry.height,
+    projectiles: [firstProjectile],
+    nextProjectileId: 1,
   };
 }
 
@@ -105,6 +172,32 @@ function assertPositiveFinite(value: number, name: string): void {
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(
       `Invalid combat simulation geometry: ${name} must be a positive finite number (received ${value}).`,
+    );
+  }
+}
+
+function assertValidWeapon(weapon: WeaponDefinition): void {
+  if (
+    !Number.isFinite(weapon.damage) ||
+    weapon.damage < 0 ||
+    !Number.isFinite(weapon.fireRate) ||
+    weapon.fireRate <= 0
+  ) {
+    throw new Error(
+      'Invalid combat simulation weapon: damage must be finite and non-negative and fireRate finite and positive.',
+    );
+  }
+}
+
+function assertValidProjectile(config: PlayerProjectileConfig): void {
+  if (
+    !Number.isFinite(config.speedViewportHeightPerSecond) ||
+    config.speedViewportHeightPerSecond <= 0 ||
+    !Number.isFinite(config.maximumLifetimeSeconds) ||
+    config.maximumLifetimeSeconds <= 0
+  ) {
+    throw new Error(
+      'Invalid combat simulation projectile: speed and lifetime must be finite and positive.',
     );
   }
 }
@@ -202,9 +295,72 @@ export function stepCombatSimulation(
   if (!Number.isFinite(stepSeconds) || stepSeconds <= 0) {
     return state;
   }
-  return state.mode === 'keyboard'
-    ? stepKeyboard(state, stepSeconds)
-    : stepMouse(state, stepSeconds);
+  const moved =
+    state.mode === 'keyboard'
+      ? stepKeyboard(state, stepSeconds)
+      : stepMouse(state, stepSeconds);
+  // Player firing advances exactly one fixed step per step in both modes;
+  // no wall-clock authority, delayed catch-up, or firing input (AC-019).
+  return stepProjectiles(moved, stepSeconds);
+}
+
+/**
+ * Player-weapon scheduling and projectile integration (Combat §8, S09): the
+ * firing countdown advances exactly one step per fixed step and resets when a
+ * shot is due, then every active projectile moves upward at constant speed and
+ * ages. Removal applies on the first S09-owned condition — full-bounds
+ * viewport exit or lifetime `2 s` — after the step. Newly spawned projectiles
+ * are placed ahead of older ones so the array order is deterministic and
+ * stable across removal.
+ */
+function stepProjectiles(
+  state: CombatSimulationState,
+  stepSeconds: number,
+): CombatSimulationState {
+  const remaining = state.firingStepsRemaining - 1;
+  let nextProjectileId = state.nextProjectileId;
+  let spawned: CombatProjectile[] = [];
+  if (remaining <= 0) {
+    spawned = [
+      spawnProjectile(
+        nextProjectileId,
+        state.weaponDamage,
+        state.aircraft.centerX,
+        state.aircraft.centerY - state.aircraftHeight / 2,
+        { width: state.projectileWidth, height: state.projectileHeight },
+      ),
+    ];
+    nextProjectileId += 1;
+  }
+  const geometry = {
+    width: state.projectileWidth,
+    height: state.projectileHeight,
+  };
+  const kept: CombatProjectile[] = [];
+  for (const projectile of [...spawned, ...state.projectiles]) {
+    const advanced = advanceProjectile(
+      projectile,
+      state.projectileSpeedPxPerSecond,
+      stepSeconds,
+    );
+    if (
+      !isProjectileRemoved(
+        advanced,
+        state.viewportWidth,
+        state.viewportHeight,
+        state.projectileMaxLifetimeSeconds,
+        geometry,
+      )
+    ) {
+      kept.push(advanced);
+    }
+  }
+  return {
+    ...state,
+    firingStepsRemaining: remaining <= 0 ? state.stepsPerShot : remaining,
+    projectiles: kept,
+    nextProjectileId,
+  };
 }
 
 /**
@@ -373,6 +529,15 @@ function resizeSimulation(
   );
   const ratioX = command.width / state.viewportWidth;
   const ratioY = command.height / state.viewportHeight;
+  const geometry = projectileGeometry(shortSide);
+  // S09 resize contract (AC-053/057/081, MASTER-AC-010): active projectile
+  // positions reproject proportionally and viewport-derived geometry/speed
+  // recalculate; no entities are duplicated or re-fetched.
+  const projectiles = state.projectiles.map((projectile) => ({
+    ...projectile,
+    centerX: projectile.centerX * ratioX,
+    centerY: projectile.centerY * ratioY,
+  }));
   return {
     ...state,
     viewportWidth: command.width,
@@ -394,7 +559,32 @@ function resizeSimulation(
       centerX: clamp(state.aircraft.centerX * ratioX, bounds.minX, bounds.maxX),
       centerY: clamp(state.aircraft.centerY * ratioY, bounds.minY, bounds.maxY),
     },
+    projectileWidth: geometry.width,
+    projectileHeight: geometry.height,
+    projectileSpeedPxPerSecond:
+      state.projectileSpeedPxPerSecond *
+      (command.height / state.viewportHeight),
+    projectiles,
   };
+}
+
+/**
+ * S11 collision-consumption seam: removes a projectile consumed by a valid
+ * hit. A missing id is a deterministic no-op. S09 never fabricates enemies,
+ * hits, damage application, penetration, or destruction — this pure function
+ * exists so S11 can consume projectiles without owning their state.
+ */
+export function removeProjectileById(
+  state: CombatSimulationState,
+  projectileId: number,
+): CombatSimulationState {
+  const projectiles = state.projectiles.filter(
+    (projectile) => projectile.id !== projectileId,
+  );
+  if (projectiles.length === state.projectiles.length) {
+    return state;
+  }
+  return { ...state, projectiles };
 }
 
 function computeBounds(

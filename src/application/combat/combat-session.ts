@@ -1,10 +1,32 @@
+import type {
+  ContentCatalogue,
+  PlayerProjectileConfig,
+  WeaponDefinition,
+} from '../content';
+import { MACHINE_GUN } from '../content';
 import type { MissionSnapshot } from '../mission/snapshot';
 import type { AssetPreloadResult } from '../ports';
 import type { SessionAction } from '../session';
 import type { CombatControlMode } from './input-command';
+import type { WeaponType } from '@domain/index';
 
 export interface CombatSession {
   readonly dispose: () => void;
+}
+
+/**
+ * Resolves the immutable Mission Snapshot's `equippedWeapon` against the
+ * validated catalogue (Base §9.4, S09). The catalogue guarantees both MVP
+ * weapons, so the Machine Gun fallback is defensive and never reached in a
+ * validated build.
+ */
+export function resolveEquippedWeapon(
+  catalogue: ContentCatalogue,
+  type: WeaponType,
+): WeaponDefinition {
+  return (
+    catalogue.weapons.find((weapon) => weapon.type === type) ?? MACHINE_GUN
+  );
 }
 
 /**
@@ -31,6 +53,10 @@ export interface CombatSessionInput {
   readonly snapshot: MissionSnapshot;
   readonly preparedAssets: AssetPreloadResult;
   readonly container: HTMLElement;
+  /** Selected weapon definition resolved from the snapshot (S09, AC-019). */
+  readonly weapon: WeaponDefinition;
+  /** Shared player-projectile configuration (S09). */
+  readonly projectile: PlayerProjectileConfig;
   /**
    * Shared-session dispatch (S08, AC-064): the Combat session synchronises the
    * single `Mouse Movement Enabled` value exactly once per accepted `F`
