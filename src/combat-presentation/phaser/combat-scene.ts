@@ -1,4 +1,12 @@
 import Phaser from 'phaser';
+import {
+  routeKeyInput,
+  shouldForwardPointerMove,
+  type CombatInputCommand,
+  type CombatInputContext,
+  type CombatSimulationState,
+  type RoutedKeyIntent,
+} from '@application/combat';
 import type { CombatHudBridge } from '../hud-bridge/combat-hud-bridge';
 import type { CombatGeometry } from '../presentation-config/combat-config';
 import { resolveCombatGeometry } from '../presentation-config/combat-config';
@@ -9,20 +17,26 @@ export interface CombatSceneContext {
   /** Prepared `german-fighter` runtime URL, or `null` for the approved fallback. */
   readonly aircraftUrl: string | null;
   readonly initialHullRatio: number;
+  /** Forwards semantic input commands to the application simulation (S08). */
+  readonly submitCommand: (command: CombatInputCommand) => void;
+  /** Advances the fixed-step simulation by one rendered frame and returns the
+   *  authoritative snapshot. */
+  readonly advanceFrame: (frameDeltaSeconds: number) => CombatSimulationState;
+  readonly getSimulationState: () => CombatSimulationState;
 }
 
 const AIRCRAFT_TEXTURE_KEY = 'aircraft';
 
 /**
- * Combat Scene shell (S07): the solid-black approved canvas background, the
- * player aircraft structural placeholder at its geometry (`50% × 80%` of the
- * viewport, `12%` of the viewport short side, pointing upward), and the Hull
- * Integrity bar positioned through the CombatHudBridge. On viewport resize the
- * gameplay area and the aircraft/Hull geometry are recalculated from the new
- * short side while the current Hull ratio is retained (Combat §12.3, AC-057,
- * AC-081); the prepared texture is reused and never fetched again. Movement,
- * firing, enemies, and collision arrive in later slices; the render order
- * already follows the approved background–aircraft–Hull Bar sequence.
+ * Combat Scene shell + presentation (S07–S08): the solid-black approved canvas
+ * background, the player aircraft placeholder rendered from the deterministic
+ * simulation snapshot, and the Hull Integrity bar positioned through the
+ * CombatHudBridge. Phaser is limited to input forwarding and read-only
+ * presentation: keyboard/pointer events become semantic commands and each
+ * rendered frame advances the fixed-step simulation, then the aircraft is
+ * positioned from the authoritative state. Movement, firing, enemies, and
+ * collision arrive in later slices; the render order already follows the
+ * approved background–aircraft–Hull Bar sequence.
  */
 export class CombatScene extends Phaser.Scene {
   private readonly context: CombatSceneContext;
@@ -32,29 +46,42 @@ export class CombatScene extends Phaser.Scene {
   private fallbackGraphics: Phaser.GameObjects.Graphics | null = null;
   private aircraftAspectRatio = 0;
   private aircraftLoadStarted = false;
+  private isShuttingDown = false;
+  private simState: CombatSimulationState;
 
   constructor(context: CombatSceneContext) {
     super({ key: 'combat' });
     this.context = context;
     this.geometry = context.geometry;
     this.hullRatio = context.initialHullRatio;
+    this.simState = context.getSimulationState();
   }
 
   create(): void {
-    // Guard for async aircraft decoding and the scale resize listener: the game
-    // may be disposed while the prepared asset finishes loading or a resize
-    // callback is pending, so Combat-owned callbacks must not dereference
-    // Phaser objects after destruction (Repository Architecture §9 cleanup).
+    // Guard for async aircraft decoding, input, and scale listeners: the game
+    // may be disposed while a callback is pending, so Combat-owned callbacks
+    // must not dereference Phaser objects after destruction (Repository
+    // Architecture §9 cleanup).
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.isShuttingDown = true;
-      this.scale.off(Phaser.Scale.Events.RESIZE, this.handleScaleResize, this);
+      this.removeCombatListeners();
     });
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleScaleResize, this);
+    this.registerCombatListeners();
     this.cameras.main.setBackgroundColor(this.geometry.backgroundColor);
     this.layoutAircraft();
   }
 
-  private isShuttingDown = false;
+  override update(_time: number, delta: number): void {
+    if (this.isShuttingDown) {
+      return;
+    }
+    this.simState = this.context.advanceFrame(delta / 1000);
+    this.positionAircraft(
+      this.simState.aircraft.centerX,
+      this.simState.aircraft.centerY,
+    );
+  }
 
   /** The rendered aircraft aspect ratio (image texture, or approved fallback). */
   private get renderedAircraftAspect(): number {
@@ -63,13 +90,119 @@ export class CombatScene extends Phaser.Scene {
       : this.geometry.aircraftAspectRatio;
   }
 
+  private registerCombatListeners(): void {
+    const keyboard = this.input.keyboard;
+    if (keyboard !== null) {
+      // No global key capture: Phaser only adapts raw keyboard facts and
+      // forwards the application routing result, so native browser behaviour
+      // for focused UI controls is never consumed.
+      keyboard.on(
+        Phaser.Input.Keyboard.Events.ANY_KEY_DOWN,
+        this.handleKeyDown,
+        this,
+      );
+      keyboard.on(
+        Phaser.Input.Keyboard.Events.ANY_KEY_UP,
+        this.handleKeyUp,
+        this,
+      );
+    }
+    this.input.on('pointermove', this.handlePointerMove, this);
+  }
+
+  private removeCombatListeners(): void {
+    this.scale.off(Phaser.Scale.Events.RESIZE, this.handleScaleResize, this);
+    this.input.off('pointermove', this.handlePointerMove, this);
+    const keyboard = this.input.keyboard;
+    if (keyboard !== null) {
+      keyboard.off(
+        Phaser.Input.Keyboard.Events.ANY_KEY_DOWN,
+        this.handleKeyDown,
+        this,
+      );
+      keyboard.off(
+        Phaser.Input.Keyboard.Events.ANY_KEY_UP,
+        this.handleKeyUp,
+        this,
+      );
+    }
+  }
+
+  /** Current application input-routing context. S08 is always enabled; S13
+   *  will gate on Pause / blocking Overlay / browser-safety states. */
+  private inputContext(): CombatInputContext {
+    return {
+      inputEnabled: true,
+      nativeInputFocused: isNativeControlFocused(),
+    };
+  }
+
+  private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (this.isShuttingDown) {
+      return;
+    }
+    this.applyKeyIntent(
+      routeKeyInput(event.code, true, event.repeat, this.inputContext()),
+      event,
+    );
+  };
+
+  private readonly handleKeyUp = (event: KeyboardEvent): void => {
+    if (this.isShuttingDown) {
+      return;
+    }
+    this.applyKeyIntent(
+      routeKeyInput(event.code, false, false, this.inputContext()),
+      event,
+    );
+  };
+
+  private applyKeyIntent(intent: RoutedKeyIntent, event: KeyboardEvent): void {
+    if (intent.kind === 'none') {
+      return;
+    }
+    event.preventDefault();
+    if (intent.kind === 'movement') {
+      this.context.submitCommand({
+        type: 'combat/keyboard',
+        key: intent.key,
+        pressed: intent.pressed,
+      });
+    } else if (intent.kind === 'toggle-mode') {
+      this.context.submitCommand({ type: 'combat/toggle-mode' });
+    }
+  }
+
+  private readonly handlePointerMove = (
+    pointer: Phaser.Input.Pointer,
+  ): void => {
+    if (this.isShuttingDown) {
+      return;
+    }
+    if (
+      !shouldForwardPointerMove(
+        pointer.x,
+        pointer.y,
+        this.geometry.viewportWidth,
+        this.geometry.viewportHeight,
+        this.inputContext(),
+      )
+    ) {
+      return;
+    }
+    this.context.submitCommand({
+      type: 'combat/pointer-move',
+      x: pointer.x,
+      y: pointer.y,
+    });
+  };
+
   /**
    * Viewport resize contract (Combat §12.3, AC-001, AC-053, AC-057, AC-081,
-   * MASTER-AC-010): the canvas follows the new gameplay area and the aircraft
-   * is re-laid out at the approved `50% × 80%` centre with `12%` short-side
-   * height, preserved aspect ratio, upward orientation, and complete visible
-   * bounds; the Hull bar is recalculated from the resized aircraft while the
-   * current Hull ratio is retained. The same prepared texture is reused.
+   * MASTER-AC-010, S08): the canvas follows the new gameplay area and the
+   * simulation reprojects the authoritative player position and target
+   * proportionally, recalculates the movement values/bounds, and clamps the
+   * complete aircraft sprite. The same prepared texture is reused.
    */
   private handleScaleResize(gameSize: Phaser.Structs.Size): void {
     if (this.isShuttingDown) {
@@ -82,6 +215,15 @@ export class CombatScene extends Phaser.Scene {
     }
     this.geometry = resolveCombatGeometry({ width, height });
     this.cameras.main.setSize(width, height);
+    this.context.submitCommand({
+      type: 'combat/viewport-resize',
+      width,
+      height,
+      aircraftWidth:
+        this.geometry.aircraftHeightPx * this.geometry.aircraftAspectRatio,
+      aircraftHeight: this.geometry.aircraftHeightPx,
+    });
+    this.simState = this.context.getSimulationState();
     this.layoutAircraft();
   }
 
@@ -90,20 +232,26 @@ export class CombatScene extends Phaser.Scene {
       this.placeAircraft();
       return;
     }
-    this.renderAircraft(
-      this.geometry.viewportWidth * 0.5,
-      this.geometry.viewportHeight * 0.8,
-    );
-  }
-
-  private renderAircraft(centerX: number, centerY: number): void {
     const height = this.geometry.aircraftHeightPx;
     const width = height * this.renderedAircraftAspect;
     if (this.aircraftImage !== null) {
-      this.aircraftImage.setPosition(centerX, centerY);
       this.aircraftImage.setDisplaySize(width, height);
     } else if (this.fallbackGraphics !== null) {
-      this.redrawFallbackTriangle(centerX, centerY);
+      this.redrawFallbackTriangle();
+    }
+    this.positionAircraft(
+      this.simState.aircraft.centerX,
+      this.simState.aircraft.centerY,
+    );
+  }
+
+  /** Positions the rendered aircraft from the authoritative simulation state. */
+  private positionAircraft(centerX: number, centerY: number): void {
+    const width = this.geometry.aircraftHeightPx * this.renderedAircraftAspect;
+    if (this.aircraftImage !== null) {
+      this.aircraftImage.setPosition(centerX, centerY);
+    } else if (this.fallbackGraphics !== null) {
+      this.fallbackGraphics.setPosition(centerX, centerY);
     }
     this.updateHud(centerX, centerY, width);
   }
@@ -146,7 +294,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /** Approved solid light-grey upward triangle fallback (Combat AC-056). */
-  private redrawFallbackTriangle(centerX: number, centerY: number): void {
+  private redrawFallbackTriangle(): void {
     const graphics = this.fallbackGraphics;
     if (graphics === null) {
       return;
@@ -155,13 +303,15 @@ export class CombatScene extends Phaser.Scene {
     const width = height * this.geometry.aircraftAspectRatio;
     graphics.clear();
     graphics.fillStyle(hexToNumber(this.geometry.aircraftFallbackColor), 1);
+    // Drawn around the local origin so the whole triangle moves via
+    // `graphics.setPosition` from the authoritative simulation state.
     graphics.fillTriangle(
-      centerX - width / 2,
-      centerY + height / 2,
-      centerX + width / 2,
-      centerY + height / 2,
-      centerX,
-      centerY - height / 2,
+      -width / 2,
+      height / 2,
+      width / 2,
+      height / 2,
+      0,
+      -height / 2,
     );
   }
 
@@ -182,4 +332,20 @@ export class CombatScene extends Phaser.Scene {
 
 function hexToNumber(hex: string): number {
   return Number.parseInt(hex.replace('#', ''), 16);
+}
+
+/** Raw-fact adaptation (Technical Foundation §7): true when a native UI
+ *  control owns focus, so the routing table can reject global Combat keys
+ *  without interfering with native keyboard behaviour. */
+function isNativeControlFocused(): boolean {
+  const active = document.activeElement;
+  if (active === null || active === document.body) {
+    return false;
+  }
+  return (
+    active instanceof HTMLInputElement ||
+    active instanceof HTMLTextAreaElement ||
+    active instanceof HTMLSelectElement ||
+    (active instanceof HTMLElement && active.isContentEditable)
+  );
 }

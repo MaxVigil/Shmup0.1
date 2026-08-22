@@ -42,6 +42,7 @@ export function CombatScreen(): ReactElement | null {
         snapshot,
         preparedAssets,
         container,
+        dispatch: store.dispatch,
       })
         .then((loaded) => {
           if (disposed) {

@@ -1,15 +1,23 @@
 import type { CombatSession, CombatSessionInput } from '@application/combat';
+import {
+  createCombatSimulationRuntime,
+  synchronizeSharedModeAfterToggle,
+  type CombatInputCommand,
+} from '@application/combat';
 import { createCombatHudBridge } from './hud-bridge/combat-hud-bridge';
 import { createCombatGame } from './phaser/combat-game';
 import { CombatScene } from './phaser/combat-scene';
 import { resolveCombatGeometry } from './presentation-config/combat-config';
 
 /**
- * Lazy Combat presentation entry (Repository Architecture §9): invoked only
- * through the application boundary's dynamic import. It creates the Phaser
- * Game and the CombatHudBridge, wires the approved shell from the immutable
- * Mission Snapshot + prepared assets, and returns the session disposal
- * contract (resize observer, Phaser resources, and bridge bindings).
+ * Lazy Combat presentation entry (Repository Architecture §9, S08): invoked
+ * only through the application boundary's dynamic import. It owns the
+ * deterministic simulation runtime (application state, fixed-step driver,
+ * disposal contract), the Phaser Game/Scene, and the CombatHudBridge, wires
+ * the approved shell from the immutable Mission Snapshot + prepared assets,
+ * and forwards Phaser input as semantic commands. `F` toggles the active mode
+ * and synchronises the single shared-session `Mouse Movement Enabled` value
+ * exactly once per accepted toggle (AC-064).
  */
 export function createCombatSession(input: CombatSessionInput): CombatSession {
   const container = input.container;
@@ -23,11 +31,32 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     width: container.clientWidth || window.innerWidth,
     height: container.clientHeight || window.innerHeight,
   });
+  const runtime = createCombatSimulationRuntime({
+    initialMode: input.snapshot.mouseMovementEnabled ? 'mouse' : 'keyboard',
+    viewportWidth: geometry.viewportWidth,
+    viewportHeight: geometry.viewportHeight,
+    aircraftWidth: geometry.aircraftHeightPx * geometry.aircraftAspectRatio,
+    aircraftHeight: geometry.aircraftHeightPx,
+  });
+
+  const submitCommand = (command: CombatInputCommand): void => {
+    const before = runtime.getState().mode;
+    runtime.submit(command);
+    const after = runtime.getState().mode;
+    if (command.type === 'combat/toggle-mode') {
+      // AC-064: exactly one shared-session value change per accepted F toggle.
+      synchronizeSharedModeAfterToggle(before, after, input.dispatch);
+    }
+  };
+
   const game = createCombatGame(container, {
     geometry,
     bridge,
     aircraftUrl: aircraftAsset?.status === 'ready' ? aircraftAsset.url : null,
     initialHullRatio: input.snapshot.hullIntegrity / 100,
+    submitCommand,
+    advanceFrame: (frameDeltaSeconds) => runtime.advance(frameDeltaSeconds),
+    getSimulationState: () => runtime.getState(),
   });
 
   // Viewport resize contract (Combat §12.3, AC-057, AC-082, MASTER-AC-014):
@@ -71,6 +100,7 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
         window.removeEventListener('resize', windowResizeListener);
         windowResizeListener = null;
       }
+      runtime.dispose();
       game.destroy(true);
       bridge.dispose();
     },

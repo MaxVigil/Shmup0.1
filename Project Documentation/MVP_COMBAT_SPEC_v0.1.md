@@ -188,6 +188,10 @@ Pressing `F` must fully toggle the active control mode:
 ### 5.2 Mouse Movement
 
 - The cursor represents the aircraft's target position.
+- If the cursor is inside the viewport but outside the aircraft centre's
+  reachable area because of `Movement Bounds`, the effective target is the
+  nearest reachable centre position. This keeps the complete rendered sprite
+  inside the approved margin and allows the aircraft to stop deterministically.
 - While the aircraft has not reached that target, it must move toward the cursor using its own movement speed.
 - The aircraft must not teleport or snap to the cursor.
 - Movement toward the cursor must use the acceleration-based movement model defined below.
