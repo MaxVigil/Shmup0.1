@@ -10,3 +10,7 @@ export type {
   PlayerProjectileConfig,
   WeaponDefinition,
 } from '@content/weapons';
+export { BASIC_DRONE, ENEMIES } from '@content/enemies';
+export type { EnemyDefinition } from '@content/enemies';
+export { INTERCEPTION } from '@content/missions';
+export type { EnemyGroupSchedule, MissionDefinition } from '@content/missions';

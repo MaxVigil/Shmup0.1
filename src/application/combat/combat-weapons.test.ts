@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BASIC_DRONE, INTERCEPTION } from '@content/index';
 import { CANNON, MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import type { WeaponDefinition } from '@content/weapons';
 import type { WeaponType } from '@domain/index';
@@ -52,6 +53,9 @@ function createState(
     aircraftHeight: AIRCRAFT_HEIGHT,
     weapon,
     projectile,
+    missionSeed: 1234,
+    enemy: BASIC_DRONE,
+    schedule: INTERCEPTION.schedule,
   });
 }
 
@@ -392,6 +396,9 @@ describe('player projectile simulation integration (S09)', () => {
       aircraftHeight: AIRCRAFT_HEIGHT,
       weapon: MACHINE_GUN,
       projectile: PLAYER_PROJECTILE,
+      missionSeed: 1234,
+      enemy: BASIC_DRONE,
+      schedule: INTERCEPTION.schedule,
     });
     runtime.advance(0.1);
     const before = runtime.getState();

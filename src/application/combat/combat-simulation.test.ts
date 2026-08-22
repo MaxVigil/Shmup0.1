@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BASIC_DRONE, INTERCEPTION } from '@content/index';
 import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import type { WeaponDefinition } from '@content/weapons';
 import {
@@ -18,6 +19,7 @@ import { isPointerInsideViewport } from './input-command';
 // 1280x600: short side 600 → aircraft height 48, width 48 * 1278/1231 ≈ 49.83.
 const AIRCRAFT_WIDTH = 48 * (1278 / 1231);
 const AIRCRAFT_HEIGHT = 48;
+const MISSION_SEED = 3735928559;
 
 function createState(
   mode: 'mouse' | 'keyboard' = 'mouse',
@@ -31,6 +33,9 @@ function createState(
     aircraftHeight: AIRCRAFT_HEIGHT,
     weapon,
     projectile: PLAYER_PROJECTILE,
+    missionSeed: MISSION_SEED,
+    enemy: BASIC_DRONE,
+    schedule: INTERCEPTION.schedule,
   });
 }
 
@@ -443,6 +448,9 @@ describe('mode exclusivity (AC-006)', () => {
         aircraftHeight: AIRCRAFT_HEIGHT,
         weapon: MACHINE_GUN,
         projectile: PLAYER_PROJECTILE,
+        missionSeed: MISSION_SEED,
+        enemy: BASIC_DRONE,
+        schedule: INTERCEPTION.schedule,
       });
       runtime.submit({ type: 'combat/keyboard', key: 'up', pressed: true });
       runtime.advance(0.5);
@@ -585,6 +593,9 @@ describe('fixed-step/runtime boundary hardening (S08-WI01)', () => {
           aircraftHeight: 48,
           weapon: MACHINE_GUN,
           projectile: PLAYER_PROJECTILE,
+          missionSeed: MISSION_SEED,
+          enemy: BASIC_DRONE,
+          schedule: INTERCEPTION.schedule,
         }),
       ).toThrow(/positive finite/);
     }
@@ -601,6 +612,9 @@ describe('fixed-step accumulator reset on accepted resize (S08-WI01)', () => {
       aircraftHeight: AIRCRAFT_HEIGHT,
       weapon: MACHINE_GUN,
       projectile: PLAYER_PROJECTILE,
+      missionSeed: MISSION_SEED,
+      enemy: BASIC_DRONE,
+      schedule: INTERCEPTION.schedule,
     });
     runtime.submit({
       type: 'combat/keyboard',

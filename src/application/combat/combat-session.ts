@@ -1,9 +1,11 @@
 import type {
   ContentCatalogue,
+  EnemyDefinition,
+  EnemyGroupSchedule,
   PlayerProjectileConfig,
   WeaponDefinition,
 } from '../content';
-import { MACHINE_GUN } from '../content';
+import { BASIC_DRONE, INTERCEPTION, MACHINE_GUN } from '../content';
 import type { MissionSnapshot } from '../mission/snapshot';
 import type { AssetPreloadResult } from '../ports';
 import type { SessionAction } from '../session';
@@ -27,6 +29,31 @@ export function resolveEquippedWeapon(
   return (
     catalogue.weapons.find((weapon) => weapon.type === type) ?? MACHINE_GUN
   );
+}
+
+/**
+ * Resolves the validated Basic Drone definition (S10). The catalogue
+ * guarantees the single MVP enemy, so the fallback is defensive.
+ */
+export function resolveBasicDrone(
+  catalogue: ContentCatalogue,
+): EnemyDefinition {
+  return (
+    catalogue.enemies.find((enemy) => enemy.type === 'basic-drone') ??
+    catalogue.enemies[0] ??
+    BASIC_DRONE
+  );
+}
+
+/**
+ * Resolves the validated Interception enemy-group schedule (S10). The MVP has
+ * exactly one mission; the fallback is defensive and never reached in a
+ * validated build.
+ */
+export function resolveMissionSchedule(
+  catalogue: ContentCatalogue,
+): EnemyGroupSchedule {
+  return catalogue.missions[0]?.schedule ?? INTERCEPTION.schedule;
 }
 
 /**
@@ -57,6 +84,10 @@ export interface CombatSessionInput {
   readonly weapon: WeaponDefinition;
   /** Shared player-projectile configuration (S09). */
   readonly projectile: PlayerProjectileConfig;
+  /** Basic Drone definition resolved from the catalogue (S10). */
+  readonly enemy: EnemyDefinition;
+  /** Interception enemy-group schedule resolved from the catalogue (S10). */
+  readonly schedule: EnemyGroupSchedule;
   /**
    * Shared-session dispatch (S08, AC-064): the Combat session synchronises the
    * single `Mouse Movement Enabled` value exactly once per accepted `F`

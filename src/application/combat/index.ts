@@ -1,6 +1,8 @@
 export {
   loadCombatSession,
+  resolveBasicDrone,
   resolveEquippedWeapon,
+  resolveMissionSchedule,
   synchronizeSharedModeAfterToggle,
 } from './combat-session';
 export type { CombatSession, CombatSessionInput } from './combat-session';
@@ -11,6 +13,7 @@ export {
   submitCombatCommand,
   advanceSimulationFrames,
   removeProjectileById,
+  forceFinalGroupSpawn,
   FIXED_STEP_SECONDS,
   MAX_STEPS_PER_FRAME,
 } from './combat-simulation';
@@ -40,6 +43,24 @@ export type {
   ProjectileGeometry,
   WeaponFireProfile,
 } from './projectiles';
+export {
+  isEnemyAnyPortionVisible,
+  isEnemyFullyOutsideViewport,
+  moveEnemy,
+  selectEnemyEntryRegion,
+  spawnAxisFraction,
+  spawnEnemy,
+  waypointXFraction,
+  waypointYFraction,
+} from './enemies';
+export type { CombatEnemy, EnemyEntryRegion } from './enemies';
+export { planEnemyGroups, spawnGroupDrones } from './spawn-schedule';
+export type { PlannedEnemy, PlannedEnemyGroup } from './spawn-schedule';
+export {
+  aircraftCollisionAabb,
+  AIRCRAFT_HITBOX_HEIGHT_RATIO,
+  AIRCRAFT_HITBOX_WIDTH_RATIO,
+} from './collision-geometry';
 export {
   resolveMovementConfig,
   brakingDistance,

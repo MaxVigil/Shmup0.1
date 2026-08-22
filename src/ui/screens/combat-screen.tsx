@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
 import type { ReactElement } from 'react';
-import { loadCombatSession, resolveEquippedWeapon } from '@application/combat';
+import {
+  loadCombatSession,
+  resolveBasicDrone,
+  resolveEquippedWeapon,
+  resolveMissionSchedule,
+} from '@application/combat';
 import type { CombatSession } from '@application/combat';
 import { useApplication } from '../application-context';
 import { useSessionState } from '../hooks';
@@ -11,9 +16,10 @@ import { useSessionState } from '../hooks';
  * the application seam (Phaser is dynamically imported); unmounting disposes
  * the Phaser Game/Scene, HUD bridge, and all Combat-owned resources. The
  * immutable snapshot's `equippedWeapon` is resolved against the validated
- * catalogue at the seam (S09, AC-019). A Combat initialization failure clears
- * the active mission and signals the failure so Base reopens Mission Details
- * with `Unable to start mission.` (Base AC-014).
+ * catalogue at the seam (S09, AC-019) and the Basic Drone/Interception
+ * definitions feed the deterministic enemy scheduling (S10). A Combat
+ * initialization failure clears the active mission and signals the failure so
+ * Base reopens Mission Details with `Unable to start mission.` (Base AC-014).
  */
 export function CombatScreen(): ReactElement | null {
   const { store, preparedAssets, content } = useApplication();
@@ -32,6 +38,8 @@ export function CombatScreen(): ReactElement | null {
     let disposed = false;
     let owner: CombatSession | null = null;
     const weapon = resolveEquippedWeapon(content, snapshot.equippedWeapon);
+    const enemy = resolveBasicDrone(content);
+    const schedule = resolveMissionSchedule(content);
     // Defer the lazy load one microtask: React StrictMode in development
     // mounts, cleans up, and remounts the effect synchronously, so the first
     // effect must not create a Phaser Game that is destroyed before its boot
@@ -47,6 +55,8 @@ export function CombatScreen(): ReactElement | null {
         container,
         weapon,
         projectile: content.projectile,
+        enemy,
+        schedule,
         dispatch: store.dispatch,
       })
         .then((loaded) => {

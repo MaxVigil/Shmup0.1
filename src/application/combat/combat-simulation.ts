@@ -1,8 +1,11 @@
 import type {
   WeaponDefinition,
   PlayerProjectileConfig,
+  EnemyDefinition,
+  EnemyGroupSchedule,
 } from '@application/content';
-import type { WeaponType } from '@domain/index';
+import type { EnemyType, WeaponType } from '@domain/index';
+import { Mulberry32 } from '@domain/random';
 import type { CombatInputCommand, CombatControlMode } from './input-command';
 import { isPointerInsideViewport } from './input-command';
 import type { MovementConfig } from './movement-config';
@@ -16,6 +19,12 @@ import {
   spawnProjectile,
   type CombatProjectile,
 } from './projectiles';
+import { moveEnemy, type CombatEnemy } from './enemies';
+import {
+  planEnemyGroups,
+  spawnGroupDrones,
+  type PlannedEnemyGroup,
+} from './spawn-schedule';
 
 /**
  * Application-owned deterministic Combat simulation (Repository Architecture
@@ -83,6 +92,30 @@ export interface CombatSimulationState {
   readonly projectiles: readonly CombatProjectile[];
   /** Stable monotonic id source for projectile identity. */
   readonly nextProjectileId: number;
+  // S10 enemy groups and movement (Combat §7).
+  /** Fixed-step mission clock (authoritative integer; exact spawn scheduling). */
+  readonly missionStepCount: number;
+  /** Derived mission time in seconds (`missionStepCount × FIXED_STEP_SECONDS`). */
+  readonly missionTimeSeconds: number;
+  /** The already-derived mission stream seed (never re-derived, §8). */
+  readonly missionSeed: number;
+  /** Basic Drone rendered/hitbox square side: `4%` of viewport short side. */
+  readonly enemySize: number;
+  /** `12%` of viewport height per second (constant, Combat §7.2). */
+  readonly enemySpeedPxPerSecond: number;
+  readonly enemyType: EnemyType;
+  /** Enemy Hull Integrity initialization (AC-014; unchanged in S10). */
+  readonly enemyHullIntegrity: number;
+  /** Full mission spawn plan (`0 s` … `110 s`), planned once from the RNG. */
+  readonly spawnPlan: readonly PlannedEnemyGroup[];
+  /** Index of the next not-yet-spawned planned group. */
+  readonly spawnPlanIndex: number;
+  /** Authoritative active Basic Drones in stable deterministic order. */
+  readonly enemies: readonly CombatEnemy[];
+  /** Stable monotonic id source for enemy identity. */
+  readonly nextEnemyId: number;
+  /** True once the `110 s` final group has spawned (AC-016/028). */
+  readonly finalGroupSpawned: boolean;
 }
 
 export interface CombatSimulationInput {
@@ -96,6 +129,12 @@ export interface CombatSimulationInput {
   readonly weapon: WeaponDefinition;
   /** Shared player-projectile configuration (read-only content input, S09). */
   readonly projectile: PlayerProjectileConfig;
+  /** Already-derived mission RNG seed (Snapshot `combatMissionSeed`, S10). */
+  readonly missionSeed: number;
+  /** Basic Drone definition (read-only content input, S10). */
+  readonly enemy: EnemyDefinition;
+  /** Interception enemy-group schedule (read-only content input, S10). */
+  readonly schedule: EnemyGroupSchedule;
 }
 
 export interface SimulationFrameResult {
@@ -106,16 +145,19 @@ export interface SimulationFrameResult {
 export function createCombatSimulation(
   input: CombatSimulationInput,
 ): CombatSimulationState {
-  // Construction-boundary invariants (S08-WI01, S09): invalid or non-positive
-  // geometry, a missing/zero-rate weapon, or an invalid projectile config
-  // cannot proceed safely, so initialization fails explicitly rather than
-  // silently retaining NaN/Infinity in authoritative state.
+  // Construction-boundary invariants (S08-WI01, S09, S10): invalid geometry,
+  // weapon, projectile, mission seed, enemy definition, or schedule cannot
+  // proceed safely, so initialization fails explicitly rather than silently
+  // retaining NaN/Infinity or invalid spawn data in authoritative state.
   assertPositiveFinite(input.viewportWidth, 'viewportWidth');
   assertPositiveFinite(input.viewportHeight, 'viewportHeight');
   assertPositiveFinite(input.aircraftWidth, 'aircraftWidth');
   assertPositiveFinite(input.aircraftHeight, 'aircraftHeight');
   assertValidWeapon(input.weapon);
   assertValidProjectile(input.projectile);
+  assertValidMissionSeed(input.missionSeed);
+  assertValidEnemy(input.enemy);
+  assertValidSchedule(input.schedule);
   const shortSide = Math.min(input.viewportWidth, input.viewportHeight);
   const config = resolveMovementConfig(shortSide);
   const bounds = computeBounds(
@@ -139,6 +181,27 @@ export function createCombatSimulation(
     centerY - input.aircraftHeight / 2,
     geometry,
   );
+  // S10: exactly one mission-owned Mulberry32 sequence is created from the
+  // already-derived snapshot seed and consumed once to plan every group
+  // (0 s … 110 s). The 0 s regular group spawns as part of active Combat
+  // initialization (AC-015); later groups spawn when the fixed-step clock
+  // reaches their exact integer spawn index.
+  const enemySize = shortSide * 0.04;
+  const rng = new Mulberry32(input.missionSeed);
+  const spawnPlan = planEnemyGroups(input.schedule, rng, FIXED_STEP_SECONDS);
+  const initialGroup = spawnPlan[0];
+  const initialEnemies =
+    initialGroup === undefined
+      ? []
+      : spawnGroupDrones(
+          initialGroup,
+          0,
+          input.enemy.type,
+          input.enemy.maximumHullIntegrity,
+          input.viewportWidth,
+          input.viewportHeight,
+          enemySize,
+        );
   return {
     mode: input.initialMode,
     viewportWidth: input.viewportWidth,
@@ -165,6 +228,19 @@ export function createCombatSimulation(
     projectileHeight: geometry.height,
     projectiles: [firstProjectile],
     nextProjectileId: 1,
+    missionStepCount: 0,
+    missionTimeSeconds: 0,
+    missionSeed: input.missionSeed,
+    enemySize,
+    enemySpeedPxPerSecond:
+      input.viewportHeight * input.enemy.movementSpeedViewportHeightPerSecond,
+    enemyType: input.enemy.type,
+    enemyHullIntegrity: input.enemy.maximumHullIntegrity,
+    spawnPlan,
+    spawnPlanIndex: initialEnemies.length > 0 ? 1 : 0,
+    enemies: initialEnemies,
+    nextEnemyId: initialEnemies.length,
+    finalGroupSpawned: false,
   };
 }
 
@@ -198,6 +274,49 @@ function assertValidProjectile(config: PlayerProjectileConfig): void {
   ) {
     throw new Error(
       'Invalid combat simulation projectile: speed and lifetime must be finite and positive.',
+    );
+  }
+}
+
+function assertValidMissionSeed(seed: number): void {
+  if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) {
+    throw new Error(
+      `Invalid combat simulation mission seed: must be an unsigned 32-bit integer (received ${seed}).`,
+    );
+  }
+}
+
+function assertValidEnemy(enemy: EnemyDefinition): void {
+  if (
+    !Number.isFinite(enemy.maximumHullIntegrity) ||
+    enemy.maximumHullIntegrity < 0 ||
+    !Number.isFinite(enemy.movementSpeedViewportHeightPerSecond) ||
+    enemy.movementSpeedViewportHeightPerSecond <= 0
+  ) {
+    throw new Error(
+      'Invalid combat simulation enemy: maximumHullIntegrity must be finite and non-negative and movement speed finite and positive.',
+    );
+  }
+}
+
+function assertValidSchedule(schedule: EnemyGroupSchedule): void {
+  const { regular, final } = schedule;
+  const valid =
+    Number.isFinite(regular.startTimeSeconds) &&
+    regular.startTimeSeconds >= 0 &&
+    Number.isFinite(regular.intervalSeconds) &&
+    regular.intervalSeconds > 0 &&
+    Number.isInteger(regular.groupCount) &&
+    regular.groupCount >= 1 &&
+    Number.isInteger(regular.dronesPerGroup) &&
+    regular.dronesPerGroup >= 1 &&
+    Number.isFinite(final.timeSeconds) &&
+    final.timeSeconds > 0 &&
+    Number.isInteger(final.dronesPerGroup) &&
+    final.dronesPerGroup >= 1;
+  if (!valid) {
+    throw new Error(
+      'Invalid combat simulation enemy schedule: regular groups need a non-negative start, positive interval, and positive integer counts; the final group needs a positive time and drone count.',
     );
   }
 }
@@ -299,9 +418,107 @@ export function stepCombatSimulation(
     state.mode === 'keyboard'
       ? stepKeyboard(state, stepSeconds)
       : stepMouse(state, stepSeconds);
-  // Player firing advances exactly one fixed step per step in both modes;
-  // no wall-clock authority, delayed catch-up, or firing input (AC-019).
-  return stepProjectiles(moved, stepSeconds);
+  // S10: mission time advances only through executed fixed steps; due groups
+  // spawn at their exact mission-time instant, then pre-existing enemies move
+  // (newly spawned drones begin entering on their first positive movement
+  // update), and player firing advances one fixed step (S09).
+  return stepMission(moved, stepSeconds);
+}
+
+/**
+ * Advances mission time by one fixed step, spawns every group whose planned
+ * instant has been reached (S10, Combat §7.3), moves pre-existing enemies, and
+ * then runs the player firing/projectile step. The long-frame accumulator cap
+ * (≤ 4 steps/frame) means a stalled frame never produces catch-up spawn bursts.
+ */
+function stepMission(
+  state: CombatSimulationState,
+  stepSeconds: number,
+): CombatSimulationState {
+  // The fixed-step clock is the authoritative integer mission clock: exactly
+  // one step per executed fixed step, no float accumulation drift at spawn
+  // boundaries (10 s → step 600, 110 s → step 6600).
+  const missionStepCount = state.missionStepCount + 1;
+  const missionTimeSeconds = missionStepCount * FIXED_STEP_SECONDS;
+  const spawns = collectDueSpawns(state, missionStepCount);
+  const enemies = stepActiveEnemies(state, stepSeconds);
+  const next = {
+    ...state,
+    missionStepCount,
+    missionTimeSeconds,
+    spawnPlanIndex: spawns.spawnPlanIndex,
+    nextEnemyId: spawns.nextEnemyId,
+    finalGroupSpawned: spawns.finalGroupSpawned,
+    enemies: [...enemies, ...spawns.spawned],
+  };
+  return stepProjectiles(next, stepSeconds);
+}
+
+/**
+ * Collects every planned group whose exact step index has been reached. Group
+ * step indices are `600` apart, so production stepping spawns at most one
+ * group per step; the loop keeps direct large-step calls deterministic and
+ * complete. The long-frame accumulator cap (≤ 4 steps/frame) means a stalled
+ * frame never produces catch-up spawn bursts.
+ */
+function collectDueSpawns(
+  state: CombatSimulationState,
+  missionStepCount: number,
+): {
+  readonly spawned: readonly CombatEnemy[];
+  readonly spawnPlanIndex: number;
+  readonly nextEnemyId: number;
+  readonly finalGroupSpawned: boolean;
+} {
+  let spawnPlanIndex = state.spawnPlanIndex;
+  let nextEnemyId = state.nextEnemyId;
+  let finalGroupSpawned = state.finalGroupSpawned;
+  const spawned: CombatEnemy[] = [];
+  while (spawnPlanIndex < state.spawnPlan.length) {
+    const group = state.spawnPlan[spawnPlanIndex];
+    if (group === undefined || group.stepIndex > missionStepCount) {
+      break;
+    }
+    spawned.push(
+      ...spawnGroupDrones(
+        group,
+        nextEnemyId,
+        state.enemyType,
+        state.enemyHullIntegrity,
+        state.viewportWidth,
+        state.viewportHeight,
+        state.enemySize,
+      ),
+    );
+    nextEnemyId += group.drones.length;
+    if (group.final) {
+      finalGroupSpawned = true;
+    }
+    spawnPlanIndex += 1;
+  }
+  return { spawned, spawnPlanIndex, nextEnemyId, finalGroupSpawned };
+}
+
+/** Moves pre-existing active enemies and removes escaped drones (Combat §7.5). */
+function stepActiveEnemies(
+  state: CombatSimulationState,
+  stepSeconds: number,
+): CombatEnemy[] {
+  const kept: CombatEnemy[] = [];
+  for (const enemy of state.enemies) {
+    const next = moveEnemy(
+      enemy,
+      state.enemySpeedPxPerSecond,
+      stepSeconds,
+      state.viewportWidth,
+      state.viewportHeight,
+      state.enemySize,
+    );
+    if (next !== null) {
+      kept.push(next);
+    }
+  }
+  return kept;
 }
 
 /**
@@ -538,6 +755,17 @@ function resizeSimulation(
     centerX: projectile.centerX * ratioX,
     centerY: projectile.centerY * ratioY,
   }));
+  // S10 resize contract: active drone positions and side waypoints reproject
+  // proportionally; short-side size and viewport-height speed recalculate;
+  // planned fractions are viewport-independent so no future spawns are
+  // duplicated or re-rolled.
+  const enemies = state.enemies.map((enemy) => ({
+    ...enemy,
+    centerX: enemy.centerX * ratioX,
+    centerY: enemy.centerY * ratioY,
+    waypointX: enemy.waypointX === null ? null : enemy.waypointX * ratioX,
+    waypointY: enemy.waypointY === null ? null : enemy.waypointY * ratioY,
+  }));
   return {
     ...state,
     viewportWidth: command.width,
@@ -565,6 +793,51 @@ function resizeSimulation(
       state.projectileSpeedPxPerSecond *
       (command.height / state.viewportHeight),
     projectiles,
+    enemySize: shortSide * 0.04,
+    enemySpeedPxPerSecond:
+      state.enemySpeedPxPerSecond * (command.height / state.viewportHeight),
+    enemies,
+  };
+}
+
+/**
+ * Minimal S13 seam to force the final group (Combat §11.5 "Spawn Final Group",
+ * additive behaviour): keeps existing enemies, spawns the planned final group
+ * at the current mission time, cancels every remaining scheduled spawn, and
+ * marks the final group spawned exactly once. S10 does not implement the Debug
+ * command — S13 wires it.
+ */
+export function forceFinalGroupSpawn(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  if (state.finalGroupSpawned) {
+    return state;
+  }
+  const finalIndex = state.spawnPlan.findIndex((group) => group.final);
+  if (finalIndex === -1) {
+    return state;
+  }
+  const finalGroup = state.spawnPlan[finalIndex];
+  if (finalGroup === undefined) {
+    return state;
+  }
+  const spawned = spawnGroupDrones(
+    finalGroup,
+    state.nextEnemyId,
+    state.enemyType,
+    state.enemyHullIntegrity,
+    state.viewportWidth,
+    state.viewportHeight,
+    state.enemySize,
+  );
+  return {
+    ...state,
+    enemies: [...state.enemies, ...spawned],
+    nextEnemyId: state.nextEnemyId + spawned.length,
+    // AC-042: forcing the final group cancels all future regular/final spawns
+    // without mutating mission time or removing already active enemies.
+    spawnPlanIndex: state.spawnPlan.length,
+    finalGroupSpawned: true,
   };
 }
 

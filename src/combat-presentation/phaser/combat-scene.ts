@@ -58,6 +58,13 @@ export class CombatScene extends Phaser.Scene {
     number,
     Phaser.GameObjects.Rectangle
   >();
+  /** Read-only stable-ID visual map for active Basic Drones (S10): Phaser
+   *  reflects the authoritative snapshot each frame and never owns enemy
+   *  lifetime, spawning, movement, hitbox, or escape. */
+  private readonly enemyVisuals = new Map<
+    number,
+    Phaser.GameObjects.Rectangle
+  >();
 
   constructor(context: CombatSceneContext) {
     super({ key: 'combat' });
@@ -74,8 +81,10 @@ export class CombatScene extends Phaser.Scene {
     // Architecture §9 cleanup).
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.isShuttingDown = true;
-      // Projectile visuals are scene-owned and destroyed with it; the map is
-      // cleared so no stale id → destroyed-object references survive (S09).
+      // Enemy and projectile visuals are scene-owned and destroyed with it; the
+      // maps are cleared so no stale id → destroyed-object references survive
+      // (S09/S10 cleanup).
+      this.enemyVisuals.clear();
       this.projectileVisuals.clear();
       this.removeCombatListeners();
     });
@@ -94,6 +103,7 @@ export class CombatScene extends Phaser.Scene {
       this.simState.aircraft.centerX,
       this.simState.aircraft.centerY,
     );
+    this.syncEnemyVisuals();
     this.syncProjectileVisuals();
   }
 
@@ -239,6 +249,7 @@ export class CombatScene extends Phaser.Scene {
     });
     this.simState = this.context.getSimulationState();
     this.layoutAircraft();
+    this.syncEnemyVisuals();
     this.syncProjectileVisuals();
   }
 
@@ -278,6 +289,48 @@ export class CombatScene extends Phaser.Scene {
    * simulation are destroyed. Cadence, lifetime, damage, position, and removal
    * all remain application-owned.
    */
+  /**
+   * Reflects the authoritative enemy snapshot into the stable-ID visual map
+   * (S10): a solid `danger` square is created for each new Basic Drone id,
+   * existing visuals are repositioned/resized, and visuals whose id left the
+   * simulation (Escaped) are destroyed. Spawning, movement, hitbox, and escape
+   * all remain application-owned. The explicit `COMBAT_RENDER_DEPTH.enemy`
+   * layer keeps the canonical background → drone → projectile → aircraft order
+   * deterministic regardless of object-creation timing (Combat §4.5, AC-078).
+   */
+  private syncEnemyVisuals(): void {
+    if (this.isShuttingDown) {
+      return;
+    }
+    const { enemies, enemySize } = this.simState;
+    const seen = new Set<number>();
+    for (const enemy of enemies) {
+      seen.add(enemy.id);
+      let visual = this.enemyVisuals.get(enemy.id);
+      if (visual === undefined) {
+        visual = this.add
+          .rectangle(
+            enemy.centerX,
+            enemy.centerY,
+            enemySize,
+            enemySize,
+            hexToNumber(this.geometry.droneColor),
+          )
+          .setDepth(COMBAT_RENDER_DEPTH.enemy);
+        this.enemyVisuals.set(enemy.id, visual);
+      } else {
+        visual.setPosition(enemy.centerX, enemy.centerY);
+        visual.setSize(enemySize, enemySize);
+      }
+    }
+    for (const [id, visual] of this.enemyVisuals) {
+      if (!seen.has(id)) {
+        visual.destroy();
+        this.enemyVisuals.delete(id);
+      }
+    }
+  }
+
   private syncProjectileVisuals(): void {
     if (this.isShuttingDown) {
       return;

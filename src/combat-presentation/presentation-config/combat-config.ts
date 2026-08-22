@@ -5,8 +5,10 @@
  * gap, and the background uses the resolved approved canvas token. Tokens are
  * read from the Design System CSS custom properties and cached (Technical
  * Foundation §6.2). The aircraft fallback triangle is an approved light-grey
- * presentation value (Combat AC-056) and the projectile uses the approved
- * `text-primary` token as its solid fill (Combat §8.3, S09).
+ * presentation value (Combat AC-056), the projectile uses the approved
+ * `text-primary` token as its solid fill (Combat §8.3, S09) and the Basic
+ * Drone uses the approved `danger` token as its solid square (Combat §7.2,
+ * AC-054, S10).
  */
 export interface CombatGeometry {
   readonly viewportWidth: number;
@@ -19,6 +21,7 @@ export interface CombatGeometry {
   readonly hullBarGapRatio: number;
   readonly aircraftFallbackColor: string;
   readonly projectileColor: string;
+  readonly droneColor: string;
 }
 
 /**
@@ -52,6 +55,7 @@ export function resolveCombatGeometry(viewport: {
     hullBarGapRatio: 0.01,
     aircraftFallbackColor: '#cccccc',
     projectileColor: readColorToken('--color-text-primary', '#f1f5f7'),
+    droneColor: readColorToken('--color-danger', '#d96767'),
   };
 }
 
