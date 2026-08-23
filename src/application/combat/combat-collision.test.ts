@@ -575,3 +575,84 @@ describe('S11 content seam resolver', () => {
     expect(aircraft.maximumHullIntegrity).toBe(100);
   });
 });
+
+describe('S12 terminal resolution (Combat §9.4–9.5, AC-031)', () => {
+  function exhaustedScheduleState(overrides: {
+    playerHullIntegrity?: number;
+    enemies?: readonly CombatEnemy[];
+  }) {
+    const base = createState();
+    return {
+      ...base,
+      finalGroupSpawned: true,
+      spawnPlan: [],
+      spawnPlanIndex: 0,
+      playerHullIntegrity: overrides.playerHullIntegrity ?? 100,
+      enemies: overrides.enemies ?? [],
+    };
+  }
+
+  it('emits Defeat when player Hull reaches 0 and freezes every later step', () => {
+    const state = exhaustedScheduleState({
+      playerHullIntegrity: 25,
+      enemies: [enemyAt(5, 640, 480)],
+    });
+    const defeated = stepOnce(state);
+    expect(defeated.playerHullIntegrity).toBe(0);
+    expect(defeated.playerDefeated).toBe(true);
+    expect(defeated.terminalResult).toEqual({ kind: 'defeat' });
+    expect(stepOnce(defeated)).toBe(defeated);
+    expect(stepOnce(defeated)).toBe(defeated);
+  });
+
+  it('emits Success immediately when the final group spawned, no group remains, and no active enemy remains', () => {
+    // The single one-hit drone is destroyed by the projectile in this step.
+    const state = exhaustedScheduleState({
+      enemies: [enemyAt(5, 640, 451.5, 1)],
+    });
+    const after = stepOnce(state);
+    expect(after.enemies).toEqual([]);
+    expect(after.terminalResult).toEqual({ kind: 'success' });
+    expect(stepOnce(after)).toBe(after); // frozen
+  });
+
+  it('gives Defeat unconditional priority over Success in the same step', () => {
+    const state = exhaustedScheduleState({
+      playerHullIntegrity: 25,
+      enemies: [
+        enemyAt(5, 640, 451.5, 1), // destroyed by the projectile
+        enemyAt(6, 640, 480, 1), // contact destroys the player
+      ],
+    });
+    const after = stepOnce(state);
+    expect(after.enemies).toEqual([]);
+    expect(after.playerDefeated).toBe(true);
+    expect(after.terminalResult).toEqual({ kind: 'defeat' });
+  });
+
+  it('does not use 120 s as an end condition', () => {
+    // At 130 s with active enemies the mission continues without a result.
+    const state = {
+      ...exhaustedScheduleState({
+        enemies: [enemyAt(5, 640, 400, 3)],
+      }),
+      missionStepCount: 130 * 60,
+      missionTimeSeconds: 130,
+    };
+    expect(state.terminalResult).toBeNull();
+    const after = stepOnce(state);
+    expect(after.terminalResult).toBeNull();
+    expect(after.enemies).toHaveLength(1);
+  });
+
+  it('never re-evaluates or duplicates a committed terminal result', () => {
+    const state = exhaustedScheduleState({
+      enemies: [enemyAt(5, 640, 451.5, 1)],
+    });
+    const after = stepOnce(state);
+    expect(after.terminalResult).toEqual({ kind: 'success' });
+    for (let index = 0; index < 60; index += 1) {
+      expect(stepOnce(after)).toBe(after);
+    }
+  });
+});

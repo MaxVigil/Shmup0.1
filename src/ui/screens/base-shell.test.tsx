@@ -28,6 +28,35 @@ function renderShell(store: SessionStore): void {
   );
 }
 
+function storeWithPendingResult(): SessionStore {
+  const store = createInitializedSessionStore();
+  const session = store.getState();
+  if (session === null) {
+    throw new Error('Expected an initialized session.');
+  }
+  store.dispatch({
+    type: 'mission/start',
+    snapshot: {
+      missionInstanceOrdinal: 0,
+      combatMissionSeed: 0,
+      aircraftId: session.aircraftId,
+      hullIntegrity: session.hullIntegrity,
+      equippedWeapon: session.equippedWeapon,
+      pilot: session.pilot,
+      mouseMovementEnabled: session.mouseMovementEnabled,
+    },
+  });
+  store.dispatch({
+    type: 'mission/result',
+    result: {
+      kind: 'success',
+      missionInstanceOrdinal: 0,
+      combatHullIntegrity: 80,
+    },
+  });
+  return store;
+}
+
 describe('BaseShell', () => {
   it('renders the persistent Navigation, current Screen, and Settings control (Base AC-002, AC-006)', () => {
     const store = createInitializedSessionStore();
@@ -126,5 +155,49 @@ describe('BaseShell', () => {
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(
       false,
     );
+  });
+
+  it('while a Mission Result is pending: Settings is disabled and programmatically guarded, Navigation is blocked, Continue is the only way out (S12-WI01)', () => {
+    const store = storeWithPendingResult();
+    renderShell(store);
+    // Exactly one blocking Overlay: the Mission Result (Continue), never Settings.
+    expect(
+      screen.getByRole('heading', { name: 'Mission Complete' }),
+    ).toBeDefined();
+
+    // Settings Button is disabled for user activation…
+    const settingsButton = screen.getByRole('button', { name: 'Settings' });
+    expect((settingsButton as HTMLButtonElement).disabled).toBe(true);
+    // …and command-guarded, so programmatic activation cannot create a second
+    // blocking Overlay while a Result is pending.
+    act(() => {
+      fireEvent.click(settingsButton);
+    });
+    expect(screen.queryByRole('heading', { name: 'Settings' })).toBeNull();
+    expect(
+      screen.getByRole('heading', { name: 'Mission Complete' }),
+    ).toBeDefined();
+
+    // Base Navigation stays blocked: the pending Result cannot be bypassed.
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Hangar' }));
+    });
+    expect(store.getState()?.currentScreen).toBe('operations');
+    expect(
+      screen.getByRole('heading', { name: 'Mission Complete' }),
+    ).toBeDefined();
+
+    // Continue remains the only continuation point and clears the boundary.
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    });
+    expect(
+      screen.queryByRole('heading', { name: 'Mission Complete' }),
+    ).toBeNull();
+    // Settings becomes available again after the Result is consumed.
+    expect(
+      (screen.getByRole('button', { name: 'Settings' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 });

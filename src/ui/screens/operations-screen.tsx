@@ -31,6 +31,14 @@ export function OperationsScreen(): ReactElement {
   }, [session.missionStartFailed, store]);
 
   const handleOpenMissionDetails = (): void => {
+    // S12-WI01: while a Mission Result is pending the Mission Point is inert —
+    // real activation is scrim-blocked and programmatic activation cannot open
+    // the Mission Details / Start Mission flow beneath the only continuation
+    // point. Start Mission itself is additionally rejected at the application
+    // boundary and by the reducer while a result is pending.
+    if (session.missionResult !== null) {
+      return;
+    }
     setMissionStartError(false);
     setMissionDetailsOpen(true);
   };

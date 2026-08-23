@@ -1,12 +1,13 @@
 import type { WeaponType } from '@domain/index';
-import type { MissionSnapshot } from '../mission/snapshot';
+import type { MissionResult, MissionSnapshot } from '../mission';
 import type { BaseScreenId, SessionState } from './session-state';
 
 /**
  * Named session actions. Mutations occur only through the store dispatch and
  * are reduced by `sessionReducer`. S04 added Base navigation and Settings;
  * S06 added Repair and weapon equip; S07 adds the one-accepted mission start
- * and the Combat-initialization-failure return signal.
+ * and the Combat-initialization-failure return signal; S12 adds the single
+ * typed, idempotent mission-result commitment path and its consumption.
  */
 export type SessionAction =
   | { readonly type: 'session/initialized'; readonly session: SessionState }
@@ -19,7 +20,12 @@ export type SessionAction =
   | { readonly type: 'session/equip-weapon'; readonly weapon: WeaponType }
   | { readonly type: 'mission/start'; readonly snapshot: MissionSnapshot }
   | { readonly type: 'mission/start-failed' }
-  | { readonly type: 'mission/start-failure-consumed' };
+  | { readonly type: 'mission/start-failure-consumed' }
+  | { readonly type: 'mission/result'; readonly result: MissionResult }
+  | {
+      readonly type: 'mission/result-consumed';
+      readonly missionInstanceOrdinal: number;
+    };
 
 export interface SessionStore {
   /** Returns the session, or `null` before the session is initialized. */
@@ -75,7 +81,14 @@ export function sessionReducer(
       // One accepted start (Base §9.4, S07): the snapshot is recorded exactly
       // once; while an active mission exists a second command is ignored
       // (AC-035), and the instance ordinal increments once per acceptance.
-      if (state === null || state.activeMission !== 'none') {
+      // S12-WI01: while a committed Mission Result is pending the raw action is
+      // a strict no-op too, so no start command can bypass the blocking UI or
+      // the application boundary and mutate the result flow.
+      if (
+        state === null ||
+        state.activeMission !== 'none' ||
+        state.missionResult !== null
+      ) {
         return state;
       }
       return {
@@ -99,6 +112,69 @@ export function sessionReducer(
         return state;
       }
       return { ...state, missionStartFailed: false };
+    case 'mission/result':
+      // S12 single typed, idempotent commitment path bound to the originating
+      // Mission Instance (Base §9.5, AC-032/033/034). Ignored when no active
+      // mission remains OR when the command's missionInstanceOrdinal does not
+      // exactly match the active Mission Snapshot, so a delayed or duplicated
+      // terminal/Aborted command from an older mission can never resolve,
+      // reward, recover, or abort another Mission Instance. Success retains the
+      // Combat Hull and grants exactly +1 Credit; Defeat grants no Credit and
+      // applies the free emergency recovery to exactly 25; Aborted retains the
+      // Combat Hull with no reward or recovery. Neither path performs full
+      // Repair.
+      if (
+        state === null ||
+        state.activeMission === 'none' ||
+        state.activeMission.missionInstanceOrdinal !==
+          action.result.missionInstanceOrdinal
+      ) {
+        return state;
+      }
+      if (action.result.kind === 'defeat') {
+        return {
+          ...state,
+          activeMission: 'none',
+          hullIntegrity: 25,
+          missionResult: {
+            kind: 'defeat',
+            missionInstanceOrdinal: action.result.missionInstanceOrdinal,
+          },
+        };
+      }
+      if (action.result.kind === 'success') {
+        return {
+          ...state,
+          activeMission: 'none',
+          credits: state.credits + 1,
+          hullIntegrity: action.result.combatHullIntegrity,
+          missionResult: {
+            kind: 'success',
+            missionInstanceOrdinal: action.result.missionInstanceOrdinal,
+          },
+        };
+      }
+      // Aborted: no Overlay is presented; Operations opens directly.
+      return {
+        ...state,
+        activeMission: 'none',
+        hullIntegrity: action.result.combatHullIntegrity,
+        missionResult: null,
+      };
+    case 'mission/result-consumed':
+      // Continue performed navigation/cleanup only for the presented result.
+      // The command must exactly match the presented result's originating
+      // Mission Instance; a stale Continue from an older mission is a no-op and
+      // can never clear a newer mission's result.
+      if (
+        state === null ||
+        state.missionResult === null ||
+        state.missionResult.missionInstanceOrdinal !==
+          action.missionInstanceOrdinal
+      ) {
+        return state;
+      }
+      return { ...state, missionResult: null };
     default:
       return assertNever(action);
   }

@@ -25,6 +25,7 @@ import {
   spawnGroupDrones,
   type PlannedEnemyGroup,
 } from './spawn-schedule';
+import type { CombatTerminalResult } from '../mission';
 import {
   resolveAircraftContacts,
   resolveProjectileCollisions,
@@ -140,6 +141,9 @@ export interface CombatSimulationState {
   readonly destroyedEnemyFlashes: readonly DestroyedEnemyFlash[];
   /** Player aircraft 100 ms danger flash after valid contact damage. */
   readonly aircraftDangerFlashStepsRemaining: number;
+  /** Authoritative terminal trigger emitted by the simulation (S12): `null`
+   *  until Defeat or Success is resolved, then the simulation freezes. */
+  readonly terminalResult: CombatTerminalResult | null;
 }
 
 export interface CombatSimulationInput {
@@ -282,6 +286,7 @@ export function createCombatSimulation(
     activeEnemyFlashStepsRemaining: {},
     destroyedEnemyFlashes: [],
     aircraftDangerFlashStepsRemaining: 0,
+    terminalResult: null,
   };
 }
 
@@ -475,10 +480,10 @@ export function stepCombatSimulation(
   if (!Number.isFinite(stepSeconds) || stepSeconds <= 0) {
     return state;
   }
-  // S11 defeat freeze: once the idempotent defeat-trigger state is set, no
-  // further gameplay processing runs for any later simulation step (S12 owns
-  // result resolution).
-  if (state.playerDefeated) {
+  // S12 terminal freeze: once Success or Defeat is resolved the simulation
+  // stops immediately (the runtime is disposed by the application without
+  // waiting for damage feedback); Defeat is the S11 player-defeat state.
+  if (state.terminalResult !== null) {
     return state;
   }
   // S11: feedback and the contact cooldown decrement once at the beginning of
@@ -496,7 +501,36 @@ export function stepCombatSimulation(
   const withMission = stepMission(moved, stepSeconds);
   // S11: one explicit post-integration collision phase — projectile-to-enemy
   // first, then aircraft-to-surviving-enemy contacts (player-readable tie-break).
-  return resolveCollisions(withMission);
+  const withCollisions = resolveCollisions(withMission);
+  // S12: evaluate the terminal state after the collision/defeat phase and the
+  // enemy escape/removal work of the same step.
+  return evaluateTerminalResult(withCollisions);
+}
+
+/**
+ * S12 terminal evaluation (Combat §9.4–9.5, AC-031): Defeat has unconditional
+ * priority when player Hull is 0, including a step that also resolves the final
+ * enemy. Otherwise Success occurs immediately when the final group has spawned,
+ * no future group remains scheduled, and no active enemy remains (every spawned
+ * enemy is Destroyed or Escaped). No fixed 120 s end condition is used.
+ */
+function evaluateTerminalResult(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  if (state.terminalResult !== null) {
+    return state;
+  }
+  if (state.playerDefeated) {
+    return { ...state, terminalResult: { kind: 'defeat' } };
+  }
+  if (
+    state.finalGroupSpawned &&
+    state.spawnPlanIndex >= state.spawnPlan.length &&
+    state.enemies.length === 0
+  ) {
+    return { ...state, terminalResult: { kind: 'success' } };
+  }
+  return state;
 }
 
 /** Decrements every existing feedback counter and the contact cooldown once. */

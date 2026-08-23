@@ -388,6 +388,19 @@
   width: clamp(24rem, 36vw, 32rem);
 }
 
+/* --- Mission Result Overlay (Base §9.5, S12) --- */
+.ds-mission-result-overlay {
+  width: clamp(20rem, 30vw, 26rem);
+}
+
+.ds-mission-result-overlay .ds-overlay__actions {
+  width: 100%;
+}
+
+.ds-mission-result-overlay .ds-overlay__actions .ds-button {
+  width: 100%;
+}
+
 /* --- Hangar Screen (Base §6) --- */
 .ds-hangar-screen {
   position: relative;

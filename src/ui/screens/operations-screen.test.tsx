@@ -6,6 +6,7 @@ import {
   screen,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
 import { CONTENT_CATALOGUE } from '@test-support/content';
@@ -27,7 +28,13 @@ const BACKGROUND_READY: AssetPreloadResult = [
 ];
 
 function renderScreen(assets: AssetPreloadResult): void {
-  const store = createInitializedSessionStore();
+  renderScreenWithStore(assets, createInitializedSessionStore());
+}
+
+function renderScreenWithStore(
+  assets: AssetPreloadResult,
+  store: SessionStore,
+): void {
   render(
     <ApplicationContext.Provider
       value={{ store, preparedAssets: assets, content: CONTENT_CATALOGUE }}
@@ -35,6 +42,35 @@ function renderScreen(assets: AssetPreloadResult): void {
       <OperationsScreen />
     </ApplicationContext.Provider>,
   );
+}
+
+function storeWithPendingResult(): SessionStore {
+  const store = createInitializedSessionStore();
+  const session = store.getState();
+  if (session === null) {
+    throw new Error('Expected an initialized session.');
+  }
+  store.dispatch({
+    type: 'mission/start',
+    snapshot: {
+      missionInstanceOrdinal: 0,
+      combatMissionSeed: 0,
+      aircraftId: session.aircraftId,
+      hullIntegrity: session.hullIntegrity,
+      equippedWeapon: session.equippedWeapon,
+      pilot: session.pilot,
+      mouseMovementEnabled: session.mouseMovementEnabled,
+    },
+  });
+  store.dispatch({
+    type: 'mission/result',
+    result: {
+      kind: 'success',
+      missionInstanceOrdinal: 0,
+      combatHullIntegrity: 80,
+    },
+  });
+  return store;
 }
 
 function backgroundElement(): HTMLElement {
@@ -69,5 +105,25 @@ describe('OperationsScreen', () => {
     });
     expect(screen.getByRole('dialog')).toBeDefined();
     expect(screen.getByRole('main', { name: 'Operations' })).toBeDefined();
+  });
+
+  it('while a Mission Result is pending the Mission Point cannot open the Start Mission flow (S12-WI01)', () => {
+    const store = storeWithPendingResult();
+    renderScreenWithStore([], store);
+    expect(store.getState()!.missionResult).toMatchObject({
+      kind: 'success',
+      missionInstanceOrdinal: 0,
+    });
+    // A programmatic Mission Point activation must not open Mission Details /
+    // the Start Mission flow beneath the only continuation point.
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Interception' }));
+    });
+    expect(screen.queryByRole('button', { name: 'Start Mission' })).toBeNull();
+    // The pending result is untouched.
+    expect(store.getState()!.missionResult).toMatchObject({
+      kind: 'success',
+      missionInstanceOrdinal: 0,
+    });
   });
 });

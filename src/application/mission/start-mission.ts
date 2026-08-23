@@ -7,7 +7,10 @@ export type MissionStartResult =
   | {
       readonly kind: 'rejected';
       readonly reason:
-        'no-session' | 'mission-not-available' | 'active-mission-exists';
+        | 'no-session'
+        | 'mission-not-available'
+        | 'active-mission-exists'
+        | 'mission-result-pending';
     };
 
 /**
@@ -32,6 +35,12 @@ export function startMission(store: SessionStore): MissionStartResult {
   }
   if (session.activeMission !== 'none') {
     return { kind: 'rejected', reason: 'active-mission-exists' };
+  }
+  // S12-WI01: while a committed Mission Result is pending (the Result Overlay
+  // is the only continuation point), a new Start Mission command is rejected at
+  // the application boundary as well as through the blocking UI.
+  if (session.missionResult !== null) {
+    return { kind: 'rejected', reason: 'mission-result-pending' };
   }
   const missionInstanceOrdinal = session.missionInstanceCount;
   const snapshot: MissionSnapshot = {

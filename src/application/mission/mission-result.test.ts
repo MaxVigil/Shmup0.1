@@ -1,0 +1,332 @@
+import { describe, expect, it } from 'vitest';
+import { CONTENT_CATALOGUE } from '@content/index';
+import { initializeSession } from '../session/initialize-session';
+import { createSessionStore } from '../session/store';
+import type { SessionStore } from '../session/store';
+import type { MissionSnapshot } from './snapshot';
+import { abortMission, buildMissionResult } from './mission-result';
+import { startMission } from './start-mission';
+
+function snapshotFor(store: SessionStore): MissionSnapshot {
+  const session = store.getState();
+  if (session === null) {
+    throw new Error('Expected an initialized session.');
+  }
+  return {
+    missionInstanceOrdinal: session.missionInstanceCount,
+    combatMissionSeed: 1234,
+    aircraftId: session.aircraftId,
+    hullIntegrity: session.hullIntegrity,
+    equippedWeapon: session.equippedWeapon,
+    pilot: session.pilot,
+    mouseMovementEnabled: session.mouseMovementEnabled,
+  };
+}
+
+function initializedStore(): SessionStore {
+  const store = createSessionStore();
+  store.dispatch({
+    type: 'session/initialized',
+    session: initializeSession(3735928559, CONTENT_CATALOGUE),
+  });
+  return store;
+}
+
+function startMissionIn(store: SessionStore): void {
+  store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+}
+
+describe('buildMissionResult (S12 mapper)', () => {
+  it('maps Defeat without a hull and Success with the retained Combat Hull, both bound to the Mission Instance', () => {
+    expect(buildMissionResult({ kind: 'defeat' }, 40, 0)).toEqual({
+      kind: 'defeat',
+      missionInstanceOrdinal: 0,
+    });
+    expect(buildMissionResult({ kind: 'success' }, 80, 3)).toEqual({
+      kind: 'success',
+      missionInstanceOrdinal: 3,
+      combatHullIntegrity: 80,
+    });
+  });
+});
+
+describe('mission/result commitment (Base §9.5, AC-032/033/034)', () => {
+  it('commits Success exactly once: +1 Credit, retained Hull, result recorded', () => {
+    const store = initializedStore();
+    startMissionIn(store);
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 80,
+      },
+    });
+    const session = store.getState()!;
+    expect(session.credits).toBe(2);
+    expect(session.hullIntegrity).toBe(80);
+    expect(session.activeMission).toBe('none');
+    expect(session.missionResult).toMatchObject({
+      kind: 'success',
+      missionInstanceOrdinal: 0,
+    });
+    expect(session.equippedWeapon).toBe('machine-gun');
+    expect(session.pilot).not.toBeNull();
+    // Duplicate terminal signals never reapply the reward.
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 80,
+      },
+    });
+    expect(store.getState()!.credits).toBe(2);
+  });
+
+  it('commits Defeat exactly once: no Credit, Hull exactly 25, no full Repair', () => {
+    const store = initializedStore();
+    startMissionIn(store);
+    store.dispatch({
+      type: 'mission/result',
+      result: { kind: 'defeat', missionInstanceOrdinal: 0 },
+    });
+    const session = store.getState()!;
+    expect(session.credits).toBe(1);
+    expect(session.hullIntegrity).toBe(25);
+    expect(session.activeMission).toBe('none');
+    expect(session.missionResult).toMatchObject({
+      kind: 'defeat',
+      missionInstanceOrdinal: 0,
+    });
+    store.dispatch({
+      type: 'mission/result',
+      result: { kind: 'defeat', missionInstanceOrdinal: 0 },
+    });
+    expect(store.getState()!.hullIntegrity).toBe(25);
+  });
+
+  it('ignores mission/result when no active mission remains (duplicate resistance)', () => {
+    const store = initializedStore();
+    const before = store.getState()!;
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 80,
+      },
+    });
+    expect(store.getState()).toBe(before);
+  });
+
+  it('commits Aborted through the same path: no reward/recovery, retained Hull, no Overlay', () => {
+    const store = initializedStore();
+    startMissionIn(store);
+    abortMission(store, 60, 0);
+    const session = store.getState()!;
+    expect(session.credits).toBe(1);
+    expect(session.hullIntegrity).toBe(60);
+    expect(session.activeMission).toBe('none');
+    expect(session.missionResult).toBeNull();
+    // Repeated Aborted signals are no-ops.
+    abortMission(store, 60, 0);
+    expect(store.getState()!.hullIntegrity).toBe(60);
+  });
+
+  it('result-consumed clears the presented result and is idempotent', () => {
+    const store = initializedStore();
+    startMissionIn(store);
+    store.dispatch({
+      type: 'mission/result',
+      result: { kind: 'defeat', missionInstanceOrdinal: 0 },
+    });
+    expect(store.getState()!.missionResult).toMatchObject({
+      kind: 'defeat',
+      missionInstanceOrdinal: 0,
+    });
+    store.dispatch({
+      type: 'mission/result-consumed',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()!.missionResult).toBeNull();
+    const after = store.getState()!;
+    store.dispatch({
+      type: 'mission/result-consumed',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()).toBe(after);
+  });
+
+  it('supports a repeat loop: a new mission starts with the retained shared state', () => {
+    const store = initializedStore();
+    // Mission 1 → Success with Combat Hull 75.
+    startMissionIn(store);
+    expect(store.getState()!.missionInstanceCount).toBe(1);
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 75,
+      },
+    });
+    expect(store.getState()!.credits).toBe(2);
+    store.dispatch({
+      type: 'mission/result-consumed',
+      missionInstanceOrdinal: 0,
+    });
+
+    // Mission 2 starts from the retained state: ordinal advances once, no
+    // resurrection of the prior mission.
+    startMissionIn(store);
+    const session = store.getState()!;
+    expect(session.activeMission).not.toBe('none');
+    expect(session.missionInstanceCount).toBe(2);
+    const active = session.activeMission;
+    if (active === 'none') {
+      throw new Error('Expected an active mission.');
+    }
+    expect(active.missionInstanceOrdinal).toBe(1);
+    expect(active.hullIntegrity).toBe(75);
+  });
+});
+
+describe('S12-WI01 Mission Instance identity binding', () => {
+  it('a delayed terminal from mission 0 cannot resolve mission 1', () => {
+    const store = initializedStore();
+    startMissionIn(store); // mission 0, count 1
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 75,
+      },
+    });
+    store.dispatch({
+      type: 'mission/result-consumed',
+      missionInstanceOrdinal: 0,
+    });
+    startMissionIn(store); // mission 1, count 2
+
+    const before = store.getState()!;
+    // Duplicated / delayed terminal from mission 0 arrives during mission 1.
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 99,
+      },
+    });
+    const after = store.getState()!;
+    expect(after).toBe(before); // strict no-op: no reward, no result, mission 1 intact
+    expect(after.credits).toBe(2);
+    expect(after.missionResult).toBeNull();
+    if (after.activeMission === 'none') {
+      throw new Error('Mission 1 must still be active.');
+    }
+    expect(after.activeMission.missionInstanceOrdinal).toBe(1);
+    expect(after.activeMission.hullIntegrity).toBe(75);
+  });
+
+  it('a stale Aborted command cannot abort mission 1', () => {
+    const store = initializedStore();
+    startMissionIn(store); // mission 0
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 75,
+      },
+    });
+    store.dispatch({
+      type: 'mission/result-consumed',
+      missionInstanceOrdinal: 0,
+    });
+    startMissionIn(store); // mission 1
+
+    const before = store.getState()!;
+    // A stale Return-to-Base callback still bound to mission 0.
+    abortMission(store, 55, 0);
+    const after = store.getState()!;
+    expect(after).toBe(before); // strict no-op: mission 1 not aborted
+    if (after.activeMission === 'none') {
+      throw new Error('Mission 1 must still be active.');
+    }
+    expect(after.activeMission.missionInstanceOrdinal).toBe(1);
+    expect(after.hullIntegrity).toBe(75); // mission 1 snapshot Hull untouched
+  });
+
+  it('a stale Continue cannot clear mission 1 result presented later', () => {
+    const store = initializedStore();
+    startMissionIn(store); // mission 0
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 75,
+      },
+    });
+    store.dispatch({
+      type: 'mission/result-consumed',
+      missionInstanceOrdinal: 0,
+    });
+    startMissionIn(store); // mission 1
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 1,
+        combatHullIntegrity: 60,
+      },
+    });
+
+    // Mission 1's result is now presented (ordinal 1). A delayed Continue
+    // command from mission 0 must remain a strict no-op.
+    store.dispatch({
+      type: 'mission/result-consumed',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()!.missionResult).toMatchObject({
+      kind: 'success',
+      missionInstanceOrdinal: 1,
+    });
+    expect(store.getState()!.credits).toBe(3);
+
+    // The matching Continue clears the presented result.
+    store.dispatch({
+      type: 'mission/result-consumed',
+      missionInstanceOrdinal: 1,
+    });
+    expect(store.getState()!.missionResult).toBeNull();
+  });
+
+  it('Start Mission is rejected at the application boundary and raw action while a result is pending', () => {
+    const store = initializedStore();
+    startMissionIn(store); // mission 0
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 75,
+      },
+    });
+    // Result pending: application boundary rejects.
+    expect(startMission(store)).toEqual({
+      kind: 'rejected',
+      reason: 'mission-result-pending',
+    });
+    // Raw action is a strict no-op too: no active mission and no ordinal advance.
+    const before = store.getState()!;
+    store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+    const after = store.getState()!;
+    expect(after).toBe(before);
+    expect(after.activeMission).toBe('none');
+    expect(after.missionInstanceCount).toBe(1);
+  });
+});

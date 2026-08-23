@@ -3,7 +3,9 @@ import {
   createCombatSimulationRuntime,
   synchronizeSharedModeAfterToggle,
   type CombatInputCommand,
+  type CombatSimulationState,
 } from '@application/combat';
+import { buildMissionResult } from '@application/mission';
 import { createCombatHudBridge } from './hud-bridge/combat-hud-bridge';
 import { createCombatGame } from './phaser/combat-game';
 import { CombatScene } from './phaser/combat-scene';
@@ -17,7 +19,10 @@ import { resolveCombatGeometry } from './presentation-config/combat-config';
  * the approved shell from the immutable Mission Snapshot + prepared assets,
  * and forwards Phaser input as semantic commands. `F` toggles the active mode
  * and synchronises the single shared-session `Mouse Movement Enabled` value
- * exactly once per accepted toggle (AC-064).
+ * exactly once per accepted toggle (AC-064). S12: the first time the
+ * simulation emits its authoritative terminal trigger, the entry relays the
+ * pre-built typed Mission Result to the application-owned idempotent
+ * commitment path exactly once — it never calculates, mutates, or rewards.
  */
 export function createCombatSession(input: CombatSessionInput): CombatSession {
   const container = input.container;
@@ -56,12 +61,32 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     }
   };
 
+  // S12: relay the authoritative terminal trigger exactly once. Phaser/React
+  // never calculate a result or apply effects — the application reducer owns
+  // the typed commitment.
+  let terminalDispatched = false;
+  const advanceFrame = (frameDeltaSeconds: number): CombatSimulationState => {
+    const state = runtime.advance(frameDeltaSeconds);
+    if (!terminalDispatched && state.terminalResult !== null) {
+      terminalDispatched = true;
+      input.dispatch({
+        type: 'mission/result',
+        result: buildMissionResult(
+          state.terminalResult,
+          state.playerHullIntegrity,
+          input.snapshot.missionInstanceOrdinal,
+        ),
+      });
+    }
+    return state;
+  };
+
   const game = createCombatGame(container, {
     geometry,
     bridge,
     aircraftUrl: aircraftAsset?.status === 'ready' ? aircraftAsset.url : null,
     submitCommand,
-    advanceFrame: (frameDeltaSeconds) => runtime.advance(frameDeltaSeconds),
+    advanceFrame,
     getSimulationState: () => runtime.getState(),
   });
 

@@ -10,6 +10,16 @@ import type { MissionSnapshot } from '../mission/snapshot';
 export type BaseScreenId = 'operations' | 'hangar';
 
 /**
+ * The presented Mission Result read model (S12): only Success/Defeat are
+ * presented by the Result Overlay; Aborted opens Operations directly. The
+ * `missionInstanceOrdinal` binds consumption to the originating mission.
+ */
+export interface PresentedMissionResult {
+  readonly kind: 'success' | 'defeat';
+  readonly missionInstanceOrdinal: number;
+}
+
+/**
  * The single authoritative Shared Session State (Base §9.1, §9.3). Application
  * and presentation read this; mutations occur only through named actions in
  * `src/application/session/store.ts`.
@@ -29,5 +39,8 @@ export interface SessionState {
   readonly missionInstanceCount: number;
   /** Set when a Combat initialization failure returns to Base (Base AC-014). */
   readonly missionStartFailed: boolean;
+  /** Committed terminal mission outcome presented by the Result Overlay
+   *  (Success/Defeat); `null` when no result is pending (S12). */
+  readonly missionResult: PresentedMissionResult | null;
   readonly pilot: PilotRecord;
 }

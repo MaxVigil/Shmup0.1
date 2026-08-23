@@ -45,6 +45,7 @@ export function initializeSession(
     sessionSeed,
     missionInstanceCount: 0,
     missionStartFailed: false,
+    missionResult: null,
     pilot,
   };
 }
