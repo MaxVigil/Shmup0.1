@@ -1,6 +1,7 @@
 import type { PilotRecord } from '@content/index';
 import type { AircraftId } from '@domain/index';
 import type { WeaponType } from '@domain/index';
+import type { CombatLifecycleState } from '../combat/lifecycle';
 import type { MissionSnapshot } from '../mission/snapshot';
 
 /**
@@ -42,5 +43,10 @@ export interface SessionState {
   /** Committed terminal mission outcome presented by the Result Overlay
    *  (Success/Defeat); `null` when no result is pending (S12). */
   readonly missionResult: PresentedMissionResult | null;
+  /** S13 application-owned Combat lifecycle (running/paused, active blocking
+   *  Combat Overlay, Debug restoration origin, browser-safety latch). It is
+   *  meaningful only while an Active Mission exists; mission start enters the
+   *  running state and mission resolution resets it to idle. */
+  readonly combatLifecycle: CombatLifecycleState;
   readonly pilot: PilotRecord;
 }

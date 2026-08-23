@@ -1,4 +1,10 @@
 import type { WeaponType } from '@domain/index';
+import {
+  IDLE_COMBAT_LIFECYCLE,
+  RUNNING_COMBAT_LIFECYCLE,
+  combatLifecycleReducer,
+} from '../combat/lifecycle';
+import type { CombatLifecycleAction } from '../combat/lifecycle';
 import type { MissionResult, MissionSnapshot } from '../mission';
 import type { BaseScreenId, SessionState } from './session-state';
 
@@ -7,7 +13,9 @@ import type { BaseScreenId, SessionState } from './session-state';
  * are reduced by `sessionReducer`. S04 added Base navigation and Settings;
  * S06 added Repair and weapon equip; S07 adds the one-accepted mission start
  * and the Combat-initialization-failure return signal; S12 adds the single
- * typed, idempotent mission-result commitment path and its consumption.
+ * typed, idempotent mission-result commitment path and its consumption; S13
+ * adds the application-owned Combat lifecycle command matrix (Pause/Settings/
+ * Debug/browser-safety transitions).
  */
 export type SessionAction =
   | { readonly type: 'session/initialized'; readonly session: SessionState }
@@ -25,7 +33,8 @@ export type SessionAction =
   | {
       readonly type: 'mission/result-consumed';
       readonly missionInstanceOrdinal: number;
-    };
+    }
+  | CombatLifecycleAction;
 
 export interface SessionStore {
   /** Returns the session, or `null` before the session is initialized. */
@@ -96,6 +105,9 @@ export function sessionReducer(
         activeMission: action.snapshot,
         missionInstanceCount: state.missionInstanceCount + 1,
         missionStartFailed: false,
+        // S13: one accepted mission start enters Combat running with no
+        // Overlay and no browser-safety latch.
+        combatLifecycle: RUNNING_COMBAT_LIFECYCLE,
       };
     case 'mission/start-failed':
       // Combat initialization failure (Base AC-014): no active mission
@@ -104,7 +116,12 @@ export function sessionReducer(
       if (state === null || state.activeMission === 'none') {
         return state;
       }
-      return { ...state, activeMission: 'none', missionStartFailed: true };
+      return {
+        ...state,
+        activeMission: 'none',
+        missionStartFailed: true,
+        combatLifecycle: IDLE_COMBAT_LIFECYCLE,
+      };
     case 'mission/start-failure-consumed':
       // The Base UI has reopened the Mission Details Overlay with the failure
       // message; clear the transient signal.
@@ -140,6 +157,9 @@ export function sessionReducer(
             kind: 'defeat',
             missionInstanceOrdinal: action.result.missionInstanceOrdinal,
           },
+          // S13: any open Combat Overlay/lifecycle closes with the mission;
+          // the Mission Result Overlay becomes the only continuation point.
+          combatLifecycle: IDLE_COMBAT_LIFECYCLE,
         };
       }
       if (action.result.kind === 'success') {
@@ -152,6 +172,7 @@ export function sessionReducer(
             kind: 'success',
             missionInstanceOrdinal: action.result.missionInstanceOrdinal,
           },
+          combatLifecycle: IDLE_COMBAT_LIFECYCLE,
         };
       }
       // Aborted: no Overlay is presented; Operations opens directly.
@@ -160,6 +181,7 @@ export function sessionReducer(
         activeMission: 'none',
         hullIntegrity: action.result.combatHullIntegrity,
         missionResult: null,
+        combatLifecycle: IDLE_COMBAT_LIFECYCLE,
       };
     case 'mission/result-consumed':
       // Continue performed navigation/cleanup only for the presented result.
@@ -175,6 +197,41 @@ export function sessionReducer(
         return state;
       }
       return { ...state, missionResult: null };
+    case 'combat-lifecycle/open-pause':
+    case 'combat-lifecycle/resume':
+    case 'combat-lifecycle/open-settings':
+    case 'combat-lifecycle/close-settings':
+    case 'combat-lifecycle/open-debug':
+    case 'combat-lifecycle/close-debug':
+    case 'combat-lifecycle/browser-safety-event': {
+      // S13 lifecycle commands are meaningful only during an Active Mission
+      // and are inert before one starts, after it resolves, and while a
+      // committed Mission Result is pending (Mission Result remains higher
+      // priority and immutable under every S13 command).
+      if (
+        state === null ||
+        state.activeMission === 'none' ||
+        state.missionResult !== null
+      ) {
+        return state;
+      }
+      // S13-WI01: every lifecycle command is bound to its originating Mission
+      // Instance. The reducer accepts it only when the identity exactly
+      // matches the current Active Mission Snapshot, so a delayed or
+      // duplicated Pause/Resume/Settings/Debug/browser-safety event from an
+      // older mission is a strict no-op before, during, and after mission N+1
+      // and can never pause, resume, overlay, or mutate another mission.
+      if (
+        state.activeMission.missionInstanceOrdinal !==
+        action.missionInstanceOrdinal
+      ) {
+        return state;
+      }
+      const lifecycle = combatLifecycleReducer(state.combatLifecycle, action);
+      return lifecycle === state.combatLifecycle
+        ? state
+        : { ...state, combatLifecycle: lifecycle };
+    }
     default:
       return assertNever(action);
   }

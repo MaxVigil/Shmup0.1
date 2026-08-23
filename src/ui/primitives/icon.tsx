@@ -16,9 +16,11 @@ export interface IconProps {
 
 /**
  * Renders an approved runtime icon via a CSS mask so it inherits `currentColor`
- * (DS §8.2, DS-AC-009). The asset URL comes from the prepared-asset catalogue
- * (S03 consumption); a non-ready asset renders nothing and never triggers a
- * repeated request (DS-AC-010, DS-AC-019).
+ * (DS §8.2, DS-AC-009). The mask source comes from the prepared-asset
+ * catalogue: ready icons carry the inline SVG data URI built by the single
+ * Boot preload request (S13), so the render never triggers a second network
+ * request for a prepared URL (MASTER-AC-014, DS-AC-019, DS §13.2); a
+ * non-ready/fallback asset renders nothing and never repeats a request.
  */
 export function Icon({
   icon,
@@ -30,7 +32,9 @@ export function Icon({
   if (asset?.status !== 'ready') {
     return null;
   }
-  const style = { '--icon-url': `url("${asset.url}")` } as CSSProperties;
+  const style = {
+    '--icon-url': `url("${asset.iconDataUri ?? asset.url}")`,
+  } as CSSProperties;
   return (
     <span
       aria-hidden={hidden}

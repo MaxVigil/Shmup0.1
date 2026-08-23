@@ -14,11 +14,30 @@ import {
 } from '../content';
 import type { MissionSnapshot } from '../mission/snapshot';
 import type { AssetPreloadResult } from '../ports';
-import type { SessionAction } from '../session';
+import type { SessionAction, SessionStore } from '../session';
 import type { CombatControlMode } from './input-command';
+import type { CombatDebugCommand, CombatObservability } from './debug-command';
 import type { WeaponType } from '@domain/index';
 
 export interface CombatSession {
+  /**
+   * S13 Return to Base seam: resolves the active mission as Aborted through the
+   * S12 application seam with the originating `missionInstanceOrdinal` and the
+   * current authoritative Combat Hull, then discards the Combat runtime. No
+   * reward, recovery, or Mission Result Overlay is produced; Operations opens
+   * directly.
+   */
+  readonly requestReturnToBase: () => void;
+  /**
+   * S13 settings-driven control-mode seam: applies the mutually exclusive
+   * movement mode selected by the single shared `Mouse Movement Enabled` value
+   * for use on Resume (AC-038).
+   */
+  readonly setControlMode: (mode: CombatControlMode) => void;
+  /** S13 Debug command seam: relays one deterministic application command. */
+  readonly submitDebugCommand: (command: CombatDebugCommand) => void;
+  /** S13 read-only Debug observability snapshot (Combat §11.7). */
+  readonly getObservability: () => CombatObservability;
   readonly dispose: () => void;
 }
 
@@ -112,12 +131,31 @@ export interface CombatSessionInput {
   /** Validated German Fighter maximum Hull (S11, from the content seam). */
   readonly playerMaximumHullIntegrity: number;
   /**
-   * Shared-session dispatch (S08, AC-064): the Combat session synchronises the
-   * single `Mouse Movement Enabled` value exactly once per accepted `F`
-   * toggle through this action dispatch.
+   * The one application-owned Session Store (S08, S13): the Combat session
+   * synchronises the single `Mouse Movement Enabled` value through its
+   * dispatch, relays terminal/lifecycle/browser-safety commands, derives the
+   * authoritative paused/running lifecycle by subscription, and invokes the
+   * S12 abortMission seam. The store remains the single source of truth.
    */
-  readonly dispatch: (action: SessionAction) => void;
+  readonly store: SessionStore;
+  /**
+   * S13-WI01: build-time DEV_MODE capability passed into the lazy Combat
+   * boundary. The runtime accepts Debug commands only when this is true and
+   * the authoritative lifecycle is exactly the Debug Overlay for the matching
+   * Mission Instance; it is never read from query strings, storage, or
+   * mutable globals.
+   */
+  readonly debugMode: boolean;
 }
+
+/**
+ * Returns `true` only while the caller still owns the originating Active
+ * Mission and may create its Combat presentation. The guard is evaluated
+ * after the lazy module import and immediately before synchronous owner
+ * creation, so an aborted mission never creates a late runtime, canvas, or
+ * listener in a detached container (S13-WI01).
+ */
+export type CombatSessionCreationGuard = () => boolean;
 
 /**
  * Lazy Combat boundary (Repository Architecture §9, S07–S08): entering Combat
@@ -130,7 +168,11 @@ export interface CombatSessionInput {
  */
 export async function loadCombatSession(
   input: CombatSessionInput,
-): Promise<CombatSession> {
+  mayCreate: CombatSessionCreationGuard = () => true,
+): Promise<CombatSession | null> {
   const entry = await import('@combat-presentation/entry');
+  if (!mayCreate()) {
+    return null;
+  }
   return entry.createCombatSession(input);
 }

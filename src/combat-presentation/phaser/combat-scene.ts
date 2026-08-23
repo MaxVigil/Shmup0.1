@@ -25,6 +25,14 @@ export interface CombatSceneContext {
    *  authoritative snapshot. */
   readonly advanceFrame: (frameDeltaSeconds: number) => CombatSimulationState;
   readonly getSimulationState: () => CombatSimulationState;
+  /**
+   * S13: the authoritative paused/running lifecycle (derived from the one
+   * Session Store by the entry). When true, gameplay input routing is disabled
+   * through the existing `inputEnabled` seam.
+   */
+  readonly getPaused: () => boolean;
+  /** S13: relays the canonical Escape-open-Pause command to the application. */
+  readonly requestPause: () => void;
 }
 
 const AIRCRAFT_TEXTURE_KEY = 'aircraft';
@@ -162,17 +170,32 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
-  /** Current application input-routing context. S08 is always enabled; S13
-   *  will gate on Pause / blocking Overlay / browser-safety states. */
+  /** Current application input-routing context. S13 gates on the authoritative
+   *  paused/running lifecycle: any paused or blocking state disables movement,
+   *  pointer, and control-mode routing through this seam. */
   private inputContext(): CombatInputContext {
     return {
-      inputEnabled: true,
+      inputEnabled: !this.context.getPaused(),
       nativeInputFocused: isNativeControlFocused(),
     };
   }
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     if (this.isShuttingDown) {
+      return;
+    }
+    // S13: Escape opens Pause only while running with no Overlay (the routing
+    // context is enabled exactly then). While a blocking Overlay is open the
+    // React Overlay owns Escape (Resume / Close / Close-Debug); the key
+    // auto-repeat is rejected. Key auto-repeat for every other routed binding
+    // is already rejected by `routeKeyInput`.
+    if (
+      !event.repeat &&
+      event.code === 'Escape' &&
+      this.inputContext().inputEnabled
+    ) {
+      event.preventDefault();
+      this.context.requestPause();
       return;
     }
     this.applyKeyIntent(

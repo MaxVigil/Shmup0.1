@@ -34,6 +34,12 @@ export function buildFallbackPreloadResult(): AssetPreloadResult {
   }));
 }
 
+/** The ready/fallback + optional inline icon mask outcome of one load. */
+export interface AssetLoadOutcome {
+  readonly ok: boolean;
+  readonly iconDataUri?: string;
+}
+
 /**
  * Starts every approved manifest request in parallel and resolves when all
  * requests settle or the deadline elapses, whichever comes first. Late
@@ -50,7 +56,7 @@ export function preloadRuntimeAssets(): Promise<
     try {
       return loadAsset(entry, () => closed);
     } catch {
-      return Promise.resolve(false);
+      return Promise.resolve<AssetLoadOutcome>({ ok: false });
     }
   });
   return raceSettledOrDeadline(loads, PRELOAD_DEADLINE_MS)
@@ -58,13 +64,22 @@ export function preloadRuntimeAssets(): Promise<
       // Result produced: from here on, late loader completions are inert.
       closed = true;
       return RUNTIME_ASSET_MANIFEST.map(
-        (entry, index): PreparedRuntimeAsset => ({
-          id: entry.id,
-          kind: entry.kind,
-          sourcePath: entry.sourcePath,
-          url: resolveRuntimeAssetUrl(entry.sourcePath),
-          status: results[index] === true ? 'ready' : 'fallback',
-        }),
+        (entry, index): PreparedRuntimeAsset => {
+          const loaded = results[index];
+          const ready = loaded?.ok === true;
+          return {
+            id: entry.id,
+            kind: entry.kind,
+            sourcePath: entry.sourcePath,
+            url: resolveRuntimeAssetUrl(entry.sourcePath),
+            // S13: a ready icon carries the inline SVG mask source built from
+            // the single preload fetch, so the Icon render never re-requests it.
+            ...(ready && loaded.iconDataUri !== undefined
+              ? { iconDataUri: loaded.iconDataUri }
+              : {}),
+            status: ready ? 'ready' : 'fallback',
+          };
+        },
       );
     })
     .catch((): readonly PreparedRuntimeAsset[] =>
@@ -122,7 +137,7 @@ export function raceSettledOrDeadline<T>(
 function loadAsset(
   entry: RuntimeAssetManifestEntry,
   isClosed: () => boolean,
-): Promise<boolean> {
+): Promise<AssetLoadOutcome> {
   const url = resolveRuntimeAssetUrl(entry.sourcePath);
   switch (entry.kind) {
     case 'background':
@@ -136,20 +151,20 @@ function loadAsset(
 }
 
 /** Image success requires both a successful load and decode (Master §5.6). */
-function loadImage(url: string): Promise<boolean> {
+function loadImage(url: string): Promise<AssetLoadOutcome> {
   return new Promise((resolve) => {
     const image = new Image();
     image.onload = () => {
       if (typeof image.decode !== 'function') {
-        resolve(true);
+        resolve({ ok: true });
         return;
       }
       void image.decode().then(
-        () => resolve(true),
-        () => resolve(false),
+        () => resolve({ ok: true }),
+        () => resolve({ ok: false }),
       );
     };
-    image.onerror = () => resolve(false);
+    image.onerror = () => resolve({ ok: false });
     image.src = url;
   });
 }
@@ -159,7 +174,7 @@ function loadFont(
   url: string,
   weight: string,
   isClosed: () => boolean,
-): Promise<boolean> {
+): Promise<AssetLoadOutcome> {
   try {
     const face = new FontFace('IBM Plex Mono', `url("${url}")`, { weight });
     return face.load().then(
@@ -168,21 +183,37 @@ function loadFont(
           // The deadline has passed: this completion is inert. The font is not
           // added to document.fonts, does not replace its fallback, and cannot
           // cause a layout change.
-          return false;
+          return { ok: false };
         }
         document.fonts.add(face);
-        return true;
+        return { ok: true };
       },
-      () => false,
+      () => ({ ok: false }),
     );
   } catch {
-    return Promise.resolve(false);
+    return Promise.resolve({ ok: false });
   }
 }
 
-function loadIcon(url: string): Promise<boolean> {
+/**
+ * One icon load: the manifest request itself (`fetch`, once per icon) plus the
+ * inline `data:image/svg+xml` mask source derived from its text, so the Icon
+ * component's CSS-mask render reuses the prepared bytes and never issues a
+ * second network request — including the Combat Pause icon that first renders
+ * only inside Combat (S13; MASTER-AC-014, DS §13.2).
+ */
+function loadIcon(url: string): Promise<AssetLoadOutcome> {
   return fetch(url).then(
-    (response) => response.ok,
-    () => false,
+    async (response) => {
+      if (!response.ok) {
+        return { ok: false };
+      }
+      const text = await response.text();
+      return {
+        ok: true,
+        iconDataUri: `data:image/svg+xml;utf8,${encodeURIComponent(text)}`,
+      };
+    },
+    () => ({ ok: false }),
   );
 }

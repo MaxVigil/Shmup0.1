@@ -388,6 +388,32 @@
   width: clamp(24rem, 36vw, 32rem);
 }
 
+/* --- Settings Overlay (DS §8.19) --- */
+.ds-settings-overlay {
+  width: clamp(20rem, 30vw, 26rem);
+}
+
+/* --- Pause Overlay (DS §8.22, S13) --- */
+.ds-pause-overlay {
+  width: clamp(20rem, 30vw, 26rem);
+}
+
+/* --- Debug Overlay (DS §8.24, S13; development builds only) --- */
+.ds-debug-overlay {
+  width: clamp(32rem, 50vw, 44rem);
+}
+
+.ds-debug-overlay__section {
+  display: flex;
+  flex-direction: column;
+}
+
+.ds-debug-overlay__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
 /* --- Mission Result Overlay (Base §9.5, S12) --- */
 .ds-mission-result-overlay {
   width: clamp(20rem, 30vw, 26rem);
@@ -563,6 +589,18 @@
 
 .ds-combat-canvas canvas {
   display: block;
+}
+
+/* --- Combat utility cluster (DS §8.21, S13): global Pause then Settings at
+ * --- space-4 from the upper-right, separated by space-2, above the HUD and
+ * --- below any blocking Overlay scrim. --- */
+.ds-combat-utility {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  display: flex;
+  gap: var(--space-2);
+  z-index: var(--layer-utility);
 }
 
 /* --- Combat HUD bridge (Combat §4.3, Technical Foundation §6.1): the

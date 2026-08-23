@@ -19,7 +19,8 @@ import {
   spawnProjectile,
   type CombatProjectile,
 } from './projectiles';
-import { moveEnemy, type CombatEnemy } from './enemies';
+import { moveEnemy, spawnEnemy, type CombatEnemy } from './enemies';
+import type { CombatDebugCommand } from './debug-command';
 import {
   planEnemyGroups,
   spawnGroupDrones,
@@ -135,6 +136,9 @@ export interface CombatSimulationState {
   readonly contactCooldownStepsRemaining: number;
   /** Destroyed Basic Drones counted exactly once. */
   readonly destroyedEnemyCount: number;
+  /** Escaped Basic Drones counted exactly once (S13 observability; the Escape
+   *  resolution itself is unchanged from S10). */
+  readonly escapedEnemyCount: number;
   /** Active-enemy 50 ms white-flash counters keyed by enemy id. */
   readonly activeEnemyFlashStepsRemaining: Readonly<Record<number, number>>;
   /** Hitbox-free stationary destroyed-enemy 100 ms white flashes. */
@@ -229,14 +233,19 @@ export function createCombatSimulation(
   const initialEnemies =
     initialGroup === undefined
       ? []
-      : spawnGroupDrones(
-          initialGroup,
-          0,
-          input.enemy.type,
-          input.enemy.maximumHullIntegrity,
+      : placeTopEntriesWithinEngagementBand(
+          spawnGroupDrones(
+            initialGroup,
+            0,
+            input.enemy.type,
+            input.enemy.maximumHullIntegrity,
+            input.viewportWidth,
+            input.viewportHeight,
+            enemySize,
+          ),
           input.viewportWidth,
-          input.viewportHeight,
           enemySize,
+          bounds,
         );
   return {
     mode: input.initialMode,
@@ -283,6 +292,7 @@ export function createCombatSimulation(
     godModeEnabled: false,
     contactCooldownStepsRemaining: 0,
     destroyedEnemyCount: 0,
+    escapedEnemyCount: 0,
     activeEnemyFlashStepsRemaining: {},
     destroyedEnemyFlashes: [],
     aircraftDangerFlashStepsRemaining: 0,
@@ -410,6 +420,26 @@ export function submitCombatCommand(
         };
       }
       return { ...state, mode: nextMode, keys };
+    }
+    case 'combat/set-mode': {
+      // S13: settings-driven control-mode change (Combat §10.1, AC-038). The
+      // single shared `Mouse Movement Enabled` value is the source; the
+      // simulation mode is updated for use on Resume. Same held-key hygiene as
+      // a toggle: stale pressed flags never carry into the new mode, and
+      // entering Mouse Movement without an activated pointer target rests.
+      if (state.mode === command.mode) {
+        return state;
+      }
+      const keys = { up: false, down: false, left: false, right: false };
+      if (command.mode === 'mouse' && !state.mouseTargetActive) {
+        return {
+          ...state,
+          mode: command.mode,
+          keys,
+          aircraft: { ...state.aircraft, velocityX: 0, velocityY: 0 },
+        };
+      }
+      return { ...state, mode: command.mode, keys };
     }
     case 'combat/pointer-move': {
       // AC-006: inactive-mode input is ignored. AC-071: pointer moves outside
@@ -644,7 +674,7 @@ function stepMission(
   const missionStepCount = state.missionStepCount + 1;
   const missionTimeSeconds = missionStepCount * FIXED_STEP_SECONDS;
   const spawns = collectDueSpawns(state, missionStepCount);
-  const enemies = stepActiveEnemies(state, stepSeconds);
+  const enemyMovement = stepActiveEnemies(state, stepSeconds);
   const next = {
     ...state,
     missionStepCount,
@@ -652,7 +682,10 @@ function stepMission(
     spawnPlanIndex: spawns.spawnPlanIndex,
     nextEnemyId: spawns.nextEnemyId,
     finalGroupSpawned: spawns.finalGroupSpawned,
-    enemies: [...enemies, ...spawns.spawned],
+    // S13: Escaped drones are counted exactly once in the same step they are
+    // removed; the resolution itself is unchanged from S10 (Combat §7.5).
+    escapedEnemyCount: state.escapedEnemyCount + enemyMovement.escapedCount,
+    enemies: [...enemyMovement.kept, ...spawns.spawned],
   };
   return stepProjectiles(next, stepSeconds);
 }
@@ -683,14 +716,19 @@ function collectDueSpawns(
       break;
     }
     spawned.push(
-      ...spawnGroupDrones(
-        group,
-        nextEnemyId,
-        state.enemyType,
-        state.enemyHullIntegrity,
+      ...placeTopEntriesWithinEngagementBand(
+        spawnGroupDrones(
+          group,
+          nextEnemyId,
+          state.enemyType,
+          state.enemyHullIntegrity,
+          state.viewportWidth,
+          state.viewportHeight,
+          state.enemySize,
+        ),
         state.viewportWidth,
-        state.viewportHeight,
         state.enemySize,
+        state.bounds,
       ),
     );
     nextEnemyId += group.drones.length;
@@ -702,12 +740,14 @@ function collectDueSpawns(
   return { spawned, spawnPlanIndex, nextEnemyId, finalGroupSpawned };
 }
 
-/** Moves pre-existing active enemies and removes escaped drones (Combat §7.5). */
+/** Moves pre-existing active enemies and removes escaped drones (Combat §7.5).
+ *  Returns the kept drones plus the number that fully escaped in this step. */
 function stepActiveEnemies(
   state: CombatSimulationState,
   stepSeconds: number,
-): CombatEnemy[] {
+): { readonly kept: readonly CombatEnemy[]; readonly escapedCount: number } {
   const kept: CombatEnemy[] = [];
+  let escapedCount = 0;
   for (const enemy of state.enemies) {
     const next = moveEnemy(
       enemy,
@@ -719,9 +759,11 @@ function stepActiveEnemies(
     );
     if (next !== null) {
       kept.push(next);
+    } else {
+      escapedCount += 1;
     }
   }
-  return kept;
+  return { kept, escapedCount };
 }
 
 /**
@@ -964,7 +1006,15 @@ function resizeSimulation(
   // duplicated or re-rolled.
   const enemies = state.enemies.map((enemy) => ({
     ...enemy,
-    centerX: enemy.centerX * ratioX,
+    // A Top Entry descends forever at fixed X, so preserve its normalized
+    // position inside the aircraft's horizontal firing band. Plain viewport
+    // scaling can move it outside the newly recalculated Movement Bounds and
+    // make it impossible to hit. Side entries retain proportional geometry:
+    // their approved trajectory already carries them to a central waypoint.
+    centerX:
+      enemy.entry === 'top'
+        ? reprojectEngagementBandX(enemy.centerX, state.bounds, bounds)
+        : enemy.centerX * ratioX,
     centerY: enemy.centerY * ratioY,
     waypointX: enemy.waypointX === null ? null : enemy.waypointX * ratioX,
     waypointY: enemy.waypointY === null ? null : enemy.waypointY * ratioY,
@@ -1034,14 +1084,19 @@ export function forceFinalGroupSpawn(
   if (finalGroup === undefined) {
     return state;
   }
-  const spawned = spawnGroupDrones(
-    finalGroup,
-    state.nextEnemyId,
-    state.enemyType,
-    state.enemyHullIntegrity,
+  const spawned = placeTopEntriesWithinEngagementBand(
+    spawnGroupDrones(
+      finalGroup,
+      state.nextEnemyId,
+      state.enemyType,
+      state.enemyHullIntegrity,
+      state.viewportWidth,
+      state.viewportHeight,
+      state.enemySize,
+    ),
     state.viewportWidth,
-    state.viewportHeight,
     state.enemySize,
+    state.bounds,
   );
   return {
     ...state,
@@ -1052,6 +1107,149 @@ export function forceFinalGroupSpawn(
     spawnPlanIndex: state.spawnPlan.length,
     finalGroupSpawned: true,
   };
+}
+
+/**
+ * Maps the already-planned uniform top-entry fraction from the complete-
+ * hitbox viewport range into the aircraft's reachable horizontal centre range.
+ * This consumes no additional RNG and keeps every straight-down Top Entry on
+ * a projectile line the player can reach. Side entries remain unchanged.
+ */
+function placeTopEntriesWithinEngagementBand(
+  enemies: readonly CombatEnemy[],
+  viewportWidth: number,
+  enemySize: number,
+  bounds: CombatBounds,
+): readonly CombatEnemy[] {
+  const sourceMin = enemySize / 2;
+  const sourceMax = viewportWidth - enemySize / 2;
+  return enemies.map((enemy) =>
+    enemy.entry === 'top'
+      ? {
+          ...enemy,
+          centerX: remapClamped(
+            enemy.centerX,
+            sourceMin,
+            sourceMax,
+            bounds.minX,
+            bounds.maxX,
+          ),
+        }
+      : enemy,
+  );
+}
+
+/** Preserves a Top Entry's normalized location inside the firing band. */
+function reprojectEngagementBandX(
+  centerX: number,
+  previous: CombatBounds,
+  next: CombatBounds,
+): number {
+  return remapClamped(
+    centerX,
+    previous.minX,
+    previous.maxX,
+    next.minX,
+    next.maxX,
+  );
+}
+
+function remapClamped(
+  value: number,
+  sourceMin: number,
+  sourceMax: number,
+  targetMin: number,
+  targetMax: number,
+): number {
+  const sourceSpan = sourceMax - sourceMin;
+  if (sourceSpan <= 0) {
+    return (targetMin + targetMax) / 2;
+  }
+  const fraction = clamp((value - sourceMin) / sourceSpan, 0, 1);
+  return targetMin + fraction * (targetMax - targetMin);
+}
+
+/**
+ * S13 deterministic Debug command transform (Combat §11.3–11.6, AC-039–043/061).
+ * Reuses existing identity/geometry/content owners and never duplicates spawn,
+ * collision, or result logic. Commands are strict no-ops after the terminal
+ * result freeze; Win/Lose enter the existing S12 terminal-result relay through
+ * `evaluateTerminalResult` (the runtime/entry relays once).
+ */
+export function applyDebugCommand(
+  state: CombatSimulationState,
+  command: CombatDebugCommand,
+): CombatSimulationState {
+  if (state.terminalResult !== null) {
+    return state;
+  }
+  switch (command.type) {
+    case 'combat-debug/god-mode':
+      // Enabling immediately sets Hull to maximum and keeps it maximum (the
+      // S11 collision pass honours `godModeEnabled` with no damage flash);
+      // disabling leaves maximum Hull (Combat §11.4, AC-041/061).
+      return command.enabled
+        ? {
+            ...state,
+            godModeEnabled: true,
+            playerHullIntegrity: state.playerMaximumHullIntegrity,
+            aircraftDangerFlashStepsRemaining: 0,
+          }
+        : { ...state, godModeEnabled: false };
+    case 'combat-debug/set-hull':
+      // Disabled during God Mode; otherwise changes Hull immediately with no
+      // damage feedback and no result resolution (Combat §11.4).
+      if (state.godModeEnabled) {
+        return state;
+      }
+      return { ...state, playerHullIntegrity: command.hull };
+    case 'combat-debug/spawn-standard-enemy': {
+      // Exactly one Basic Drone at a fixed valid top-edge position through the
+      // existing spawn owner (S13-WI01): the authored schedule, final-group
+      // state, mission time, and every scheduled-spawn RNG draw stay untouched
+      // because no RNG is consumed here at all (Combat §11.5).
+      const enemy = spawnEnemy(
+        state.nextEnemyId,
+        state.enemyType,
+        state.enemyHullIntegrity,
+        'top',
+        0.5,
+        null,
+        null,
+        state.viewportWidth,
+        state.viewportHeight,
+        state.enemySize,
+      );
+      return {
+        ...state,
+        enemies: [...state.enemies, enemy],
+        nextEnemyId: state.nextEnemyId + 1,
+      };
+    }
+    case 'combat-debug/spawn-final-group':
+      // Reuses the one-use additive seam (AC-042).
+      return forceFinalGroupSpawn(state);
+    case 'combat-debug/win-mission':
+      // Normal Success even if enemies remain: mark the final group spawned,
+      // cancel future scheduled spawns, resolve active enemies, then evaluate
+      // the terminal state through the same S12 path (AC-043).
+      return evaluateTerminalResult({
+        ...state,
+        finalGroupSpawned: true,
+        spawnPlanIndex: state.spawnPlan.length,
+        enemies: [],
+      });
+    case 'combat-debug/lose-mission':
+      // Disable God Mode first, set the authoritative player Hull to 0, then
+      // invoke the normal defeat flow; emergency recovery to 25 remains owned
+      // by the S12 session reducer (Combat §11.4, S13-WI01).
+      return evaluateTerminalResult({
+        ...state,
+        godModeEnabled: false,
+        playerHullIntegrity: 0,
+        playerDefeated: true,
+      });
+  }
 }
 
 /**
@@ -1103,6 +1301,15 @@ export interface CombatSimulationRuntime {
   readonly getState: () => CombatSimulationState;
   readonly submit: (command: CombatInputCommand) => void;
   readonly advance: (frameDeltaSeconds: number) => CombatSimulationState;
+  /**
+   * S13 pause obedience seam (Combat §10–12): while paused, `advance` returns
+   * the state unchanged and gameplay input commands are rejected. Entering
+   * pause once clears held-key facts and resets the fixed-step accumulator so
+   * a missing keyup cannot create latent input after Resume (S13).
+   */
+  readonly setPaused: (paused: boolean) => void;
+  /** S13 Debug command seam: applies one deterministic Debug transform. */
+  readonly submitDebug: (command: CombatDebugCommand) => void;
   /** Cleanup contract (S08): after dispose, submit/advance are inert. */
   readonly dispose: () => void;
 }
@@ -1120,10 +1327,23 @@ export function createCombatSimulationRuntime(
   let state = createCombatSimulation(input);
   let accumulatorSeconds = 0;
   let disposed = false;
+  let isPaused = false;
   return {
     getState: () => state,
     submit(command) {
       if (disposed) {
+        return;
+      }
+      // S13: while paused, gameplay input (movement/pointer/control-mode
+      // toggle) is rejected; the viewport-resize reprojection and the
+      // settings-driven set-mode remain allowed while a blocking Overlay is
+      // open so Resume uses the new mode and the reprojected geometry.
+      if (
+        isPaused &&
+        (command.type === 'combat/pointer-move' ||
+          command.type === 'combat/keyboard' ||
+          command.type === 'combat/toggle-mode')
+      ) {
         return;
       }
       const before = state;
@@ -1141,7 +1361,10 @@ export function createCombatSimulationRuntime(
       }
     },
     advance(frameDeltaSeconds) {
-      if (disposed) {
+      // S13 pause freeze: fixed-step advancement, mission time, schedules,
+      // movement, auto-fire, collisions, feedback counters, and terminal
+      // evaluation do not advance while paused.
+      if (disposed || isPaused) {
         return state;
       }
       const result = advanceSimulationFrames(
@@ -1152,6 +1375,29 @@ export function createCombatSimulationRuntime(
       state = result.state;
       accumulatorSeconds = result.accumulatorSeconds;
       return state;
+    },
+    setPaused(paused) {
+      if (disposed || paused === isPaused) {
+        return;
+      }
+      isPaused = paused;
+      if (paused) {
+        // Pause hygiene exactly once per transition: clear held-key facts and
+        // reset the fixed-step accumulator so a missing keyup cannot create
+        // latent input after Resume (S13). Position, velocity, mouse target,
+        // RNG, Hull, entities, timers, and schedules are preserved untouched.
+        state = {
+          ...state,
+          keys: { up: false, down: false, left: false, right: false },
+        };
+        accumulatorSeconds = 0;
+      }
+    },
+    submitDebug(command) {
+      if (disposed) {
+        return;
+      }
+      state = applyDebugCommand(state, command);
     },
     dispose() {
       disposed = true;

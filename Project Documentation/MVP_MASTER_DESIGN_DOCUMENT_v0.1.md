@@ -363,6 +363,7 @@ The Bar follows the aircraft, retains Hull ratio on resize, and does not affect 
 - Initial mouse target equals aircraft position and changes only after pointer movement inside the Combat viewport.
 - A spawned drone is fully outside the viewport with its nearest hitbox edge touching its selected entry boundary; there is no additional spawn offset.
 - Spawn coordinates account for full drone bounds. Group members spawn simultaneously, select entry data independently, and may overlap without repositioning.
+- A Top Entry drone selects its horizontal position inside the aircraft's current reachable centre range. Resize preserves its normalized position inside that range, so every straight-down Top Entry remains alignable with player fire.
 - Drone entry uses no marker, warning, protection, fade, or animation. Its hitbox is active from creation.
 - A projectile is created with its horizontal center aligned to the aircraft and its bottom edge aligned to the aircraft top edge. It is immediately visible and collision-active.
 - A projectile remains active while any part is visible and is removed after its complete bounds leave the viewport.

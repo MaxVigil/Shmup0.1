@@ -1,5 +1,6 @@
 import type { ContentCatalogue } from '@content/index';
 import { createPilotSelectionStream } from '@domain/index';
+import { IDLE_COMBAT_LIFECYCLE } from '../combat/lifecycle';
 import type { SessionState } from './session-state';
 
 /**
@@ -46,6 +47,7 @@ export function initializeSession(
     missionInstanceCount: 0,
     missionStartFailed: false,
     missionResult: null,
+    combatLifecycle: IDLE_COMBAT_LIFECYCLE,
     pilot,
   };
 }

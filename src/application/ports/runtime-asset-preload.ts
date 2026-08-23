@@ -16,6 +16,14 @@ export interface PreparedRuntimeAsset {
   readonly sourcePath: string;
   /** Runtime URL below the configured base (S03 prepared-catalogue consumption). */
   readonly url: string;
+  /**
+   * Inline `data:image/svg+xml` mask source for ready icons (S13): built once
+   * by the bounded Boot preload from the fetched SVG text so the Icon
+   * component's CSS-mask render reuses the prepared bytes and never issues a
+   * second network request when it first appears inside Combat (MASTER-AC-014,
+   * DS §13.2). Absent for non-icon assets, fallback icons, and non-ready icons.
+   */
+  readonly iconDataUri?: string;
   readonly status: 'ready' | 'fallback';
 }
 

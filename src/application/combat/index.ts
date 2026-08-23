@@ -6,7 +6,11 @@ export {
   resolveMissionSchedule,
   synchronizeSharedModeAfterToggle,
 } from './combat-session';
-export type { CombatSession, CombatSessionInput } from './combat-session';
+export type {
+  CombatSession,
+  CombatSessionCreationGuard,
+  CombatSessionInput,
+} from './combat-session';
 export {
   createCombatSimulation,
   createCombatSimulationRuntime,
@@ -15,6 +19,7 @@ export {
   advanceSimulationFrames,
   removeProjectileById,
   forceFinalGroupSpawn,
+  applyDebugCommand,
   FIXED_STEP_SECONDS,
   MAX_STEPS_PER_FRAME,
 } from './combat-simulation';
@@ -27,6 +32,27 @@ export type {
   CombatPoint,
   SimulationFrameResult,
 } from './combat-simulation';
+export {
+  combatLifecycleReducer,
+  IDLE_COMBAT_LIFECYCLE,
+  RUNNING_COMBAT_LIFECYCLE,
+} from './lifecycle';
+export type {
+  CombatLifecycleAction,
+  CombatLifecycleState,
+  CombatOverlayId,
+  DebugRestoreOrigin,
+} from './lifecycle';
+export {
+  buildCombatObservability,
+  isDebugCommandEligible,
+} from './debug-command';
+export type {
+  CombatDebugCommand,
+  CombatDebugHullValue,
+  CombatObservability,
+  DebugEligibilityContext,
+} from './debug-command';
 export {
   advanceProjectile,
   isProjectileOutsideViewport,

@@ -87,6 +87,24 @@ describe('S10 initialization and schedule', () => {
     expect(state.finalGroupSpawned).toBe(false);
   });
 
+  it('keeps extreme Top Entry positions inside the reachable firing band (AC-083)', () => {
+    // These deterministic seeds put the first planned Top Entry respectively
+    // near the raw full-viewport left and right extremes. The same RNG draw is
+    // remapped into the aircraft's reachable centre range.
+    const left = createState(77379);
+    const right = createState(27233);
+    const leftTop = left.enemies[0]!;
+    const rightTop = right.enemies[0]!;
+    expect(leftTop.entry).toBe('top');
+    expect(rightTop.entry).toBe('top');
+    expect(leftTop.centerX).toBeGreaterThanOrEqual(left.bounds.minX);
+    expect(leftTop.centerX).toBeLessThanOrEqual(left.bounds.maxX);
+    expect(rightTop.centerX).toBeGreaterThanOrEqual(right.bounds.minX);
+    expect(rightTop.centerX).toBeLessThanOrEqual(right.bounds.maxX);
+    expect(leftTop.centerX).toBeCloseTo(left.bounds.minX, 1);
+    expect(rightTop.centerX).toBeCloseTo(right.bounds.maxX, 0);
+  });
+
   it('advances mission time only through executed fixed steps', () => {
     let state = createState();
     state = stepCount(state, 1);
@@ -309,12 +327,47 @@ describe('S10 resize, seams, and hardening', () => {
       const oldEnemy = before.enemies[index];
       const newEnemy = resized.enemies[index];
       expect(newEnemy!.id).toBe(oldEnemy!.id);
-      expect(newEnemy!.centerX).toBeCloseTo(oldEnemy!.centerX * 0.625, 6);
+      if (oldEnemy!.entry === 'top') {
+        const oldFraction =
+          (oldEnemy!.centerX - before.bounds.minX) /
+          (before.bounds.maxX - before.bounds.minX);
+        const newFraction =
+          (newEnemy!.centerX - resized.bounds.minX) /
+          (resized.bounds.maxX - resized.bounds.minX);
+        expect(newFraction).toBeCloseTo(oldFraction, 6);
+        expect(newEnemy!.centerX).toBeGreaterThanOrEqual(resized.bounds.minX);
+        expect(newEnemy!.centerX).toBeLessThanOrEqual(resized.bounds.maxX);
+      } else {
+        expect(newEnemy!.centerX).toBeCloseTo(oldEnemy!.centerX * 0.625, 6);
+      }
       expect(newEnemy!.centerY).toBeCloseTo(oldEnemy!.centerY * (2 / 3), 6);
       expect(newEnemy!.waypointX).toBe(
         oldEnemy!.waypointX === null ? null : oldEnemy!.waypointX * 0.625,
       );
     }
+  });
+
+  it('keeps a left-edge Top Entry reachable after an aspect-ratio resize (AC-083)', () => {
+    const before = createState(77379);
+    const topBefore = before.enemies[0]!;
+    expect(topBefore.entry).toBe('top');
+
+    const resized = submit(before, {
+      type: 'combat/viewport-resize',
+      width: 1500,
+      height: 800,
+      aircraftWidth: 64 * (1278 / 1231),
+      aircraftHeight: 64,
+    });
+    const topAfter = resized.enemies.find(
+      (enemy) => enemy.id === topBefore.id,
+    )!;
+
+    // A plain width ratio would put this enemy left of the new aircraft bound.
+    expect(topBefore.centerX * (1500 / 1280)).toBeLessThan(resized.bounds.minX);
+    expect(topAfter.centerX).toBeGreaterThanOrEqual(resized.bounds.minX);
+    expect(topAfter.centerX).toBeLessThanOrEqual(resized.bounds.maxX);
+    expect(topAfter.centerX).toBeCloseTo(resized.bounds.minX, 1);
   });
 
   it('forceFinalGroupSpawn is additive, cancels future spawns, and runs exactly once (S13 seam)', () => {

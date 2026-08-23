@@ -268,4 +268,164 @@ describe('createSessionStore', () => {
     expect(store.getState()?.missionStartFailed).toBe(false);
     expect(store.getState()?.activeMission).toBe('none');
   });
+
+  it('mission start enters the running Combat lifecycle (S13)', () => {
+    const store = initializedStore();
+    expect(store.getState()?.combatLifecycle).toEqual({
+      running: false,
+      overlay: 'none',
+      debugRestoreOrigin: 'none',
+      browserSafetyLatched: false,
+    });
+    store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+    expect(store.getState()?.combatLifecycle).toEqual({
+      running: true,
+      overlay: 'none',
+      debugRestoreOrigin: 'none',
+      browserSafetyLatched: false,
+    });
+  });
+
+  it('lifecycle commands are inert without an Active Mission and after resolution (S13)', () => {
+    const store = initializedStore();
+    store.dispatch({
+      type: 'combat-lifecycle/open-pause',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()?.combatLifecycle.overlay).toBe('none');
+
+    store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+    store.dispatch({
+      type: 'combat-lifecycle/open-pause',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()?.combatLifecycle.overlay).toBe('pause');
+
+    // Mission resolution resets the lifecycle to idle and rejects later
+    // lifecycle commands (the Result Overlay is the only continuation point).
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'aborted',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 100,
+      },
+    });
+    expect(store.getState()?.combatLifecycle).toEqual({
+      running: false,
+      overlay: 'none',
+      debugRestoreOrigin: 'none',
+      browserSafetyLatched: false,
+    });
+    store.dispatch({
+      type: 'combat-lifecycle/browser-safety-event',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()?.combatLifecycle.overlay).toBe('none');
+  });
+
+  it('Mission Result stays higher priority and immutable under every S13 command', () => {
+    const store = initializedStore();
+    store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+    store.dispatch({
+      type: 'combat-lifecycle/open-pause',
+      missionInstanceOrdinal: 0,
+    });
+    store.dispatch({
+      type: 'mission/result',
+      result: { kind: 'defeat', missionInstanceOrdinal: 0 },
+    });
+    const committed = store.getState();
+    if (committed === null || committed.missionResult === null) {
+      throw new Error('Expected a committed Defeat result.');
+    }
+    for (const action of [
+      'combat-lifecycle/open-pause',
+      'combat-lifecycle/resume',
+      'combat-lifecycle/open-settings',
+      'combat-lifecycle/open-debug',
+      'combat-lifecycle/browser-safety-event',
+    ] as const) {
+      store.dispatch({ type: action, missionInstanceOrdinal: 0 });
+      expect(store.getState()).toBe(committed);
+    }
+  });
+
+  it('a browser safety event during Settings latches manual Resume and close transitions to Pause (S13)', () => {
+    const store = initializedStore();
+    store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+    store.dispatch({
+      type: 'combat-lifecycle/open-settings',
+      missionInstanceOrdinal: 0,
+    });
+    store.dispatch({
+      type: 'combat-lifecycle/browser-safety-event',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()?.combatLifecycle.browserSafetyLatched).toBe(true);
+    store.dispatch({
+      type: 'combat-lifecycle/close-settings',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()?.combatLifecycle.overlay).toBe('pause');
+    expect(store.getState()?.combatLifecycle.running).toBe(false);
+    store.dispatch({
+      type: 'combat-lifecycle/resume',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()?.combatLifecycle.overlay).toBe('none');
+    expect(store.getState()?.combatLifecycle.running).toBe(true);
+  });
+
+  it('a stale lifecycle command from mission N is a strict no-op during and after mission N+1 (S13-WI01)', () => {
+    const store = initializedStore();
+    // Mission N (ordinal 0) starts and pauses.
+    const first = snapshotFor(store);
+    store.dispatch({ type: 'mission/start', snapshot: first });
+    store.dispatch({
+      type: 'combat-lifecycle/open-pause',
+      missionInstanceOrdinal: 0,
+    });
+    expect(store.getState()?.combatLifecycle.overlay).toBe('pause');
+
+    // Mission N resolves (Continue consumes the Result Overlay) and mission
+    // N+1 (ordinal 1) starts running.
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        combatHullIntegrity: 80,
+      },
+    });
+    store.dispatch({
+      type: 'mission/result-consumed',
+      missionInstanceOrdinal: 0,
+    });
+    const second = {
+      ...snapshotFor(store),
+      missionInstanceOrdinal: 1,
+      combatMissionSeed: 999,
+    };
+    store.dispatch({ type: 'mission/start', snapshot: second });
+    expect(store.getState()?.combatLifecycle.overlay).toBe('none');
+    expect(store.getState()?.combatLifecycle.running).toBe(true);
+
+    // A delayed Pause/Resume/Settings/Debug/browser event from mission N can
+    // never pause, resume, overlay, or mutate mission N+1.
+    const before = store.getState();
+    for (const action of [
+      'combat-lifecycle/open-pause',
+      'combat-lifecycle/resume',
+      'combat-lifecycle/open-settings',
+      'combat-lifecycle/open-debug',
+      'combat-lifecycle/browser-safety-event',
+    ] as const) {
+      store.dispatch({ type: action, missionInstanceOrdinal: 0 });
+      expect(store.getState()).toBe(before);
+    }
+    expect(store.getState()?.combatLifecycle.overlay).toBe('none');
+    expect(store.getState()?.combatLifecycle.running).toBe(true);
+    expect(store.getState()?.credits).toBe(2); // mission N reward applied once
+  });
 });

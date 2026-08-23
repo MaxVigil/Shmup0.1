@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 /**
  * S03-WI02 regression coverage at the minimum supported viewport
@@ -8,6 +9,66 @@ import { expect, test } from '@playwright/test';
  * element's computed outline (2px ring + 2px positive offset).
  */
 const MINIMUM_VIEWPORT = { width: 1280, height: 600 };
+
+/** Asserts no document overflow and a fully visible canonical focus ring for
+ *  the currently focused control (DS-AC-004, Verification §14.2). */
+async function measureFocusedRing(
+  page: Page,
+  expectedText: string,
+  ringOwnerSelector?: string,
+): Promise<void> {
+  const metrics = await page.evaluate(
+    ({ expectedText, ringOwnerSelector }) => {
+      const doc = document.scrollingElement as HTMLElement;
+      const active =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      const ringOwner =
+        ringOwnerSelector === undefined
+          ? active
+          : (active?.closest<HTMLElement>(ringOwnerSelector) ?? null);
+      const rect = ringOwner?.getBoundingClientRect() ?? null;
+      const style = ringOwner === null ? null : getComputedStyle(ringOwner);
+      const ext =
+        style === null
+          ? 0
+          : parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+      return {
+        matchesExpectedText:
+          active?.textContent?.trim() === expectedText ||
+          active?.getAttribute('aria-label')?.includes(expectedText) === true ||
+          ringOwner?.textContent?.includes(expectedText) === true,
+        scrollWidth: doc.scrollWidth,
+        scrollHeight: doc.scrollHeight,
+        clientWidth: doc.clientWidth,
+        clientHeight: doc.clientHeight,
+        ring:
+          rect === null || style === null
+            ? null
+            : {
+                top: rect.top - ext,
+                left: rect.left - ext,
+                right: rect.right + ext,
+                bottom: rect.bottom + ext,
+              },
+      };
+    },
+    { expectedText, ringOwnerSelector },
+  );
+
+  expect(metrics.matchesExpectedText).toBe(true);
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
+  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight);
+  expect(metrics.ring).not.toBeNull();
+  if (metrics.ring === null) {
+    throw new Error(`Expected focused ${expectedText} ring geometry.`);
+  }
+  expect(metrics.ring.top).toBeGreaterThanOrEqual(0);
+  expect(metrics.ring.left).toBeGreaterThanOrEqual(0);
+  expect(metrics.ring.right).toBeLessThanOrEqual(metrics.clientWidth);
+  expect(metrics.ring.bottom).toBeLessThanOrEqual(metrics.clientHeight);
+}
 
 test('Operations has no document overflow and a fully visible active Navigation Item ring at 1280x600', async ({
   page,
@@ -132,69 +193,11 @@ test('Hangar and Weapon Selection keep destination focus rings inside 1280x600',
   await page.getByRole('button', { name: 'Hangar' }).click();
   await expect(page.getByRole('button', { name: 'Hangar' })).toBeFocused();
 
-  const measureFocusedRing = async (
-    expectedText: string,
-    ringOwnerSelector?: string,
-  ): Promise<void> => {
-    const metrics = await page.evaluate(
-      ({ expectedText, ringOwnerSelector }) => {
-        const doc = document.scrollingElement as HTMLElement;
-        const active =
-          document.activeElement instanceof HTMLElement
-            ? document.activeElement
-            : null;
-        const ringOwner =
-          ringOwnerSelector === undefined
-            ? active
-            : (active?.closest<HTMLElement>(ringOwnerSelector) ?? null);
-        const rect = ringOwner?.getBoundingClientRect() ?? null;
-        const style = ringOwner === null ? null : getComputedStyle(ringOwner);
-        const ext =
-          style === null
-            ? 0
-            : parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
-        return {
-          matchesExpectedText:
-            active?.textContent?.trim() === expectedText ||
-            active?.getAttribute('aria-label')?.includes(expectedText) ===
-              true ||
-            ringOwner?.textContent?.includes(expectedText) === true,
-          scrollWidth: doc.scrollWidth,
-          scrollHeight: doc.scrollHeight,
-          clientWidth: doc.clientWidth,
-          clientHeight: doc.clientHeight,
-          ring:
-            rect === null || style === null
-              ? null
-              : {
-                  top: rect.top - ext,
-                  left: rect.left - ext,
-                  right: rect.right + ext,
-                  bottom: rect.bottom + ext,
-                },
-        };
-      },
-      { expectedText, ringOwnerSelector },
-    );
-
-    expect(metrics.matchesExpectedText).toBe(true);
-    expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
-    expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight);
-    expect(metrics.ring).not.toBeNull();
-    if (metrics.ring === null) {
-      throw new Error(`Expected focused ${expectedText} ring geometry.`);
-    }
-    expect(metrics.ring.top).toBeGreaterThanOrEqual(0);
-    expect(metrics.ring.left).toBeGreaterThanOrEqual(0);
-    expect(metrics.ring.right).toBeLessThanOrEqual(metrics.clientWidth);
-    expect(metrics.ring.bottom).toBeLessThanOrEqual(metrics.clientHeight);
-  };
-
-  await measureFocusedRing('Hangar');
+  await measureFocusedRing(page, 'Hangar');
 
   await page.getByRole('button', { name: 'Change Weapon' }).click();
   await expect(page.getByRole('radio', { name: /Machine Gun/ })).toBeFocused();
-  await measureFocusedRing('Machine Gun', '.ds-weapon-option');
+  await measureFocusedRing(page, 'Machine Gun', '.ds-weapon-option');
 });
 
 test('Boot View has no document overflow at 1280x600', async ({ page }) => {
@@ -226,4 +229,19 @@ test('Boot View has no document overflow at 1280x600', async ({ page }) => {
   });
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
   expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight);
+});
+
+test('Pause Overlay has no document overflow and a fully visible Resume ring at 1280x600 (S13)', async ({
+  page,
+}) => {
+  await page.setViewportSize(MINIMUM_VIEWPORT);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Start Mission' }).click();
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+
+  await page.keyboard.press('KeyP');
+  await expect(page.getByRole('button', { name: 'Resume' })).toBeFocused();
+  await measureFocusedRing(page, 'Resume');
 });

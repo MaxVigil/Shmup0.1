@@ -24,6 +24,7 @@ export type CombatInputCommand =
       readonly pressed: boolean;
     }
   | { readonly type: 'combat/toggle-mode' }
+  | { readonly type: 'combat/set-mode'; readonly mode: CombatControlMode }
   | {
       readonly type: 'combat/viewport-resize';
       readonly width: number;

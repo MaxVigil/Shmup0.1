@@ -358,7 +358,9 @@ The drone therefore remains fully outside the visible area at creation and begin
 For `Top Entry`:
 
 - the hitbox starts above the top boundary;
-- horizontal position is selected randomly so the complete hitbox remains within the viewport width;
+- horizontal position is selected uniformly inside the current horizontal engagement band;
+- the horizontal engagement band is the range between the minimum and maximum aircraft centre X permitted by the current `Movement Bounds`;
+- this range keeps the complete drone hitbox within the viewport and guarantees that the aircraft can align a projectile with every `Top Entry` trajectory;
 - after entering, the drone moves straight down.
 
 For `Upper-left Side Entry`:
@@ -790,7 +792,9 @@ These values do not appear in the normal Combat HUD.
 
 - Resizing the viewport during Combat automatically pauses Combat.
 - The gameplay area is recalculated for the new viewport.
-- Player and active enemy positions are reprojected proportionally into the resized gameplay area.
+- Player position, Side Entry enemy positions, Side Entry waypoints, and all vertical positions are reprojected proportionally into the resized gameplay area.
+- Each active `Top Entry` enemy preserves its normalized horizontal position inside the old horizontal engagement band and maps it into the new horizontal engagement band.
+- Resize must not place a `Top Entry` enemy outside the horizontal projectile-alignment range reachable by the aircraft.
 - The player aircraft is then clamped inside its recalculated `Movement Bounds`.
 - Damage and configured movement speeds are not modified by resize.
 - Combat does not resume automatically; the player must select `Resume`.
@@ -1423,6 +1427,12 @@ If the check is missing or the approved budget is violated, the affected system 
 **Given** bounded Boot preload has completed,  
 **when** Combat opens or resizes,  
 **then** it uses the prepared aircraft asset or stable fallback and prepared UI assets without another loading state, repeated application request, or late visual replacement.
+
+### AC-083 — Top Entry remains attackable
+
+**Given** a `Basic Drone` uses `Top Entry`,
+**when** it spawns or the viewport is resized,
+**then** its horizontal centre is inside the aircraft's current horizontal engagement band, its random normalized position inside that band is preserved across resize, and the player can align a vertically fired projectile with its trajectory.
 
 ## 16. Readiness verdict
 
