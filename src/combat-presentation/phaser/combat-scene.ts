@@ -19,7 +19,6 @@ export interface CombatSceneContext {
   readonly bridge: CombatHudBridge;
   /** Prepared `german-fighter` runtime URL, or `null` for the approved fallback. */
   readonly aircraftUrl: string | null;
-  readonly initialHullRatio: number;
   /** Forwards semantic input commands to the application simulation (S08). */
   readonly submitCommand: (command: CombatInputCommand) => void;
   /** Advances the fixed-step simulation by one rendered frame and returns the
@@ -44,7 +43,6 @@ const AIRCRAFT_TEXTURE_KEY = 'aircraft';
 export class CombatScene extends Phaser.Scene {
   private readonly context: CombatSceneContext;
   private geometry: CombatGeometry;
-  private readonly hullRatio: number;
   private aircraftImage: Phaser.GameObjects.Image | null = null;
   private fallbackGraphics: Phaser.GameObjects.Graphics | null = null;
   private aircraftAspectRatio = 0;
@@ -65,12 +63,20 @@ export class CombatScene extends Phaser.Scene {
     number,
     Phaser.GameObjects.Rectangle
   >();
+  /** Read-only stable-ID visual map for hitbox-free destroyed-enemy flashes
+   *  (S11): white stationary squares that are removed when the 100 ms feedback
+   *  expires. They never participate in gameplay or collision. */
+  private readonly destroyedEnemyFlashVisuals = new Map<
+    number,
+    Phaser.GameObjects.Rectangle
+  >();
+  /** True while the aircraft danger flash is active (drives tint/redraw). */
+  private aircraftFlashActive = false;
 
   constructor(context: CombatSceneContext) {
     super({ key: 'combat' });
     this.context = context;
     this.geometry = context.geometry;
-    this.hullRatio = context.initialHullRatio;
     this.simState = context.getSimulationState();
   }
 
@@ -81,11 +87,13 @@ export class CombatScene extends Phaser.Scene {
     // Architecture §9 cleanup).
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.isShuttingDown = true;
-      // Enemy and projectile visuals are scene-owned and destroyed with it; the
-      // maps are cleared so no stale id → destroyed-object references survive
-      // (S09/S10 cleanup).
+      // Enemy, destroyed-enemy-feedback, and projectile visuals are
+      // scene-owned and destroyed with it; the maps are cleared so no stale
+      // id → destroyed-object references survive (S09/S10/S11 cleanup).
       this.enemyVisuals.clear();
+      this.destroyedEnemyFlashVisuals.clear();
       this.projectileVisuals.clear();
+      this.aircraftFlashActive = false;
       this.removeCombatListeners();
     });
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleScaleResize, this);
@@ -104,7 +112,9 @@ export class CombatScene extends Phaser.Scene {
       this.simState.aircraft.centerY,
     );
     this.syncEnemyVisuals();
+    this.syncDestroyedEnemyFlashes();
     this.syncProjectileVisuals();
+    this.applyAircraftFlash();
   }
 
   /** The rendered aircraft aspect ratio (image texture, or approved fallback). */
@@ -250,7 +260,9 @@ export class CombatScene extends Phaser.Scene {
     this.simState = this.context.getSimulationState();
     this.layoutAircraft();
     this.syncEnemyVisuals();
+    this.syncDestroyedEnemyFlashes();
     this.syncProjectileVisuals();
+    this.applyAircraftFlash();
   }
 
   private layoutAircraft(): void {
@@ -302,10 +314,16 @@ export class CombatScene extends Phaser.Scene {
     if (this.isShuttingDown) {
       return;
     }
-    const { enemies, enemySize } = this.simState;
+    const { enemies, enemySize, activeEnemyFlashStepsRemaining } =
+      this.simState;
     const seen = new Set<number>();
     for (const enemy of enemies) {
       seen.add(enemy.id);
+      // S11: an active enemy flashes white for 50 ms after a non-destroying hit.
+      const flashing = (activeEnemyFlashStepsRemaining[enemy.id] ?? 0) > 0;
+      const fillColor = hexToNumber(
+        flashing ? this.geometry.enemyFlashColor : this.geometry.droneColor,
+      );
       let visual = this.enemyVisuals.get(enemy.id);
       if (visual === undefined) {
         visual = this.add
@@ -314,13 +332,14 @@ export class CombatScene extends Phaser.Scene {
             enemy.centerY,
             enemySize,
             enemySize,
-            hexToNumber(this.geometry.droneColor),
+            fillColor,
           )
           .setDepth(COMBAT_RENDER_DEPTH.enemy);
         this.enemyVisuals.set(enemy.id, visual);
       } else {
         visual.setPosition(enemy.centerX, enemy.centerY);
         visual.setSize(enemySize, enemySize);
+        visual.setFillStyle(fillColor);
       }
     }
     for (const [id, visual] of this.enemyVisuals) {
@@ -328,6 +347,72 @@ export class CombatScene extends Phaser.Scene {
         visual.destroy();
         this.enemyVisuals.delete(id);
       }
+    }
+  }
+
+  /**
+   * Reflects the hitbox-free destroyed-enemy flash state (S11): stationary
+   * white squares created on destruction and removed when the 100 ms feedback
+   * expires. These visuals never participate in gameplay or collision.
+   */
+  private syncDestroyedEnemyFlashes(): void {
+    if (this.isShuttingDown) {
+      return;
+    }
+    const { destroyedEnemyFlashes } = this.simState;
+    const seen = new Set<number>();
+    for (const flash of destroyedEnemyFlashes) {
+      seen.add(flash.enemyId);
+      let visual = this.destroyedEnemyFlashVisuals.get(flash.enemyId);
+      if (visual === undefined) {
+        visual = this.add
+          .rectangle(
+            flash.centerX,
+            flash.centerY,
+            flash.size,
+            flash.size,
+            hexToNumber(this.geometry.enemyFlashColor),
+          )
+          .setDepth(COMBAT_RENDER_DEPTH.enemy);
+        this.destroyedEnemyFlashVisuals.set(flash.enemyId, visual);
+      } else {
+        visual.setPosition(flash.centerX, flash.centerY);
+        visual.setSize(flash.size, flash.size);
+      }
+    }
+    for (const [id, visual] of this.destroyedEnemyFlashVisuals) {
+      if (!seen.has(id)) {
+        visual.destroy();
+        this.destroyedEnemyFlashVisuals.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Applies the approved 100 ms aircraft `danger` flash from the authoritative
+   * snapshot (S11, Combat §8.5.1) via a texture tint or a fallback redraw, and
+   * restores the normal colours exactly when the simulation feedback expires.
+   */
+  private applyAircraftFlash(): void {
+    if (this.isShuttingDown) {
+      return;
+    }
+    const flashing = this.simState.aircraftDangerFlashStepsRemaining > 0;
+    if (flashing === this.aircraftFlashActive) {
+      return;
+    }
+    this.aircraftFlashActive = flashing;
+    if (this.aircraftImage !== null) {
+      if (flashing) {
+        this.aircraftImage.setTint(
+          hexToNumber(this.geometry.aircraftFlashColor),
+        );
+      } else {
+        this.aircraftImage.clearTint();
+      }
+    }
+    if (this.fallbackGraphics !== null) {
+      this.redrawFallbackTriangle();
     }
   }
 
@@ -413,7 +498,15 @@ export class CombatScene extends Phaser.Scene {
     const height = this.geometry.aircraftHeightPx;
     const width = height * this.geometry.aircraftAspectRatio;
     graphics.clear();
-    graphics.fillStyle(hexToNumber(this.geometry.aircraftFallbackColor), 1);
+    // S11: while the danger flash is active the fallback is drawn in danger.
+    graphics.fillStyle(
+      hexToNumber(
+        this.aircraftFlashActive
+          ? this.geometry.aircraftFlashColor
+          : this.geometry.aircraftFallbackColor,
+      ),
+      1,
+    );
     // Drawn around the local origin so the whole triangle moves via
     // `graphics.setPosition` from the authoritative simulation state.
     graphics.fillTriangle(
@@ -431,11 +524,16 @@ export class CombatScene extends Phaser.Scene {
     centerY: number,
     aircraftWidth: number,
   ): void {
+    // S11: the CombatHudBridge is updated from the authoritative player Hull
+    // every rendered frame so the bar width and aria-valuenow change in the
+    // same frame as damage, without any React per-frame state.
     this.context.bridge.update({
       aircraftCenterX: centerX,
       aircraftBottomY: centerY + this.geometry.aircraftHeightPx / 2,
       aircraftWidth,
-      hullRatio: this.hullRatio,
+      hullRatio:
+        this.simState.playerHullIntegrity /
+        this.simState.playerMaximumHullIntegrity,
       viewportShortSide: this.geometry.shortSide,
     });
   }

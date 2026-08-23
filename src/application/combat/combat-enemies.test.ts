@@ -38,6 +38,8 @@ function createState(
     missionSeed,
     enemy: BASIC_DRONE,
     schedule: INTERCEPTION.schedule,
+    playerHullIntegrity: 100,
+    playerMaximumHullIntegrity: 100,
   });
 }
 
@@ -360,6 +362,8 @@ describe('S10 resize, seams, and hardening', () => {
         missionSeed: SEED,
         enemy: badEnemy,
         schedule: INTERCEPTION.schedule,
+        playerHullIntegrity: 100,
+        playerMaximumHullIntegrity: 100,
       }),
     ).toThrow(/enemy/);
     const badSchedule = {
@@ -378,6 +382,8 @@ describe('S10 resize, seams, and hardening', () => {
         missionSeed: SEED,
         enemy: BASIC_DRONE,
         schedule: badSchedule,
+        playerHullIntegrity: 100,
+        playerMaximumHullIntegrity: 100,
       }),
     ).toThrow(/schedule/);
   });
@@ -407,6 +413,8 @@ describe('S10 resize, seams, and hardening', () => {
       missionSeed: SEED,
       enemy: BASIC_DRONE,
       schedule: INTERCEPTION.schedule,
+      playerHullIntegrity: 100,
+      playerMaximumHullIntegrity: 100,
     });
     runtime.advance(0.1);
     const before = runtime.getState();

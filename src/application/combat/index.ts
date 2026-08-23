@@ -2,6 +2,7 @@ export {
   loadCombatSession,
   resolveBasicDrone,
   resolveEquippedWeapon,
+  resolveGermanFighter,
   resolveMissionSchedule,
   synchronizeSharedModeAfterToggle,
 } from './combat-session';
@@ -58,9 +59,27 @@ export { planEnemyGroups, spawnGroupDrones } from './spawn-schedule';
 export type { PlannedEnemy, PlannedEnemyGroup } from './spawn-schedule';
 export {
   aircraftCollisionAabb,
+  droneCollisionAabb,
+  projectileCollisionAabb,
   AIRCRAFT_HITBOX_HEIGHT_RATIO,
   AIRCRAFT_HITBOX_WIDTH_RATIO,
 } from './collision-geometry';
+export {
+  resolveAircraftContacts,
+  resolveProjectileCollisions,
+  CONTACT_COOLDOWN_STEPS,
+  CONTACT_DAMAGE,
+  AIRCRAFT_DAMAGE_FLASH_STEPS,
+  DESTROYED_ENEMY_FLASH_STEPS,
+  ENEMY_HIT_FLASH_STEPS,
+} from './collision';
+export type {
+  ContactCollisionInput,
+  ContactCollisionResult,
+  DestroyedEnemyFlash,
+  ProjectileCollisionInput,
+  ProjectileCollisionResult,
+} from './collision';
 export {
   resolveMovementConfig,
   brakingDistance,

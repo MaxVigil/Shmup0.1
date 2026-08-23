@@ -5,6 +5,8 @@
  * application boundary (Repository Architecture §5 / eslint routing).
  */
 export type { ContentCatalogue } from '@content/index';
+export { GERMAN_FIGHTER } from '@content/aircraft';
+export type { AircraftDefinition } from '@content/aircraft';
 export { MACHINE_GUN } from '@content/weapons';
 export type {
   PlayerProjectileConfig,

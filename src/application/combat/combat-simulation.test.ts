@@ -36,6 +36,8 @@ function createState(
     missionSeed: MISSION_SEED,
     enemy: BASIC_DRONE,
     schedule: INTERCEPTION.schedule,
+    playerHullIntegrity: 100,
+    playerMaximumHullIntegrity: 100,
   });
 }
 
@@ -451,6 +453,8 @@ describe('mode exclusivity (AC-006)', () => {
         missionSeed: MISSION_SEED,
         enemy: BASIC_DRONE,
         schedule: INTERCEPTION.schedule,
+        playerHullIntegrity: 100,
+        playerMaximumHullIntegrity: 100,
       });
       runtime.submit({ type: 'combat/keyboard', key: 'up', pressed: true });
       runtime.advance(0.5);
@@ -596,6 +600,8 @@ describe('fixed-step/runtime boundary hardening (S08-WI01)', () => {
           missionSeed: MISSION_SEED,
           enemy: BASIC_DRONE,
           schedule: INTERCEPTION.schedule,
+          playerHullIntegrity: 100,
+          playerMaximumHullIntegrity: 100,
         }),
       ).toThrow(/positive finite/);
     }
@@ -615,6 +621,8 @@ describe('fixed-step accumulator reset on accepted resize (S08-WI01)', () => {
       missionSeed: MISSION_SEED,
       enemy: BASIC_DRONE,
       schedule: INTERCEPTION.schedule,
+      playerHullIntegrity: 100,
+      playerMaximumHullIntegrity: 100,
     });
     runtime.submit({
       type: 'combat/keyboard',

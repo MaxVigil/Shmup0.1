@@ -6,9 +6,10 @@
  * read from the Design System CSS custom properties and cached (Technical
  * Foundation §6.2). The aircraft fallback triangle is an approved light-grey
  * presentation value (Combat AC-056), the projectile uses the approved
- * `text-primary` token as its solid fill (Combat §8.3, S09) and the Basic
- * Drone uses the approved `danger` token as its solid square (Combat §7.2,
- * AC-054, S10).
+ * `text-primary` token as its solid fill (Combat §8.3, S09), the Basic Drone
+ * uses the approved `danger` token as its solid square (Combat §7.2, AC-054,
+ * S10), and S11 damage/destruction feedback uses the approved `text-primary`
+ * white flash and the `danger` aircraft flash (Combat §8.5.1).
  */
 export interface CombatGeometry {
   readonly viewportWidth: number;
@@ -22,6 +23,10 @@ export interface CombatGeometry {
   readonly aircraftFallbackColor: string;
   readonly projectileColor: string;
   readonly droneColor: string;
+  /** Approved white flash for enemy damage/destruction feedback (S11). */
+  readonly enemyFlashColor: string;
+  /** Approved danger flash for the player aircraft after valid damage (S11). */
+  readonly aircraftFlashColor: string;
 }
 
 /**
@@ -56,6 +61,8 @@ export function resolveCombatGeometry(viewport: {
     aircraftFallbackColor: '#cccccc',
     projectileColor: readColorToken('--color-text-primary', '#f1f5f7'),
     droneColor: readColorToken('--color-danger', '#d96767'),
+    enemyFlashColor: readColorToken('--color-text-primary', '#f1f5f7'),
+    aircraftFlashColor: readColorToken('--color-danger', '#d96767'),
   };
 }
 

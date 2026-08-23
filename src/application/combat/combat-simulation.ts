@@ -25,6 +25,11 @@ import {
   spawnGroupDrones,
   type PlannedEnemyGroup,
 } from './spawn-schedule';
+import {
+  resolveAircraftContacts,
+  resolveProjectileCollisions,
+  type DestroyedEnemyFlash,
+} from './collision';
 
 /**
  * Application-owned deterministic Combat simulation (Repository Architecture
@@ -116,6 +121,25 @@ export interface CombatSimulationState {
   readonly nextEnemyId: number;
   /** True once the `110 s` final group has spawned (AC-016/028). */
   readonly finalGroupSpawned: boolean;
+  // S11 collision, damage and destruction (Combat §7.1, §8.4–8.5).
+  /** Authoritative player Hull Integrity (initialized from the snapshot). */
+  readonly playerHullIntegrity: number;
+  /** Validated German Fighter maximum Hull (content input, not a magic number). */
+  readonly playerMaximumHullIntegrity: number;
+  /** Idempotent defeat-trigger seam (S11 sets; S12 owns result resolution). */
+  readonly playerDefeated: boolean;
+  /** Canonical S13 God Mode seam, default off (no Debug command/UI in S11). */
+  readonly godModeEnabled: boolean;
+  /** Steps until the player is next eligible for contact damage (0 = eligible). */
+  readonly contactCooldownStepsRemaining: number;
+  /** Destroyed Basic Drones counted exactly once. */
+  readonly destroyedEnemyCount: number;
+  /** Active-enemy 50 ms white-flash counters keyed by enemy id. */
+  readonly activeEnemyFlashStepsRemaining: Readonly<Record<number, number>>;
+  /** Hitbox-free stationary destroyed-enemy 100 ms white flashes. */
+  readonly destroyedEnemyFlashes: readonly DestroyedEnemyFlash[];
+  /** Player aircraft 100 ms danger flash after valid contact damage. */
+  readonly aircraftDangerFlashStepsRemaining: number;
 }
 
 export interface CombatSimulationInput {
@@ -135,6 +159,10 @@ export interface CombatSimulationInput {
   readonly enemy: EnemyDefinition;
   /** Interception enemy-group schedule (read-only content input, S10). */
   readonly schedule: EnemyGroupSchedule;
+  /** Player Hull Integrity captured from the Mission Snapshot (S11). */
+  readonly playerHullIntegrity: number;
+  /** Validated German Fighter maximum Hull (content input, S11). */
+  readonly playerMaximumHullIntegrity: number;
 }
 
 export interface SimulationFrameResult {
@@ -158,6 +186,10 @@ export function createCombatSimulation(
   assertValidMissionSeed(input.missionSeed);
   assertValidEnemy(input.enemy);
   assertValidSchedule(input.schedule);
+  assertValidPlayerHull(
+    input.playerHullIntegrity,
+    input.playerMaximumHullIntegrity,
+  );
   const shortSide = Math.min(input.viewportWidth, input.viewportHeight);
   const config = resolveMovementConfig(shortSide);
   const bounds = computeBounds(
@@ -241,6 +273,15 @@ export function createCombatSimulation(
     enemies: initialEnemies,
     nextEnemyId: initialEnemies.length,
     finalGroupSpawned: false,
+    playerHullIntegrity: input.playerHullIntegrity,
+    playerMaximumHullIntegrity: input.playerMaximumHullIntegrity,
+    playerDefeated: false,
+    godModeEnabled: false,
+    contactCooldownStepsRemaining: 0,
+    destroyedEnemyCount: 0,
+    activeEnemyFlashStepsRemaining: {},
+    destroyedEnemyFlashes: [],
+    aircraftDangerFlashStepsRemaining: 0,
   };
 }
 
@@ -317,6 +358,26 @@ function assertValidSchedule(schedule: EnemyGroupSchedule): void {
   if (!valid) {
     throw new Error(
       'Invalid combat simulation enemy schedule: regular groups need a non-negative start, positive interval, and positive integer counts; the final group needs a positive time and drone count.',
+    );
+  }
+}
+
+function assertValidPlayerHull(
+  hullIntegrity: number,
+  maximumHullIntegrity: number,
+): void {
+  if (!Number.isFinite(maximumHullIntegrity) || maximumHullIntegrity <= 0) {
+    throw new Error(
+      'Invalid combat simulation player Hull: maximum must be a positive finite number.',
+    );
+  }
+  if (
+    !Number.isFinite(hullIntegrity) ||
+    hullIntegrity < 0 ||
+    hullIntegrity > maximumHullIntegrity
+  ) {
+    throw new Error(
+      `Invalid combat simulation player Hull: current must be finite within [0, ${maximumHullIntegrity}].`,
     );
   }
 }
@@ -414,15 +475,123 @@ export function stepCombatSimulation(
   if (!Number.isFinite(stepSeconds) || stepSeconds <= 0) {
     return state;
   }
+  // S11 defeat freeze: once the idempotent defeat-trigger state is set, no
+  // further gameplay processing runs for any later simulation step (S12 owns
+  // result resolution).
+  if (state.playerDefeated) {
+    return state;
+  }
+  // S11: feedback and the contact cooldown decrement once at the beginning of
+  // each executed step, so feedback created during the collision phase exposes
+  // its full duration in the post-hit snapshot.
+  const begun = beginStepCounters(state);
   const moved =
-    state.mode === 'keyboard'
-      ? stepKeyboard(state, stepSeconds)
-      : stepMouse(state, stepSeconds);
-  // S10: mission time advances only through executed fixed steps; due groups
-  // spawn at their exact mission-time instant, then pre-existing enemies move
+    begun.mode === 'keyboard'
+      ? stepKeyboard(begun, stepSeconds)
+      : stepMouse(begun, stepSeconds);
+  // Mission time advances only through executed fixed steps; due groups spawn
+  // at their exact mission-time instant, then pre-existing enemies move
   // (newly spawned drones begin entering on their first positive movement
   // update), and player firing advances one fixed step (S09).
-  return stepMission(moved, stepSeconds);
+  const withMission = stepMission(moved, stepSeconds);
+  // S11: one explicit post-integration collision phase — projectile-to-enemy
+  // first, then aircraft-to-surviving-enemy contacts (player-readable tie-break).
+  return resolveCollisions(withMission);
+}
+
+/** Decrements every existing feedback counter and the contact cooldown once. */
+function beginStepCounters(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  const activeEnemyFlashStepsRemaining: Record<number, number> = {};
+  for (const [id, steps] of Object.entries(
+    state.activeEnemyFlashStepsRemaining,
+  )) {
+    const next = steps - 1;
+    if (next > 0) {
+      activeEnemyFlashStepsRemaining[Number(id)] = next;
+    }
+  }
+  const destroyedEnemyFlashes = state.destroyedEnemyFlashes
+    .map((flash) => ({ ...flash, stepsRemaining: flash.stepsRemaining - 1 }))
+    .filter((flash) => flash.stepsRemaining > 0);
+  return {
+    ...state,
+    activeEnemyFlashStepsRemaining,
+    destroyedEnemyFlashes,
+    aircraftDangerFlashStepsRemaining: Math.max(
+      0,
+      state.aircraftDangerFlashStepsRemaining - 1,
+    ),
+    contactCooldownStepsRemaining: Math.max(
+      0,
+      state.contactCooldownStepsRemaining - 1,
+    ),
+  };
+}
+
+/**
+ * S11 collision phase orchestration: projectile-to-enemy pairs first, then
+ * aircraft-to-surviving-enemy contacts. Player Hull, defeat, cooldown, enemy
+ * destruction, and the destruction count are all updated atomically; feedback
+ * is presentation-only and never delays gameplay transitions.
+ */
+function resolveCollisions(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  if (state.playerDefeated) {
+    return state;
+  }
+  const projectileResult = resolveProjectileCollisions({
+    projectiles: state.projectiles,
+    enemies: state.enemies,
+    projectileWidth: state.projectileWidth,
+    projectileHeight: state.projectileHeight,
+    enemySize: state.enemySize,
+    existingFlashes: state.activeEnemyFlashStepsRemaining,
+  });
+  const contactResult = resolveAircraftContacts({
+    enemies: projectileResult.enemies,
+    enemySize: state.enemySize,
+    aircraftCenterX: state.aircraft.centerX,
+    aircraftCenterY: state.aircraft.centerY,
+    aircraftWidth: state.aircraftWidth,
+    aircraftHeight: state.aircraftHeight,
+    playerHullIntegrity: state.playerHullIntegrity,
+    playerMaximumHullIntegrity: state.playerMaximumHullIntegrity,
+    contactCooldownStepsRemaining: state.contactCooldownStepsRemaining,
+    aircraftDangerFlashStepsRemaining: state.aircraftDangerFlashStepsRemaining,
+    godModeEnabled: state.godModeEnabled,
+    playerDefeated: state.playerDefeated,
+  });
+  // The active-enemy flash record contains only surviving active enemies.
+  const activeEnemyFlashStepsRemaining: Record<number, number> = {};
+  for (const enemy of contactResult.enemies) {
+    const steps = projectileResult.flashes[enemy.id];
+    if (steps !== undefined && steps > 0) {
+      activeEnemyFlashStepsRemaining[enemy.id] = steps;
+    }
+  }
+  return {
+    ...state,
+    projectiles: projectileResult.projectiles,
+    enemies: contactResult.enemies,
+    playerHullIntegrity: contactResult.playerHullIntegrity,
+    playerDefeated: contactResult.playerDefeated,
+    contactCooldownStepsRemaining: contactResult.contactCooldownStepsRemaining,
+    aircraftDangerFlashStepsRemaining:
+      contactResult.aircraftDangerFlashStepsRemaining,
+    destroyedEnemyCount:
+      state.destroyedEnemyCount +
+      projectileResult.destroyedEnemyCount +
+      contactResult.destroyedEnemyCount,
+    activeEnemyFlashStepsRemaining,
+    destroyedEnemyFlashes: [
+      ...state.destroyedEnemyFlashes,
+      ...projectileResult.destroyedEnemyFlashes,
+      ...contactResult.destroyedEnemyFlashes,
+    ],
+  };
 }
 
 /**
@@ -766,6 +935,15 @@ function resizeSimulation(
     waypointX: enemy.waypointX === null ? null : enemy.waypointX * ratioX,
     waypointY: enemy.waypointY === null ? null : enemy.waypointY * ratioY,
   }));
+  // S11 resize contract: destroyed-enemy feedback stays hitbox-free but its
+  // presentation reprojects with the viewport; feedback step counters are
+  // unaffected by geometry.
+  const destroyedEnemyFlashes = state.destroyedEnemyFlashes.map((flash) => ({
+    ...flash,
+    centerX: flash.centerX * ratioX,
+    centerY: flash.centerY * ratioY,
+    size: shortSide * 0.04,
+  }));
   return {
     ...state,
     viewportWidth: command.width,
@@ -797,6 +975,7 @@ function resizeSimulation(
     enemySpeedPxPerSecond:
       state.enemySpeedPxPerSecond * (command.height / state.viewportHeight),
     enemies,
+    destroyedEnemyFlashes,
   };
 }
 

@@ -56,6 +56,8 @@ function createState(
     missionSeed: 1234,
     enemy: BASIC_DRONE,
     schedule: INTERCEPTION.schedule,
+    playerHullIntegrity: 100,
+    playerMaximumHullIntegrity: 100,
   });
 }
 
@@ -399,6 +401,8 @@ describe('player projectile simulation integration (S09)', () => {
       missionSeed: 1234,
       enemy: BASIC_DRONE,
       schedule: INTERCEPTION.schedule,
+      playerHullIntegrity: 100,
+      playerMaximumHullIntegrity: 100,
     });
     runtime.advance(0.1);
     const before = runtime.getState();

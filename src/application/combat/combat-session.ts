@@ -1,11 +1,17 @@
 import type {
+  AircraftDefinition,
   ContentCatalogue,
   EnemyDefinition,
   EnemyGroupSchedule,
   PlayerProjectileConfig,
   WeaponDefinition,
 } from '../content';
-import { BASIC_DRONE, INTERCEPTION, MACHINE_GUN } from '../content';
+import {
+  BASIC_DRONE,
+  GERMAN_FIGHTER,
+  INTERCEPTION,
+  MACHINE_GUN,
+} from '../content';
 import type { MissionSnapshot } from '../mission/snapshot';
 import type { AssetPreloadResult } from '../ports';
 import type { SessionAction } from '../session';
@@ -57,6 +63,21 @@ export function resolveMissionSchedule(
 }
 
 /**
+ * Resolves the validated German Fighter definition (S11) so the player's
+ * maximum Hull Integrity comes from the content catalogue, never a duplicated
+ * magic number. The MVP has exactly one aircraft; the fallback is defensive.
+ */
+export function resolveGermanFighter(
+  catalogue: ContentCatalogue,
+): AircraftDefinition {
+  return (
+    catalogue.aircraft.find((aircraft) => aircraft.id === 'german-fighter') ??
+    catalogue.aircraft[0] ??
+    GERMAN_FIGHTER
+  );
+}
+
+/**
  * AC-064 shared-setting synchronization: after an accepted `F` toggle that
  * actually changed the active mode, the single shared-session `Mouse Movement
  * Enabled` value is dispatched exactly once to match. An unchanged mode (e.g.
@@ -88,6 +109,8 @@ export interface CombatSessionInput {
   readonly enemy: EnemyDefinition;
   /** Interception enemy-group schedule resolved from the catalogue (S10). */
   readonly schedule: EnemyGroupSchedule;
+  /** Validated German Fighter maximum Hull (S11, from the content seam). */
+  readonly playerMaximumHullIntegrity: number;
   /**
    * Shared-session dispatch (S08, AC-064): the Combat session synchronises the
    * single `Mouse Movement Enabled` value exactly once per accepted `F`

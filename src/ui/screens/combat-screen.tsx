@@ -4,6 +4,7 @@ import {
   loadCombatSession,
   resolveBasicDrone,
   resolveEquippedWeapon,
+  resolveGermanFighter,
   resolveMissionSchedule,
 } from '@application/combat';
 import type { CombatSession } from '@application/combat';
@@ -40,6 +41,7 @@ export function CombatScreen(): ReactElement | null {
     const weapon = resolveEquippedWeapon(content, snapshot.equippedWeapon);
     const enemy = resolveBasicDrone(content);
     const schedule = resolveMissionSchedule(content);
+    const aircraft = resolveGermanFighter(content);
     // Defer the lazy load one microtask: React StrictMode in development
     // mounts, cleans up, and remounts the effect synchronously, so the first
     // effect must not create a Phaser Game that is destroyed before its boot
@@ -57,6 +59,7 @@ export function CombatScreen(): ReactElement | null {
         projectile: content.projectile,
         enemy,
         schedule,
+        playerMaximumHullIntegrity: aircraft.maximumHullIntegrity,
         dispatch: store.dispatch,
       })
         .then((loaded) => {

@@ -42,6 +42,8 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     missionSeed: input.snapshot.combatMissionSeed,
     enemy: input.enemy,
     schedule: input.schedule,
+    playerHullIntegrity: input.snapshot.hullIntegrity,
+    playerMaximumHullIntegrity: input.playerMaximumHullIntegrity,
   });
 
   const submitCommand = (command: CombatInputCommand): void => {
@@ -58,7 +60,6 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     geometry,
     bridge,
     aircraftUrl: aircraftAsset?.status === 'ready' ? aircraftAsset.url : null,
-    initialHullRatio: input.snapshot.hullIntegrity / 100,
     submitCommand,
     advanceFrame: (frameDeltaSeconds) => runtime.advance(frameDeltaSeconds),
     getSimulationState: () => runtime.getState(),
