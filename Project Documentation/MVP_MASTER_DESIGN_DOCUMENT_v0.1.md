@@ -67,7 +67,7 @@ The MVP validates:
 - persistent in-session aircraft damage and Repair;
 - one mission reward and Credit spend loop;
 - keyboard and mouse aircraft control;
-- browser performance on the approved reference device;
+- proxy-verified browser performance for local-only MVP acceptance, with physical reference-device validation required before the first external playtest or any minimum-system-requirement claim;
 - the approved minimal Design System and component governance.
 
 ## 4. Current system inventory
@@ -407,6 +407,8 @@ Combat sustained floor:        not below 50 FPS
 - No repeatable application-attributable main-thread task longer than `50 ms` is allowed during Boot completion, Base interaction, or the representative Combat scenario.
 - After Boot, application-driven asset loading causes no layout shift or late visual replacement.
 - Combat retains its detailed reference-device scenario, FPS, entity cleanup, and five-mission lifecycle gates from the Combat Specification.
+- `S14` local-only acceptance may use recorded production-build proxy evidence when the approved physical reference device is unavailable. Proxy evidence must be identified as non-reference evidence and must not be reported as a reference-device pass.
+- The physical reference-device gate remains mandatory before the first external playtest or any minimum-system-requirement claim. Deferral changes the milestone timing only; it does not change the hardware profile, browsers, workload, or performance budgets.
 - After each of five consecutive missions, no obsolete Combat-owned entity, timer, schedule, listener, or Screen instance may remain. Post-cleanup memory must not show monotonic growth attributable to retained Combat state.
 - Exact framework-specific chunk, tree-shaking, and dependency rules remain deferred until the repository configuration and delivery-command contract are approved; they must satisfy these product-level budgets.
 
@@ -510,9 +512,13 @@ The production-mode artifact is a client-only static web application with one en
 
 ### MASTER-AC-015 — Whole-application performance gate
 
-**Given** the production build runs on the approved reference device through the defined Boot, Base, and representative Combat scenarios,  
-**when** recorded performance evidence is reviewed,  
-**then** transfer, startup, interaction, main-thread, frame-rate, and cleanup measurements satisfy every approved budget before the milestone is complete.
+**Given** the local-only MVP is proposed for `S14` acceptance while the approved physical reference device is unavailable,  
+**when** recorded production-build proxy evidence is reviewed,  
+**then** every measurable transfer, startup, interaction, main-thread, frame-rate, and cleanup budget passes, the evidence is labelled non-reference, and the physical gate remains explicitly pending rather than claimed passed.
+
+**Given** the build is proposed for its first external playtest or for a minimum-system-requirement claim,  
+**when** performance readiness is reviewed,  
+**then** the same budgets pass on the approved physical reference device in the required Chrome and Edge environments before that external milestone proceeds.
 
 ### MASTER-AC-016 — Local delivery boundary
 

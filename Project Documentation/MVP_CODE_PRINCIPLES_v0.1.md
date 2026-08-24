@@ -236,7 +236,7 @@ Required practice:
 - record performance evidence at required milestones and after material Combat changes;
 - investigate sustained budget regression before adding more features on top of it.
 
-Passing on a development machine does not replace the approved reference-device verification.
+Passing on a development machine does not constitute approved physical reference-device verification. For local-only `S14` acceptance, labelled production-build proxy evidence may close the implementation milestone under `DELIVERY-DEC-002`; physical verification remains mandatory before the first external playtest or any minimum-system-requirement claim.
 
 ## 16. Dependencies and licences
 

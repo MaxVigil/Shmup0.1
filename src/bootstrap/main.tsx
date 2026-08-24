@@ -6,6 +6,7 @@ import type { AssetPreloadResult } from '@application/ports';
 import { CONTENT_CATALOGUE } from '@content/index';
 import { createBrowserAssetPreload } from '@platform/assets/preload';
 import { createBrowserSessionSeedSource } from '@platform/browser/session-seed-source';
+import { logBuildIdentifier } from '@platform/diagnostics/build-identifier';
 import { ApplicationContext } from '@ui/application-context';
 import '@ui/styles/index.css';
 import { App } from './app';
@@ -40,6 +41,7 @@ function mount(
 }
 
 async function start(): Promise<void> {
+  logBuildIdentifier();
   const store: SessionStore = createSessionStore();
   const bootRunner = createBootRunner({
     store,

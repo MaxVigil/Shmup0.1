@@ -877,6 +877,8 @@ This is an intentionally conservative test target: a non-gaming entry-level note
 
 Performance acceptance must be tested at native `1366 x 768` in the latest stable Google Chrome and Microsoft Edge available for Windows 10 at test time, with the game in the foreground and non-essential extensions disabled.
 
+For the local-only `S14` milestone, recorded production-build proxy evidence may close MVP implementation acceptance when this physical environment is unavailable. Such evidence must be labelled non-reference and must not be reported as a reference-device pass. Physical validation on this profile remains mandatory before the first external playtest or any minimum-system-requirement claim.
+
 Reference sources:
 
 - [Lenovo IdeaPad 3 15IIL05 configuration 81WE002JUS](https://www.lenovo.com/us/outletus/en/p/laptops/ideapad/ideapad-300/ideapad-3-gen-5-15-inch-intel/81we002jus)
@@ -915,8 +917,8 @@ The representative performance scenario must be rerun:
 
 1. after adding or materially changing any runtime Combat system;
 2. after materially changing enemy count, projectile count, visual effects, collision detection, or rendering;
-3. before declaring a playable milestone complete;
-4. before handing a build to external testers.
+3. before declaring a local-only implementation milestone complete, using proportional production-build evidence from the available environment;
+4. on the approved physical reference device before handing a build to external testers or making a minimum-system-requirement claim.
 
 Each check must record at minimum:
 
@@ -932,7 +934,7 @@ memory before mission
 memory after five missions
 ```
 
-If the check is missing or the approved budget is violated, the affected system or milestone is not complete.
+Missing or failing proportional evidence blocks the affected implementation milestone. Missing or failing physical reference-device evidence blocks the first external playtest and any minimum-system-requirement claim, but does not block the approved local-only `S14` acceptance when compliant proxy evidence is recorded.
 
 ## 15. Acceptance criteria for resolved scope
 
@@ -1214,9 +1216,13 @@ If the check is missing or the approved budget is violated, the affected system 
 
 ### AC-047 — Representative performance scenario
 
-**Given** the representative MVP mission runs on the approved reference device at native `1366 x 768` in the required Chrome and Edge test environments,  
+**Given** the representative MVP mission runs as a production build at `1366 x 768` on the available proxy environment for local-only `S14` acceptance,  
 **when** the complete mission is executed with continuous `Machine Gun` fire,  
-**then** it targets `60 FPS`, does not remain below `50 FPS`, and its verification results are recorded.
+**then** it targets `60 FPS`, does not remain below `50 FPS`, records its results as non-reference evidence, and does not claim the physical reference-device gate passed.
+
+**Given** the same build is proposed for its first external playtest or a minimum-system-requirement claim,  
+**when** the representative mission runs on the approved physical reference device in the required Chrome and Edge environments,  
+**then** it targets `60 FPS`, does not remain below `50 FPS`, and the physical verification results are recorded before that milestone proceeds.
 
 ### AC-048 — Repeated mission cleanup
 

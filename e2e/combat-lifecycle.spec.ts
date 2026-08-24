@@ -194,10 +194,6 @@ test('page refresh discards the session without reward and initializes Operation
 test('development F1 opens Debug, its actions mutate the paused simulation, and it resumes on close (Combat AC-039, AC-041-042, AC-061)', async ({
   page,
 }) => {
-  test.skip(
-    test.info().project.name !== 'development',
-    'Debug is development-only',
-  );
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await startCombat(page);
@@ -250,10 +246,6 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
 test('development Debug Win/Lose enter the normal S12 result flow exactly once (Combat AC-043, AC-068)', async ({
   page,
 }) => {
-  test.skip(
-    test.info().project.name !== 'development',
-    'Debug is development-only',
-  );
   await startCombat(page);
 
   // Win Mission resolves as a normal one-time Success (+1 Credit).
@@ -296,25 +288,4 @@ test('development Debug Win/Lose enter the normal S12 result flow exactly once (
       { timeout: 5000 },
     )
     .toBe('25');
-});
-
-test('production has no Debug UI, F1 has no effect, and no Debug label is reachable (DELIVERY-AC-003)', async ({
-  page,
-}) => {
-  test.skip(
-    test.info().project.name === 'development',
-    'Production exclusion evidence',
-  );
-  await startCombat(page);
-  await page.keyboard.press('F1');
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(
-    page.getByText(/God Mode|Win Mission|Lose Mission/i),
-  ).toHaveCount(0);
-
-  // The non-Debug lifecycle shell is unaffected in production.
-  await page.getByRole('button', { name: 'Pause' }).click();
-  await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
-  await page.getByRole('button', { name: 'Resume' }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
 });

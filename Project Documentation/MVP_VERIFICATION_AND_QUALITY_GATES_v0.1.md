@@ -176,6 +176,8 @@ Manual gates include:
 - reference-device performance profile;
 - five-mission cleanup and memory review.
 
+For local-only `S14` acceptance, a recorded production-build proxy profile may substitute for the unavailable physical reference-device profile only as non-reference evidence. The physical profile remains mandatory before the first external playtest or any minimum-system-requirement claim.
+
 Evidence belongs in `verification/` only when required for a milestone or build handoff. Transient screenshots, traces, and generated reports remain ignored.
 
 ## 11. Performance gate
@@ -193,7 +195,7 @@ At minimum, record a proportional performance check when a change adds or materi
 
 A sustained regression against an approved budget blocks additional dependent feature accumulation until it is understood and resolved or explicitly accepted by the Product Owner.
 
-The final reference-device evidence uses the hardware, browsers, viewport, workload, and fields defined by the product and Delivery specifications.
+Local-only `S14` acceptance uses the available production-build proxy evidence when the approved physical device is unavailable. This evidence must identify the environment and must not claim physical-device certification. The later physical gate uses the hardware, browsers, viewport, workload, and fields defined by the product and Delivery specifications and must pass before the first external playtest or any minimum-system-requirement claim.
 
 ## 12. Dependency and lockfile gate
 

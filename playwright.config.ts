@@ -13,10 +13,20 @@ export default defineConfig({
     {
       name: 'development',
       use: { baseURL: 'http://127.0.0.1:4173' },
+      // S14 test-cost delta: the full behavioural browser suite runs against
+      // the development server once. The compact production smoke (Delivery §7
+      // plus production-only checks) is the production project's contract and
+      // is not repeated against the dev server.
+      testIgnore: /production-smoke\.spec\.ts/,
     },
     {
       name: 'production',
       use: { baseURL: 'http://127.0.0.1:4174' },
+      // S14 test-cost delta: production re-verifies the golden path and the
+      // production-only boundaries (base path, lazy Combat chunk, Debug
+      // exclusion, console, request boundary, artifact hygiene) instead of
+      // repeating the full DEV behaviour suite against the built artifact.
+      testMatch: /production-smoke\.spec\.ts/,
     },
   ],
   webServer: [

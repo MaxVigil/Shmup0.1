@@ -32,7 +32,7 @@ A row is complete only when:
 | Browser lifecycle | Master §7.7 | MASTER-AC-009 | Events cannot duplicate or mutate product state | Covered |
 | Combat entry geometry | Master §7.8 | MASTER-AC-010 | No hidden offsets or entry effects | Covered |
 | Accessibility boundary | Master §7.9 | MASTER-AC-011 | Non-visual Combat and formal certification not claimed | Covered |
-| Whole-app performance | Master §7.10; Combat §14 | MASTER-AC-015; Combat AC-047–048 | Deferred optimization and unverified milestones prohibited | Covered |
+| Whole-app performance | Master §7.10; Combat §14 | MASTER-AC-015; Combat AC-047–048 | S14 requires labelled proxy evidence; physical validation remains mandatory before external playtest or minimum-spec claim | Covered; physical external gate pending |
 | Local delivery | Master §7.11; Delivery §§1–8 | MASTER-AC-016; DELIVERY-AC-001–005 | No backend, telemetry, CDN, external hosting, public URL, publication, or Debug production UI | Covered |
 | Durable narrative constraints | Narrative Rules §§2–7 | NARRATIVE-AC-001–005 | No forced MVP narrative features, hidden national bonuses, or Russian representation | Covered |
 
@@ -71,7 +71,7 @@ A row is complete only when:
 | Pause, Settings, Aborted, and utility controls | Combat §10 | Combat AC-037–038, AC-052, AC-063–067, AC-079–080 | Covered |
 | Debug Mode | Combat §11 | Combat AC-039–043, AC-061, AC-066, AC-080 | Covered |
 | Browser lifecycle and refresh | Combat §12 | Combat AC-044–046, AC-066–069, AC-082 | Covered |
-| Performance and cleanup | Combat §14 | Combat AC-047–048 | Covered |
+| Performance and cleanup | Combat §14 | Combat AC-047–048 | Covered for local-only S14 by proxy and cleanup evidence; physical external gate pending |
 | Combat negative scope | Combat §§4, 7–8, 12.1, 12.6, 13 | Explicit prohibited-behaviour lists plus applicable AC above | Covered |
 
 ## 5. Design System coverage

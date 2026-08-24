@@ -64,7 +64,7 @@ An implementation report cannot mark a Slice `Accepted`; acceptance remains a re
 | S11 | Collision, Damage and Destruction | Deterministic AABB passes, projectile/contact damage, cooldown, destruction, and approved feedback | L | S09, S10 | Work items permitted |
 | S12 | Mission Resolution and Return Loop | Success/Defeat/Aborted, result commitment, reward/Hull effects, recovery, Result Overlay, and repeatable return | L | S06, S11 | Work items permitted |
 | S13 | Pause, Debug and Browser Lifecycle | Pause/Settings, development Debug commands, focus/visibility/resize/refresh behaviour, and recovery | L | S12 | Work items permitted |
-| S14 | Full-MVP Hardening and Local Delivery | End-to-end, accessibility, cleanup, lazy chunk, performance, reference-device, and localhost production-mode evidence | L | S01–S13 | Work items permitted |
+| S14 | Full-MVP Hardening and Local Delivery | End-to-end, accessibility, cleanup, lazy chunk, proxy performance, deferred physical reference-device gate, and localhost production-mode evidence | L | S01–S13 | Work items permitted |
 
 ## 4. Slice contracts
 
@@ -236,9 +236,9 @@ An implementation report cannot mark a Slice `Accepted`; acceptance remains a re
 
 ### S14 — Full-MVP Hardening and Local Delivery
 
-**Outcome:** The complete MVP satisfies cross-system behaviour, accessibility, lifecycle, performance, cleanup, and localhost production-mode requirements with recorded evidence.
+**Outcome:** The complete local-only MVP satisfies cross-system behaviour, accessibility, lifecycle, proxy performance, cleanup, and localhost production-mode requirements with recorded evidence. Physical reference-device validation remains mandatory before the first external playtest or any minimum-system-requirement claim.
 
-**In scope:** complete end-to-end flows, keyboard-only audit, Design System audit, five consecutive missions, lazy Combat chunk inspection, reference-device budgets, cleanup/memory evidence, asset/request boundaries, production Debug exclusion, artifact hygiene, and final regression closure.
+**In scope:** complete end-to-end flows, keyboard-only audit, Design System audit, five consecutive missions, lazy Combat chunk inspection, labelled production-build proxy evidence against the reference-device budgets, explicit deferral of the unavailable physical gate, cleanup/memory evidence, asset/request boundaries, production Debug exclusion, artifact hygiene, and final regression closure.
 
 **Out of scope:** hosting-provider selection, external deployment, public URL, publication, PR-based release flow, backend, analytics, accounts, telemetry, CDN, audio, new polish/features, or weakening gates to accept failures.
 
@@ -335,6 +335,11 @@ The Product Owner has authorized the independent acceptance reviewer to commit a
 | S08 | Accepted |
 | S09 | Accepted |
 | S10 | Accepted |
-| S11–S14 | Not Started |
+| S11 | Accepted |
+| S12 | Accepted |
+| S13 | Accepted |
+| S14 | Accepted |
 
 Status changes require implementation evidence and review. This document is not an agent-maintained progress log; approved status changes are recorded deliberately rather than rewritten speculatively.
+
+`S14` acceptance status: `Feature Complete and Proxy Performance Verified`. Physical Windows 10 Chrome and Edge reference-device validation is a pending external gate before the first external playtest or any minimum-system-requirement claim; it is not claimed passed by `S14`.

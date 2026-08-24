@@ -45,6 +45,8 @@ performance viewport: native 1366 × 768
 
 Mobile, touch, portrait layout, and browsers outside this acceptance set are not delivery blockers for MVP.
 
+The Windows 10 profile remains the intended physical validation target. For the local-only `S14` milestone, production-build proxy evidence from the available implementation environment is sufficient when it is explicitly labelled non-reference. This does not certify Windows performance. Physical Windows 10 validation in Chrome and Edge is mandatory before the first external playtest or any minimum-system-requirement claim.
+
 ## 4. Production-mode requirements
 
 - `DEV_MODE = false`.
@@ -99,6 +101,8 @@ keyboard-only UI audit result
 Design System audit result
 ```
 
+When the approved physical reference device is unavailable, the Combat performance result for local-only `S14` acceptance is a labelled production-build proxy result. The physical result remains a pending external gate and must be recorded before the first external playtest or any minimum-system-requirement claim.
+
 The smoke test must cover:
 
 1. cold page load to Operations;
@@ -145,10 +149,15 @@ The implementation agent must not select or configure a hosting provider, extern
 
 **Given** the complete MVP is proposed for local acceptance testing,  
 **when** local readiness is reviewed,  
-**then** every required build, browser, performance, lifecycle, keyboard, and Design System record is present and passing.
+**then** every required build, browser, proxy-performance, lifecycle, keyboard, and Design System record is present and passing, and unavailable physical reference-device evidence is explicitly pending rather than claimed passed.
+
+**Given** the build is proposed for its first external playtest or a minimum-system-requirement claim,  
+**when** delivery readiness is reviewed,  
+**then** the physical Windows 10 Chrome and Edge reference-device performance record is present and passing.
 
 ## 10. Decision record
 
 | ID | Date | Status | Decision | Consequence |
 |---|---|---|---|---|
 | DELIVERY-DEC-001 | 2026-08-21 | Approved | The complete MVP is playable only through localhost; GitHub stores a source backup. | Hosting-provider selection, external deployment, public URL, PR-based release flow, and publication are outside MVP. Production-mode build and local static-server verification remain mandatory. |
+| DELIVERY-DEC-002 | 2026-08-24 | Approved | `S14` may be accepted as `Feature Complete and Proxy Performance Verified` without the unavailable physical reference device. | The hardware profile and budgets do not change. Physical Windows 10 Chrome and Edge validation is deferred and mandatory before the first external playtest or any minimum-system-requirement claim. Proxy evidence must never be represented as a physical reference-device pass. |
