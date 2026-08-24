@@ -180,6 +180,30 @@ For local-only `S14` acceptance, a recorded production-build proxy profile may s
 
 Evidence belongs in `verification/` only when required for a milestone or build handoff. Transient screenshots, traces, and generated reports remain ignored.
 
+### 10.1 Evidence-on-demand review order
+
+The independent reviewer must inspect evidence in this order:
+
+1. handoff identity and assigned scope;
+2. actual Git diff and changed owners;
+3. failed, deviated, manual, or risk-linked evidence;
+4. full audit records, traces, or screenshots only when the changed risk requires them;
+5. the smallest independent diagnostic needed, followed by every required acceptance gate.
+
+Do not load all prior Slice audits, screenshots, or full evidence packages by default. This rule reduces review context only. It does not authorize skipping a relevant browser, manual, lifecycle, cleanup, production, or performance gate.
+
+### 10.2 External audit evidence threshold
+
+An external technical or process audit is not acceptance evidence unless it identifies:
+
+- repository path and Git revision;
+- concrete file or module owners;
+- an observed fact separately from a recommended solution;
+- a repeatable command, profile, trace, or inspection method;
+- device, browser, viewport, workload, and sample window for performance claims.
+
+Claims about absent files, dependencies, hooks, or architecture must be checked against the repository before action. A numerical improvement without a baseline and method is not a verified estimate.
+
 ## 11. Performance gate
 
 Performance is checked during implementation, not deferred until all features exist.
@@ -192,6 +216,16 @@ At minimum, record a proportional performance check when a change adds or materi
 - runtime assets or fonts;
 - a Screen, Overlay, animation, resize path, or lifecycle listener;
 - bundle or lazy-loading boundaries.
+
+For a Combat-heavy Epic that changes enemy types or their runtime behaviour:
+
+1. approve the representative enemy mix, schedule, and maximum concurrent workload;
+2. run one production-build pre-change proxy baseline on the current accepted revision;
+3. repeat the same scenario after the integrated Epic;
+4. record entity maxima, mean and percentile frame time, sustained FPS, repeatable long tasks, cleanup, and heap or allocation/GC evidence when browser tooling can measure it reliably;
+5. investigate a correlated budget threat before adding object pooling, mutable simulation buffers, spatial partitioning, or another lower-level optimization.
+
+The existing accepted S14 proxy is historical performance evidence, not a substitute for the pre-change baseline when the new Epic's representative workload differs.
 
 A sustained regression against an approved budget blocks additional dependent feature accumulation until it is understood and resolved or explicitly accepted by the Product Owner.
 
@@ -251,7 +285,7 @@ A Slice is eligible for `Accepted` only when:
 
 `S3` must not create a correction cycle by itself. `S4` is neither reported nor tracked. A failed command, missing mandatory evidence, or materially misleading test is at least `S2` until resolved.
 
-An eligible local defect may use the reviewer-owned Micro-correction lane in `AGENTS.md` §10.3 instead of a separate implementation-agent cycle. Acceptance still requires the defect to be fixed, covered by regression, and verified; the lane reduces relay cost but never lowers the threshold.
+An eligible local defect may use the reviewer-owned Micro-correction lane in `AGENTS.md` §10.4 instead of a separate implementation-agent cycle. Acceptance still requires the defect to be fixed, covered by regression, and verified; the lane reduces relay cost but never lowers the threshold.
 
 ### 14.2 UI viewport and focus baseline
 
@@ -265,7 +299,23 @@ Every Slice that creates or materially changes a full-viewport Screen must exten
 
 Use numeric DOM geometry for pass/fail. Screenshots supplement these assertions; they do not replace them. Add the state to the existing test owner rather than creating a one-off probe that survives in product files.
 
-## 15. Readiness
+## 15. Development-process metrics
+
+After each accepted post-MVP Epic, the independent reviewer records the compact fields in `verification/process-metrics-template.md`:
+
+- model/provider and dialogue identifier;
+- input, cached-input, and output tokens when exposed;
+- agent turns, implementation cycles, and correction cycles;
+- loaded canonical sections;
+- control/result size;
+- gate durations;
+- escaped defects found by independent or human review.
+
+If token counts are unavailable, record that fact and use context bytes, turns, cycles, and wall-clock as proxies. These are development-process records. They are not player telemetry and must never be added to the production application.
+
+Re-audit after three accepted post-MVP scopes. Keep an optimization only when cost improves without increased escaped defects or weakened gates.
+
+## 16. Readiness
 
 The dependency lockfile, repository configuration scaffold, and verification-command contract are approved and verified.
 

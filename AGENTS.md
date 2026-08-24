@@ -27,33 +27,43 @@ If sources conflict, stop the affected work and report the exact conflict. Do no
 
 ## 2. Required reading before work
 
-Reading is revision-aware. In a new agent session, read every required source completely. In the same persistent session, first compare repository revisions: unchanged sources already read completely need not be reread. Always reread the assigned Slice contract, every changed canonical source, and the relevant normative sections. Never rely on an agent-authored summary in place of a canonical source.
+Reading is revision-aware and section-routed. In a new dialogue, read completely:
 
-For every task, read completely:
+1. this file;
+2. the active `.agent-handoff/control.json`, when present;
+3. the selected project skill's `SKILL.md`.
 
-- `Project Documentation/README.md`;
-- the relevant feature specification;
-- `MVP_GLOSSARY_v0.1.md`;
-- `MVP_REPOSITORY_ARCHITECTURE_v0.1.md`;
-- `MVP_CODE_PRINCIPLES_v0.1.md`;
-- `MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md`.
+Then read the exact canonical sections named by the assignment and the minimum owner sections below. A section means its heading and all content until the next heading of the same or higher level. Do not substitute an agent summary for a canonical section.
 
-Also read:
+| Change owner                                          | Minimum canonical context                                                                                                                                                                                                                 |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Combat simulation, enemies, weapons, collision        | affected `MVP_COMBAT_SPEC_v0.1.md` sections and AC; Repository Architecture §§5.1–5.3, 8.2, 12, 14–16; Code Principles §§5–6, 9, 11–15, 17, 19–21 as applicable; Verification §§5–11, 14 as applicable                                    |
+| Combat presentation, Phaser, HUD                      | affected Combat sections and AC; Repository Architecture §§5.5, 9, 11–12, 14–16; Code Principles §§9–11, 15, 17, 19–21; affected Design System sections for player-visible UI; Verification §§5–11, 14                                    |
+| Content definitions or validation                     | affected product sections and AC; Repository Architecture §§5.1–5.3, 11–12, 14–16; Code Principles §§3–6, 12–15, 17, 19–21; Verification §§5–8, 11, 14                                                                                    |
+| Base UI or pre-Combat                                 | affected `MVP_BASE_AND_PRECOMBAT_SPEC_v0.1.md` sections and AC; affected Design System component/token/focus sections; Repository Architecture §§5.3–5.4, 8, 12, 14–16; Code Principles §§9–10, 12–15, 17, 19–21; Verification §§5–10, 14 |
+| Cross-system state, Boot, mission boundary, lifecycle | affected Master and Base/Combat transition sections and AC; Repository Architecture §§5–10, 14–16 as applicable; Code Principles §§5–10, 13–15, 17, 19–21; Verification §§5–11, 14                                                        |
+| Build, assets, dependencies, release                  | affected Delivery sections and AC; Repository Architecture §§4, 9, 11, 15–16; Code Principles §§9, 15–19, 21; Verification §§2–14 as applicable                                                                                           |
+| Governance or process only                            | this file; affected Governance, Code Principles, Verification, Repository Architecture, or Process Audit sections only                                                                                                                    |
 
-- `MVP_MASTER_DESIGN_DOCUMENT_v0.1.md` for Boot, cross-system state, lifecycle, or end-to-end work;
-- `MVP_DESIGN_SYSTEM_SPEC_v0.1.md` for any player-visible UI or HUD work;
-- `MVP_NARRATIVE_RULES_v1.0.md` before adding or changing names, copy, people, factions, countries, technologies, or localization;
-- `MVP_DELIVERY_SPEC_v0.1.md` for build, production, asset, or release work;
-- `MVP_TRACEABILITY_MATRIX_v0.1.md` when selecting or reporting Acceptance Criteria;
-- `MVP_IMPLEMENTATION_SLICES_v0.1.md` before planning or implementing any Slice or Work Item.
+Additional routing rules:
 
-Read the selected skill's complete `SKILL.md` before acting. Read only relevant supporting references.
+- read the complete Glossary only when terminology is added, removed, renamed, or uncertain; otherwise read the affected entries;
+- read Narrative Rules only for copy, localization, people, factions, countries, technologies, narrative content, or narrative-dependent assets;
+- read the Traceability Matrix only when selecting, changing, or reporting AC coverage;
+- read the Implementation Slices document only for legacy `S01`–`S14` work;
+- read the Master document only for product boundary, Boot, shared state, lifecycle, end-to-end, or whole-application performance work;
+- read supporting skill references only when a concrete technique requires them.
+
+Escalation rule: if the proposed diff touches an owner, import boundary, product term, or AC outside the loaded route, stop editing and load that owner's relevant canonical sections first. A cross-system change may require several routes. Full-document reading remains required only when a conflict cannot be resolved from routed sections or when the assignment explicitly requests a complete audit.
+
+In the same dialogue, unchanged sections already read need not be reread after checking the repository revision. Always reread the active assignment, changed canonical sections, and sections whose owner enters the diff.
 
 ## 3. Work authorization
 
-- Implement only the explicitly assigned slice.
-- The MVP has exactly fourteen canonical Slices, `S01`–`S14`. A `Sxx-WIyy` Work Item is an execution unit inside its parent Slice and never an additional or complete Slice.
-- Do not mark a parent Slice complete after a Work Item. Slice acceptance requires all applicable source AC, technical criteria, gates, and manual evidence.
+- Implement only the explicitly assigned scope.
+- The completed MVP has exactly fourteen canonical Slices, `S01`–`S14`. A legacy `Sxx-WIyy` Work Item is an execution unit inside its parent Slice and never an additional or complete Slice.
+- Post-MVP work uses one approved Epic scope plus bounded Work Items or corrections inside that Epic. A Work Item never becomes an additional Epic.
+- Do not mark a parent Slice or Epic complete after one Work Item. Acceptance requires all applicable source AC, technical criteria, gates, and manual evidence.
 - An approved MVP document does not authorize implementing every feature in it.
 - Do not add adjacent mechanics, polish, assets, settings, persistence, audio, analytics, backend, deployment, or future architecture without explicit scope.
 - Do not infer product behaviour from a skill, tutorial, previous prototype, or framework convention.
@@ -124,7 +134,7 @@ Before editing:
 
 1. inspect repository status and preserve unrelated work;
 2. read the required sources and selected skill;
-3. resolve the assigned Slice or Work Item against the canonical Slice Registry;
+3. resolve the assigned Slice, Epic, or Work Item against its canonical contract;
 4. verify its dependencies, exact in-scope outcome, AC/TC, negative requirements, gates, and evidence;
 5. report only a material blocker before creating dependent code.
 
@@ -146,13 +156,13 @@ For a correction Work Item, treat the assignment as a repair budget:
 - do not perform incidental refactoring, rewrite the subsystem, or introduce a generalized framework;
 - if the correction requires additional production owners or a materially larger design surface, stop and report the expansion instead of silently broadening the diff.
 
-For a Slice executed through multiple Work Items:
+For a Slice or Epic executed through multiple Work Items:
 
 - plan and complete the Work Items sequentially inside the same assigned Slice;
 - do not request relay, acceptance, or commit after each Work Item unless the handoff declares a mandatory checkpoint;
 - run narrow tests while working and the Slice-level gates once after integration;
 - stop and report only when an S0–S2 blocker prevents safe continuation;
-- never continue into the next Slice.
+- never continue into the next Slice or Epic.
 
 After implementation:
 
@@ -160,7 +170,7 @@ After implementation:
 2. inspect the diff for scope creep and boundary violations;
 3. perform a self-review against every assigned AC/TC and negative requirement;
 4. correct self-discovered in-scope defects before reporting;
-5. write the required Slice report using section 13; when filesystem handoff is active, `result.json` is that report and the user-facing message remains the single line required by section 8.1;
+5. write the required scope report using section 13; when filesystem handoff is active, `result.json` is that report and the user-facing message remains the single line required by section 8.1;
 6. do not describe unrun checks as passing;
 7. set the result to `Awaiting Acceptance Review`, never `Accepted`.
 
@@ -168,35 +178,71 @@ After implementation:
 
 The Product Owner is a non-technical relay between the implementation agent and the independent acceptance reviewer. Do not require the Product Owner to inspect code, compare technical alternatives, rewrite instructions, or determine whether evidence is sufficient.
 
-- Treat canonical repository documents as already available; task messages reference them and include only Slice-specific scope or explicit overrides.
+- Treat canonical repository documents as already available; task messages reference them and include only scope-specific delta, risks, and explicit overrides.
 - Do not repeat reading lists, global architecture rules, standard negative scope, verification rules, reporting rules, or commit rules in every handoff.
 - Do not ask about helper names, file-local decomposition, equivalent test techniques, or other reversible choices within the approved architecture.
 - If several material blockers exist, return them in one report rather than one message per question.
 - A blocker report must explain the observable impact, provide a recommendation, and end with one copyable `RELAY TO ACCEPTANCE REVIEWER` block. Do not ask the Product Owner to choose a technical implementation.
 - A completion report must be copyable unchanged to the acceptance reviewer and contain no request for the Product Owner to interpret test output.
 - Do not send progress narration unless a tool approval is required or the assigned environment requires it to continue.
-- Work on the next Slice begins only from a new explicit assignment after the current Slice is accepted.
+- Work on the next Slice or Epic begins only from a new explicit assignment after the current scope is accepted.
+
+Dialogue lifecycle:
+
+- start one new DeepSeek/Cline dialogue for each canonical Slice or post-MVP Epic;
+- keep every Work Item and correction for that scope in the same dialogue until Accepted;
+- close the dialogue after acceptance; do not carry its speculative or stale context into the next scope;
+- begin the next dialogue with the section-routed read from §2.
+
+Independent review uses evidence on demand:
+
+1. validate handoff identity;
+2. inspect the actual diff and changed owners;
+3. inspect failed, deviated, manual, or risk-linked evidence;
+4. open full audit records or screenshots only when the changed risk requires them;
+5. run the smallest independent diagnostic needed, followed by every required acceptance gate.
+
+Do not load all previous Slice audits, screenshots, or full specifications by default. This changes reading order, not the acceptance threshold.
 
 ### 8.1 Filesystem handoff
 
-When `.agent-handoff/control.json` exists, it is the active transient assignment envelope. It does not replace canonical documentation and is never committed. The implementation agent must:
+When `.agent-handoff/control.json` exists, it is the active transient assignment envelope. It does not replace canonical documentation and is never committed. New post-MVP assignments use protocol v2. The validator retains protocol v1 compatibility only for legacy MVP handoffs. The implementation agent must:
 
 1. run `npm run handoff:validate` before editing;
-2. match `runId`, `sliceId`, `baseRevision`, `taskType`, and the canonical section;
-3. execute only that Slice or correction;
+2. match `runId`, `scopeId`, `baseRevision`, `taskType`, and every canonical section;
+3. execute only that Epic, Work Item, or correction;
 4. write evidence under `.agent-handoff/evidence/` when required;
 5. write `.agent-handoff/result.json` last, after all work and gates, then run `npm run handoff:validate` again;
 6. tell the Product Owner only: `Handoff ready. Tell Codex: DeepSeek completed the cycle.`
 
-`result.json` contains only variable evidence: identifiers, state, changed paths, AC/TC, gates, evidence paths, material deviations, and blockers. Do not copy requirements or full logs into it. A completed result never authorizes the next Slice, commit, or push.
+`result.json` contains only variable evidence: identifiers, state, changed paths, AC/TC, gates, evidence paths, material deviations, and blockers. Do not copy requirements or full logs into it. A completed result never authorizes the next Slice or Epic, commit, or push.
 
-Write `result.json` with this exact shape; arrays may be empty:
+Write new `control.json` assignments with this exact protocol-v2 shape:
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
+  "runId": "stable unique run id",
+  "scopeId": "E01",
+  "taskType": "epic | work_item | correction",
+  "baseRevision": "full 40-character Git revision",
+  "canonicalSections": ["Project Documentation/...md §..."],
+  "delta": ["one observable change per item"],
+  "risks": ["only scope-specific known risks"],
+  "requiredGates": ["npm run verify"],
+  "state": "assigned"
+}
+```
+
+Do not copy standing architecture, negative scope, reporting rules, or complete AC wording into `delta`. `canonicalSections` supplies the exact routed context. `risks` may be empty; the other arrays must not be empty.
+
+Write `result.json` with this exact protocol-v2 shape; arrays may be empty where stated:
+
+```json
+{
+  "protocolVersion": 2,
   "runId": "copied from control",
-  "sliceId": "Sxx",
+  "scopeId": "copied from control",
   "baseRevision": "copied from control",
   "state": "awaiting_review",
   "changedPaths": ["src/..."],
@@ -210,7 +256,7 @@ Write `result.json` with this exact shape; arrays may be empty:
 
 An issue object uses `{ "severity": "S0|S1|S2|S3", "disposition": "blocked|fix_now|accepted_observation", "impact": "one sentence", "owner": "required only for accepted_observation" }`. Set `state` to `blocked` when blockers exist. `awaiting_review` cannot contain `S0`–`S2` or an unpassed gate.
 
-The Product Owner relays only `DeepSeek completed the cycle.` The independent reviewer reads the handoff, inspects the actual diff, and reruns applicable gates. For a correction, the reviewer replaces `control.json`; the Product Owner relays only `Continue the active Slice under the standing protocol.`
+The Product Owner relays only `DeepSeek completed the cycle.` The independent reviewer reads the handoff, inspects the actual diff, and reruns applicable gates. For a correction, the reviewer replaces `control.json`; the Product Owner relays only `Continue the active scope under the standing protocol.`
 
 ## 9. Verification
 
@@ -225,11 +271,11 @@ The Product Owner relays only `DeepSeek completed the cycle.` The independent re
 
 ## 10. Acceptance and correction
 
-- The implementation agent supplies evidence but cannot accept its own Slice.
+- The implementation agent supplies evidence but cannot accept its own Slice, Epic, or Work Item.
 - The independent acceptance reviewer returns either `Accepted` or one consolidated correction task.
-- A correction is named `Sxx-WIyy within Slice Sxx`; it is not a new Slice.
-- Complete all corrections, rerun affected Slice gates, and return one revised report.
-- Do not begin the next Slice while acceptance is pending or corrections remain.
+- A legacy correction is named `Sxx-WIyy within Slice Sxx`; a post-MVP correction remains inside its parent Epic. Neither is a new parent scope.
+- Complete all corrections, rerun affected scope gates, and return one revised report.
+- Do not begin the next Slice or Epic while acceptance is pending or corrections remain.
 
 ### 10.1 Defect and uncertainty policy
 
@@ -253,13 +299,27 @@ Rules:
 - after a second failed correction for the same defect class, stop automatic repetition and review the root cause: specification, test, decomposition, or agent execution;
 - ambiguity outside the assigned scope creates no requirement and no speculative implementation.
 
-Acceptance requires no known `S0`–`S2`, passing required gates, proportionate evidence, no unresolved source conflict, no ownerless deferral, and no known-defective foundation passed to the next Slice.
+Acceptance requires no known `S0`–`S2`, passing required gates, proportionate evidence, no unresolved source conflict, no ownerless deferral, and no known-defective foundation passed to the next dependent scope.
 
 ### 10.2 Proactive process audit
 
-After each accepted Slice, the independent reviewer silently checks correction causes, repeated defects, redundant reading or gates, relay steps, and candidates for a test, lint rule, validator, or hook. Raise a process proposal only when it removes a cycle, prevents a recurring defect class, materially reduces context, or reduces Product Owner involvement. Do not produce a routine process report when no useful change exists.
+After each accepted Slice or Epic, the independent reviewer silently checks correction causes, repeated defects, redundant reading or gates, relay steps, and candidates for a test, lint rule, validator, or hook. Raise a process proposal only when it removes a cycle, prevents a recurring defect class, materially reduces context, or reduces Product Owner involvement. Do not produce a routine process report when no useful change exists.
 
-### 10.3 Micro-correction lane
+After each accepted post-MVP Epic, record the lightweight process metrics defined by the Verification specification. Re-audit the process after three accepted post-MVP scopes. Stop an optimization if cost does not improve or escaped defects increase.
+
+### 10.3 External analysis evidence
+
+Treat an external code, architecture, performance, or process audit as a set of hypotheses until it identifies:
+
+- the exact repository path and Git revision;
+- concrete files and line-level owners;
+- the observed fact separately from the proposed solution;
+- the command, profile, trace, or repeatable method behind quantitative claims;
+- the relevant device, browser, viewport, workload, and sample window for performance claims.
+
+An audit that names absent dependencies, files, hooks, or architecture is not actionable until direct repository inspection confirms the claim. Unsupported percentage improvements are not estimates; reject them as unevidenced. This rule does not require external auditors to use repository terminology perfectly, but it does require evidence that maps to the actual code.
+
+### 10.4 Micro-correction lane
 
 The Product Owner authorizes the independent acceptance reviewer (Codex) to implement a local micro-correction autonomously within an `Accepted` or `Awaiting Acceptance Review` Slice when every condition below holds:
 
@@ -295,7 +355,8 @@ Do not use this lane when the cause is uncertain, more than three logical files 
 - Use `feat(sxx): <slice outcome>` for the first accepted Slice commit, or an explicitly assigned message.
 - After commit, report only the commit hash, commit subject, whether relevant files changed after accepted verification, and exact remaining working-tree entries.
 - The Product Owner has given the independent acceptance reviewer standing authorization to commit accepted Slices and push only to the existing `origin/main` when the working tree is clean and the push is fast-forward. This authorization does not apply to the implementation agent.
-- The same reviewer authorization covers eligible micro-correction amendment commits under §10.3 after applicable gates pass.
+- Post-MVP Epic commits require an explicit Product Owner command until the Product Owner extends or replaces the legacy Slice authorization. Do not infer that extension from Epic acceptance alone.
+- The same reviewer authorization covers eligible micro-correction amendment commits under §10.4 after applicable gates pass.
 - No agent may push another branch or remote, force push, publish, deploy, or create a PR under that standing authorization.
 - Do not push, publish, deploy, create a remote, open a PR, or contact an external system unless explicitly requested.
 - Never combine unrelated user changes into an agent commit.
@@ -308,13 +369,13 @@ Do not use this lane when the cause is uncertain, more than three logical files 
 - A temporary plan may exist in the agent conversation, not as canonical product state.
 - When an approved contract changes, update its canonical document and affected traceability in the same authorized change.
 
-## 13. Required Slice report
+## 13. Required scope report
 
 When filesystem handoff is not active, return exactly one concise, factual report designed to be relayed unchanged:
 
 ```text
 Outcome:
-Slice status: Awaiting Acceptance Review | Correction Required
+Scope status: Awaiting Acceptance Review | Correction Required
 Changed files: [paths grouped by ownership; no file-by-file prose when the path is self-explanatory]
 AC/TC: [IDs covered; identify any uncovered ID]
 Gates: [command → pass/fail; test counts where applicable]

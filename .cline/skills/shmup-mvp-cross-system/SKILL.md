@@ -1,6 +1,6 @@
 ---
 name: shmup-mvp-cross-system
-description: Implement or review approved Shmup MVP work spanning Domain, Content, Boot, Shared Session State, mission boundaries, browser lifecycle, integration, or full-MVP hardening. Use for cross-system slices in this repository; do not use for isolated Base UI, isolated Combat mechanics, or Build-Tooling-only work.
+description: Implement or review approved Shmup work spanning Domain, Content, Boot, Shared Session State, mission boundaries, browser lifecycle, integration, or milestone hardening. Use for an assigned MVP Slice or approved post-MVP cross-system Epic; do not use for isolated Base UI, isolated Combat mechanics, or Build-Tooling-only work.
 ---
 
 # Shmup MVP Cross-System
@@ -9,28 +9,18 @@ Use this skill as a project router for behaviour that crosses Base and Combat or
 
 ## Required sources
 
-Apply the revision-aware reading rule in `AGENTS.md` §2: a new agent session reads these sources completely; the same persistent session may reuse completely read, unchanged sources after checking revisions. Always reread the assigned Slice and changed normative sources.
+Apply the section-routed, revision-aware rule in `AGENTS.md` §2. Read this skill, `AGENTS.md`, and the active assignment completely. Then read:
 
-Before acting, read completely:
+1. every exact canonical section named by the assignment;
+2. the minimum owner sections in each applicable `AGENTS.md` route;
+3. affected Master and Base/Combat transition sections only for owners entered by the change;
+4. affected Glossary entries when terminology changes or is uncertain;
+5. affected Design System sections for shared UI or accessibility;
+6. affected Delivery sections for production, assets, build, or release work;
+7. Narrative Rules only for copy, localization, people, countries, factions, technologies, narrative content, or narrative-dependent assets;
+8. the Traceability Matrix rows only when selecting, changing, or reporting source-qualified AC coverage.
 
-1. `AGENTS.md`;
-2. `Project Documentation/MVP_MASTER_DESIGN_DOCUMENT_v0.1.md`;
-3. `Project Documentation/MVP_GLOSSARY_v0.1.md`;
-4. `Project Documentation/MVP_TECHNICAL_FOUNDATION_v0.1.md`;
-5. `Project Documentation/MVP_REPOSITORY_ARCHITECTURE_v0.1.md`;
-6. `Project Documentation/MVP_CODE_PRINCIPLES_v0.1.md`;
-7. `Project Documentation/MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md`;
-8. `Project Documentation/MVP_TRACEABILITY_MATRIX_v0.1.md`.
-
-Also read:
-
-- `MVP_BASE_AND_PRECOMBAT_SPEC_v0.1.md` when shared state, Boot, Mission Snapshot, Mission Result, Settings, or lifecycle affects Base;
-- `MVP_COMBAT_SPEC_v0.1.md` when shared state, Mission Snapshot, Mission Result, Settings, lifecycle, RNG, or integration affects Combat;
-- `MVP_DESIGN_SYSTEM_SPEC_v0.1.md` for Boot presentation, application shell, shared UI, or cross-Screen accessibility;
-- `MVP_DELIVERY_SPEC_v0.1.md` for full-MVP hardening, production, assets, build, or release work;
-- `MVP_NARRATIVE_RULES_v1.0.md` before changing player-facing names, copy, people, countries, factions, technologies, or localization.
-
-Use source-qualified Acceptance Criteria.
+If the diff enters another owner or AC, expand the route before editing. Do not load the complete Master, feature, technical, Design System, Narrative, or Delivery package merely because a shared type is referenced.
 
 ## Use this skill for
 
@@ -47,7 +37,7 @@ Do not use this skill for a task that belongs entirely to `shmup-mvp-combat` or 
 
 ## Mandatory boundaries
 
-- Implement only the explicitly assigned cross-system slice.
+- Implement only the explicitly assigned cross-system Slice, Epic, or Work Item.
 - Keep Domain independent from React, Phaser, DOM, browser, storage, network, wall-clock, and unseeded randomness APIs.
 - Keep Shared Session State application-owned and mutate it only through named actions or reducers.
 - Do not expose mutable store or simulation objects to presentation.

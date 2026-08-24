@@ -201,6 +201,17 @@ Rules:
 - Tests of generic rules use small local fixtures and do not depend unnecessarily on full production content.
 - Presentation tokens and asset paths are not gameplay content.
 
+Before the first implementation Work Item of a content-heavy Epic:
+
+1. classify each proposed value as authored content, simulation behaviour, presentation mapping, or mission composition;
+2. add only fields required by approved consumers in that Epic;
+3. define units, valid ranges, required identifiers, and cross-references;
+4. update runtime validation and deterministic validation tests in the same change as the schema;
+5. keep content records free of callbacks, framework objects, CSS tokens, and asset paths;
+6. provide one small typed example for each approved content variant.
+
+Do not create one monolithic JSON registry, generic content engine, universal behaviour schema, or fields for hypothetical future mechanics. A data definition may configure an approved reusable behaviour; it cannot replace the product and simulation contract for a genuinely new behaviour.
+
 ## 13. Functions and modules
 
 - A module has one coherent responsibility and one clear owner.
@@ -235,6 +246,16 @@ Required practice:
 - measure before adding pooling, spatial partitioning, memoization, or lower-level data structures;
 - record performance evidence at required milestones and after material Combat changes;
 - investigate sustained budget regression before adding more features on top of it.
+
+A Combat-heavy Epic that changes enemy types, maximum active entity counts, movement behaviours, collision work, or rendering must:
+
+1. define its representative worst approved workload before implementation;
+2. record a pre-change production-build proxy baseline against the current accepted revision;
+3. record the same measurements after integration;
+4. include entity maxima, frame-time distribution, sustained FPS, repeatable long tasks, cleanup, and heap or allocation/GC evidence where the available browser tooling can measure it reliably;
+5. correlate an allocation optimization with an observed budget threat before introducing pooling or mutable hot-path buffers.
+
+If the Epic has not yet fixed its enemy mix, schedule, and maximum concurrent workload, the performance scenario is not ready. Do not substitute an arbitrary stress test and call it representative.
 
 Passing on a development machine does not constitute approved physical reference-device verification. For local-only `S14` acceptance, labelled production-build proxy evidence may close the implementation milestone under `DELIVERY-DEC-002`; physical verification remains mandatory before the first external playtest or any minimum-system-requirement claim.
 

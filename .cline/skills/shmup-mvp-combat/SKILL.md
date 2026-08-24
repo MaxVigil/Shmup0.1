@@ -1,6 +1,6 @@
 ---
 name: shmup-mvp-combat
-description: Implement or review the approved Shmup MVP Combat Screen, deterministic simulation, enemies, weapons, collisions, controls, HUD, lifecycle, and Phaser presentation. Use for any Combat-related task in this repository; do not use for future combat design or unapproved mechanics.
+description: Implement or review approved Shmup Combat work, including deterministic simulation, enemies, weapons, collisions, controls, HUD, lifecycle, and Phaser presentation. Use for an assigned MVP Slice or approved post-MVP Combat Epic; do not use to invent future combat behaviour.
 ---
 
 # Shmup MVP Combat
@@ -9,25 +9,20 @@ Use this skill as a project router, not as an alternative combat design document
 
 ## Required sources
 
-Apply the revision-aware reading rule in `AGENTS.md` §2: a new agent session reads these sources completely; the same persistent session may reuse completely read, unchanged sources after checking revisions. Always reread the assigned Slice and changed normative sources.
+Apply the section-routed, revision-aware rule in `AGENTS.md` §2. Read this skill, `AGENTS.md`, and the active assignment completely. Then read:
 
-Before acting, read completely:
+1. every exact canonical section named by the assignment;
+2. the minimum owner sections in the applicable `AGENTS.md` Combat route;
+3. affected Glossary entries when terminology changes or is uncertain;
+4. affected Design System sections for presentation or HUD;
+5. affected Master transition sections for mission entry, exit, shared state, Boot, browser lifecycle, or whole-application performance;
+6. the Traceability Matrix rows only when selecting, changing, or reporting AC coverage.
 
-1. `AGENTS.md`;
-2. `Project Documentation/MVP_COMBAT_SPEC_v0.1.md`;
-3. `Project Documentation/MVP_GLOSSARY_v0.1.md`;
-4. `Project Documentation/MVP_TECHNICAL_FOUNDATION_v0.1.md`;
-5. `Project Documentation/MVP_REPOSITORY_ARCHITECTURE_v0.1.md`;
-6. `Project Documentation/MVP_CODE_PRINCIPLES_v0.1.md`;
-7. `Project Documentation/MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md`;
-8. `Project Documentation/MVP_DESIGN_SYSTEM_SPEC_v0.1.md` when the task affects presentation or HUD;
-9. `Project Documentation/MVP_MASTER_DESIGN_DOCUMENT_v0.1.md` when the task affects mission entry, exit, shared state, Boot, or browser lifecycle.
-
-Use the Traceability Matrix to identify relevant Acceptance Criteria.
+If the diff enters another owner or AC, expand the route before editing. Do not load the complete Combat, Master, Design System, or technical package merely because the task mentions Combat.
 
 ## Mandatory boundaries
 
-- Implement only the assigned Combat slice.
+- Implement only the assigned Combat Slice, Epic, or Work Item.
 - Combat rules and authoritative state remain outside Phaser.
 - Use fixed-step deterministic TypeScript simulation and project AABB rules.
 - Never load or use Arcade Physics or Matter Physics.

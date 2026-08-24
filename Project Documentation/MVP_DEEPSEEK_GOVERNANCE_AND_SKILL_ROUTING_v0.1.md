@@ -5,6 +5,7 @@
 **Status:** APPROVED  
 **Decision owner:** Product Owner  
 **Approved:** 2026-08-20
+**Process routing updated:** 2026-08-24
 
 ## 1. Purpose
 
@@ -34,7 +35,7 @@ There is no `memory-bank/`, duplicated PLAN/STATUS authority, or copied requirem
 
 The implementation agent must:
 
-1. read canonical sources before planning;
+1. read the assignment-routed canonical sections before planning;
 2. select the project-specific skill for the assigned subsystem;
 3. load a generic skill only when its narrow technique is needed;
 4. treat every skill statement as subordinate to canonical documentation;
@@ -42,7 +43,7 @@ The implementation agent must:
 6. implement only the explicitly assigned slice;
 7. provide verification evidence rather than confidence statements.
 
-The canonical implementation structure contains exactly `S01`–`S14`. Optional `Sxx-WIyy` Work Items are execution units inside a parent Slice and cannot be reported as additional or completed Slices.
+The completed MVP implementation structure contains exactly `S01`–`S14`. Optional legacy `Sxx-WIyy` Work Items are execution units inside a parent Slice and cannot be reported as additional or completed Slices. Post-MVP work uses one approved Epic plus bounded Work Items or corrections inside it.
 
 The agent must not use a generic skill to fill an unspecified product gap.
 
@@ -226,6 +227,30 @@ Other package skills may be used only after confirming that the assigned feature
 
 ## 9. Task routing protocol
 
+### 9.1 Context routing
+
+`AGENTS.md` §2 is the executable context router. Every new dialogue reads `AGENTS.md`, the active assignment, and one selected project skill completely. Canonical documents are then loaded by exact assigned section and change owner rather than as a full package.
+
+Minimum behaviour:
+
+- `control.json` protocol v2 lists every required canonical section;
+- the selected project skill supplies the owner route, not copied requirements;
+- Narrative Rules load only for copy, localization, people, factions, countries, technologies, narrative content, or narrative-dependent assets;
+- the Traceability Matrix loads only when selecting, changing, or reporting AC coverage;
+- a new owner, import boundary, product term, or AC in the proposed diff expands the route before editing;
+- a full document loads only for an explicitly assigned complete audit or when section-level conflict analysis is insufficient.
+
+Do not create condensed specification copies, a Memory Bank, or an agent-authored requirements mirror to reduce reading. The saving comes from precise source selection.
+
+### 9.2 Dialogue lifecycle
+
+- Use one new DeepSeek/Cline dialogue per canonical Slice or post-MVP Epic.
+- Keep every Work Item and correction for that scope in the same dialogue until Accepted.
+- Close the dialogue after acceptance.
+- Start the next scope with a fresh section-routed read.
+
+This rule bounds stale context without paying for complete documentation rereads.
+
 ### Combat task
 
 Load:
@@ -277,13 +302,23 @@ Architecture, build, lint, dependency, or governance work uses canonical technic
 The agent report must identify:
 
 - selected project skill and any generic reference skill;
-- authoritative specifications read;
+- canonical sections loaded;
 - Acceptance Criteria addressed;
 - files changed;
 - commands and manual evidence completed;
 - unresolved assumptions, risks, or blockers.
 
 A report must not say “all tests pass” without listing the executed gate, and must not claim visual or reference-device quality from unit tests.
+
+The independent reviewer uses evidence on demand:
+
+1. validate `control.json` and `result.json` identity;
+2. inspect the actual diff and changed owners;
+3. inspect failed, deviated, manual, or risk-linked evidence;
+4. open full audit records and screenshots only when the changed risk requires them;
+5. run the smallest independent diagnostic needed and every required acceptance gate.
+
+Do not preload previous Slice audits or every evidence file. Evidence-on-demand changes review order, not quality gates or independent acceptance.
 
 ## 12. Governance maintenance
 
@@ -295,6 +330,8 @@ Update this audit only when:
 - observed agent behaviour demonstrates a real routing failure.
 
 Do not expand governance for hypothetical failures. Do not copy entire skill bodies into documentation.
+
+An external audit is actionable only after repository inspection confirms its claims. Require the exact repository path and revision, concrete file owners, a separation of observation from recommendation, and a reproducible method for quantitative claims. Reject unsupported percentage improvements and claims that rely on absent files, dependencies, hooks, or architecture.
 
 ## 13. Readiness
 

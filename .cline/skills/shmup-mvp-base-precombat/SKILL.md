@@ -1,6 +1,6 @@
 ---
 name: shmup-mvp-base-precombat
-description: Implement or review the approved Shmup MVP Operations, Hangar, Repair, weapon selection, Base Navigation, Mission Details, Settings, and result flows. Use for any Base or pre-Combat task in this repository; do not use for future strategic-management systems.
+description: Implement or review approved Shmup Operations, Hangar, Repair, weapon selection, Base Navigation, Mission Details, Settings, and result flows. Use for an assigned MVP Slice or approved post-MVP Base Epic; do not use to invent future strategic-management systems.
 ---
 
 # Shmup MVP Base and Pre-Combat
@@ -9,25 +9,21 @@ Use this skill as a project router, not as a strategic-game design source.
 
 ## Required sources
 
-Apply the revision-aware reading rule in `AGENTS.md` §2: a new agent session reads these sources completely; the same persistent session may reuse completely read, unchanged sources after checking revisions. Always reread the assigned Slice and changed normative sources.
+Apply the section-routed, revision-aware rule in `AGENTS.md` §2. Read this skill, `AGENTS.md`, and the active assignment completely. Then read:
 
-Before acting, read completely:
+1. every exact canonical section named by the assignment;
+2. the minimum owner sections in the applicable `AGENTS.md` Base route;
+3. affected Design System component, token, layout, and focus sections;
+4. affected Glossary entries when terminology changes or is uncertain;
+5. affected Master transition sections only for cross-system flow;
+6. Narrative Rules only for copy, localization, people, countries, factions, technologies, narrative content, or narrative-dependent assets;
+7. the Traceability Matrix rows only when selecting, changing, or reporting AC coverage.
 
-1. `AGENTS.md`;
-2. `Project Documentation/MVP_BASE_AND_PRECOMBAT_SPEC_v0.1.md`;
-3. `Project Documentation/MVP_DESIGN_SYSTEM_SPEC_v0.1.md`;
-4. `Project Documentation/MVP_GLOSSARY_v0.1.md`;
-5. `Project Documentation/MVP_MASTER_DESIGN_DOCUMENT_v0.1.md` for cross-system flow;
-6. `Project Documentation/MVP_TECHNICAL_FOUNDATION_v0.1.md`;
-7. `Project Documentation/MVP_REPOSITORY_ARCHITECTURE_v0.1.md`;
-8. `Project Documentation/MVP_CODE_PRINCIPLES_v0.1.md`;
-9. `Project Documentation/MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md`.
-
-Read `MVP_NARRATIVE_RULES_v1.0.md` before changing player-facing names, copy, personnel, countries, factions, or technology references. Use the Traceability Matrix to identify relevant Acceptance Criteria.
+If the diff enters another owner or AC, expand the route before editing. Do not load the complete Base, Master, Design System, Narrative, or technical package merely because the task mentions Base.
 
 ## Mandatory boundaries
 
-- Implement only the assigned Base or pre-Combat slice.
+- Implement only the assigned Base or pre-Combat Slice, Epic, or Work Item.
 - Base Screens and Overlays are React DOM UI, not Phaser Scenes.
 - Use the approved Shared Session Store and named application commands.
 - Preserve pending-versus-confirmed Overlay behaviour and one-time state transitions.
