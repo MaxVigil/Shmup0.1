@@ -49,8 +49,15 @@ test(
   // parallel full-suite load the wall-clock Defeat poll can exceed the default
   // 30 s test budget, so this long-running simulation test gets an explicit
   // 60 s budget (the simulation, not the assertions, drives the duration).
-  { timeout: 60000 },
+  {
+    annotation: {
+      type: 'runtime-budget',
+      description: 'Natural fixed-step mission uses a 60 s test budget.',
+    },
+  },
   async ({ page }) => {
+    test.setTimeout(60_000);
+
     const pageErrors: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
     const assetRequests: string[] = [];
