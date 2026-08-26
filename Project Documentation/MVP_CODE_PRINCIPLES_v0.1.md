@@ -5,10 +5,11 @@
 **Status:** APPROVED  
 **Decision owner:** Product Owner  
 **Approved:** 2026-08-20
+**Sustainable-development and review update:** 2026-08-26
 
 ## 1. Purpose
 
-These principles constrain how the approved MVP is implemented. They protect product behaviour, deterministic Combat, browser performance, maintainability, and the repository boundaries defined by `MVP_REPOSITORY_ARCHITECTURE_v0.1.md`.
+These principles constrain changes to the accepted MVP baseline and every approved post-MVP scope. They protect product behaviour, deterministic Combat, browser performance, maintainability, and the repository boundaries defined by `MVP_REPOSITORY_ARCHITECTURE_v0.1.md`.
 
 They are mandatory implementation rules, not style suggestions. A local exception requires evidence, a written rationale, and approval at the appropriate architecture or product level.
 
@@ -37,6 +38,16 @@ This order does not authorize knowingly violating a lower item. It determines ho
 - Remove obsolete code when replacing behaviour; do not leave parallel legacy paths or commented-out implementations.
 - A TODO must identify an approved follow-up or concrete defect. Speculative TODOs are forbidden.
 - No module may silently invent missing product behaviour. Missing or conflicting S0–S2 behaviour stops the affected implementation.
+
+### 3.1 Sustainable change
+
+- Optimize for the total cost of the current change and the next foreseeable approved changes, not implementation speed alone.
+- Prefer a reversible implementation when two choices satisfy the same contract and quality threshold. Reversibility does not justify a speculative abstraction.
+- A long-lived boundary change must identify its owner, consumers, compatibility impact, migration path, and rollback or removal path before implementation.
+- Preserve stable interfaces and isolate volatile behaviour at its canonical owner. Do not spread a new mechanic across Domain, application, React, and Phaser when one owner plus adapters is sufficient.
+- Treat repeated edits, broad test breakage, unclear ownership, and one change requiring many unrelated files as coupling signals. Record the concrete signal; do not declare technical debt from file size or personal preference alone.
+- Refactor only to enable an approved change, remove demonstrated duplication or coupling, or correct a measured quality problem. Keep behaviour-preserving structural work separate from behavioural changes when this materially improves review or rollback.
+- Do not build an architecture runway beyond the approved Epic. Add the smallest seam required by a real consumer and its test.
 
 ## 4. TypeScript contract
 
@@ -278,6 +289,11 @@ Passing on a development machine does not constitute approved physical reference
 - Manual evidence covers visual quality, game feel, reference-device performance, and lifecycle behaviour that browser automation cannot represent reliably.
 - Each Acceptance Criterion maps to the suitable evidence type.
 - A bug fix adds a regression test at the lowest reliable layer when technically possible.
+- Test-first development is the default for new deterministic Domain/application behaviour and for a defect with a known expected result. Use a small Red–Green–Refactor loop: make the new test fail for the expected reason, implement the smallest complete behaviour, then improve structure while the suite remains green.
+- Do not claim test-first work unless the failing state was observed. When the environment prevents that observation, report the limitation and still provide the strongest feasible regression.
+- Before refactoring a poorly understood or high-change existing path, add focused characterization tests for relevant current behaviour. A characterization test records what the accepted system does; it does not convert an accidental behaviour into a product requirement. Resolve any conflict with the canonical contract before preserving it.
+- TDD is a technique, not a universal ceremony. Documentation, generated declarations, exploratory spikes, manual visual judgement, and slow cross-system acceptance flows may use another feedback loop when test-first execution would add cost without improving the design signal.
+- The implementation author may write the primary tests, but the independent reviewer judges their correctness and sufficiency. The reviewer derives boundary and failure cases independently and checks that a relevant broken implementation would make the tests fail.
 - Tests must not depend on execution order, real waiting, network access, or uncontrolled randomness.
 - Fake timers are used only for adapter-level time behaviour; fixed-step Domain tests pass time explicitly.
 - Snapshot tests must not replace behavioural assertions or visual review.
@@ -318,7 +334,9 @@ An increment is not complete unless:
 7. performance is checked in proportion to its runtime impact;
 8. documentation and traceability are updated when their contract changed;
 9. no unrelated feature, dependency, or abstraction was introduced;
-10. the implementation report states exactly what changed and what remains.
+10. a high-impact boundary or state change has an explicit migration and rollback or removal path;
+11. an independent reviewer has inspected the implementation and test adequacy; an author cannot be the sole acceptance authority for production code, committed tests, build configuration, or canonical governance;
+12. the implementation report states exactly what changed and what remains.
 
 ## 21. Negative requirements
 
@@ -335,6 +353,7 @@ Implementation must not:
 - duplicate balance, asset paths, or Design Tokens;
 - add dependencies, services, storage, telemetry, or network behaviour outside approved scope;
 - weaken tests, lint, types, or budgets merely to make a gate pass;
+- accept an author's tests solely because they pass or allow a reviewer to accept the reviewer's own substantive amendment;
 - represent an unverified manual requirement as automated coverage;
 - publish, push, deploy, or contact an external system without explicit authorization.
 
@@ -344,4 +363,4 @@ The Code Principles are approved. No additional product decision is required to 
 
 The final cross-document technical audit passed on `2026-08-20`.
 
-The Code Principles are **READY FOR IMPLEMENTATION** and mandatory for every explicitly assigned feature slice.
+The Code Principles are **READY FOR IMPLEMENTATION** and mandatory for every explicitly assigned Slice, Epic, Work Item, or correction.

@@ -6,6 +6,8 @@
 **Decision owner:** Product Owner  
 **Approved:** 2026-08-20
 
+**Lifecycle:** Historical delivery record. `S01`–`S14` are complete. Current post-MVP workflow rules live in `AGENTS.md` and the cross-cutting governance documents.
+
 ## 1. Purpose
 
 This document defines the only canonical implementation-slice structure for the MVP. It sequences already approved requirements; it does not create, replace, weaken, or summarize their product behaviour.
@@ -251,8 +253,8 @@ An implementation report cannot mark a Slice `Accepted`; acceptance remains a re
 Global execution, communication, review, verification, and commit rules live in `AGENTS.md` and must not be copied into each task. A Slice handoff carries only the variable contract:
 
 ```text
-Задача: [Slice Sxx — canonical name]
-Підсистема: Base / Combat / Cross-system / Build-Tooling
+Task: [Slice Sxx — canonical name]
+Subsystem: Base / Combat / Cross-system / Build-Tooling
 Canonical contract: MVP_IMPLEMENTATION_SLICES_v0.1.md §[slice section]
 Explicit additions or overrides: [None unless explicitly approved]
 Dependencies: [accepted Slice IDs]
@@ -264,7 +266,7 @@ The Slice Registry supplies the outcome, scope, negative scope, primary sources,
 A separately assigned Work Item uses:
 
 ```text
-Задача: Work Item Sxx-WIyy within Slice Sxx — name
+Task: Work Item Sxx-WIyy within Slice Sxx — name
 Parent criteria advanced: [IDs]
 Scope delta: [exact bounded correction or checkpoint]
 Still incomplete in parent Slice: [IDs or areas]

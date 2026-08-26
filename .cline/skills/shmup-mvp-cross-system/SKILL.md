@@ -3,9 +3,11 @@ name: shmup-mvp-cross-system
 description: Implement or review approved Shmup work spanning Domain, Content, Boot, Shared Session State, mission boundaries, browser lifecycle, integration, or milestone hardening. Use for an assigned MVP Slice or approved post-MVP cross-system Epic; do not use for isolated Base UI, isolated Combat mechanics, or Build-Tooling-only work.
 ---
 
-# Shmup MVP Cross-System
+# Shmup Cross-System Router
 
 Use this skill as a project router for behaviour that crosses Base and Combat or establishes their shared application foundation. It does not replace the canonical technical or product documents.
+
+The historical `shmup-mvp-cross-system` ID remains stable for handoff compatibility. It also routes approved post-MVP work; it does not limit current scope to MVP implementation.
 
 ## Required sources
 

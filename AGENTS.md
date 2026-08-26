@@ -1,6 +1,32 @@
-# Shmup MVP — Agent Governance
+# Shmup — Agent Governance
 
 These rules apply to DeepSeek, Cline, Codex, and any other implementation agent working in this repository.
+
+## 0. Repository identity and canonical language
+
+### 0.1 Repository Identity Gate
+
+The canonical repository is `https://github.com/MaxVigil/Shmup0.1`. A folder name, prior conversation, memory entry, attachment, or similarly named repository never overrides this identity.
+
+Before substantive analysis, planning, handoff creation, or any file mutation:
+
+1. enter the user-specified checkout or worktree;
+2. run `npm run context:validate`;
+3. inspect the reported root, `origin`, branch, `HEAD`, `origin/main`, working-tree entries, and active-handoff state;
+4. preserve every unrelated tracked or untracked entry;
+5. stop if the command fails or the reported repository differs from the user's explicit target.
+
+For work explicitly requested against current `main`, fetch `origin` before creating an isolated worktree and require zero divergence between local `main` and the fetched `origin/main`. The context validator checks the local remote-tracking revision; it does not prove that a fetch occurred. Record the verified root, remote, and baseline revision in the working plan or handoff.
+
+An active `.agent-handoff/control.json` must have `baseRevision` equal to the current `HEAD`. A stale handoff is a blocker. Replace it only through a new authorized assignment; do not silently reinterpret or reuse it.
+
+### 0.2 Canonical Language Policy
+
+1. Repository documentation is written in English. This includes requirements, specifications, architecture records, decision logs, roadmaps, playtest procedures, agent instructions, skills, code comments, test descriptions, pull-request descriptions, and implementation handoffs.
+2. Communication between the Principal Technical Product Manager and coding agents, including DeepSeek, is in English. Code identifiers and canonical product terms must remain unchanged between documentation, prompts, tests, and implementation.
+3. Communication with Maksym is in Ukrainian by default. English can be used when Maksym requests it or when presenting exact canonical wording that will be added to the repository or sent to a coding agent.
+4. Player-facing localization is outside this policy. Ukrainian, English, Chinese, and other localized game content remain supported product languages. Localization strings are not repository documentation.
+5. Canonical documents must not have complete translated duplicates. A Ukrainian summary can accompany a complex decision when necessary, but the English document remains the single source of truth.
 
 ## 1. Authority
 
@@ -132,11 +158,12 @@ Report the conflict if following the skill would materially change the assigned 
 
 Before editing:
 
-1. inspect repository status and preserve unrelated work;
-2. read the required sources and selected skill;
-3. resolve the assigned Slice, Epic, or Work Item against its canonical contract;
-4. verify its dependencies, exact in-scope outcome, AC/TC, negative requirements, gates, and evidence;
-5. report only a material blocker before creating dependent code.
+1. pass the Repository Identity Gate in §0.1;
+2. inspect repository status and preserve unrelated work;
+3. read the required sources and selected skill;
+4. resolve the assigned Slice, Epic, or Work Item against its canonical contract;
+5. verify its dependencies, exact in-scope outcome, AC/TC, negative requirements, gates, and evidence;
+6. report only a material blocker before creating dependent code.
 
 Do not send a planning summary, restate canonical requirements, or request confirmation for an implementation choice that is already within agent authority.
 
@@ -158,9 +185,11 @@ For a correction Work Item, treat the assignment as a repair budget:
 
 For a Slice or Epic executed through multiple Work Items:
 
-- plan and complete the Work Items sequentially inside the same assigned Slice;
-- do not request relay, acceptance, or commit after each Work Item unless the handoff declares a mandatory checkpoint;
-- run narrow tests while working and the Slice-level gates once after integration;
+- define the Work Items before implementation as small, independently understandable changes with explicit criteria, owners, negative scope, and an integration-safe end state;
+- prefer vertical behaviour slices where they can be tested and reviewed without speculative scaffolding; use a foundation-first Work Item only when a real next consumer and rollback path are explicit;
+- keep same-owner low-risk Work Items in one implementation cycle when the combined diff remains coherent and reviewable;
+- require an independent checkpoint after a Work Item that changes a long-lived state schema or migration, an architectural boundary, a dependency/build contract, a cross-system public interface, or a diff that has become too large for thorough review;
+- run narrow tests while working and the parent-scope gates after integration; a checkpoint also runs every gate required by its changed risk;
 - stop and report only when an S0–S2 blocker prevents safe continuation;
 - never continue into the next Slice or Epic.
 
@@ -179,6 +208,7 @@ After implementation:
 The Product Owner is a non-technical relay between the implementation agent and the independent acceptance reviewer. Do not require the Product Owner to inspect code, compare technical alternatives, rewrite instructions, or determine whether evidence is sufficient.
 
 - Treat canonical repository documents as already available; task messages reference them and include only scope-specific delta, risks, and explicit overrides.
+- Keep the stable repository rules and canonical section order byte-stable when the agent interface allows it. Place task-specific delta after the stable prefix so DeepSeek context caching can reuse the prefix. Never omit a required constraint merely to increase cache hits.
 - Do not repeat reading lists, global architecture rules, standard negative scope, verification rules, reporting rules, or commit rules in every handoff.
 - Do not ask about helper names, file-local decomposition, equivalent test techniques, or other reversible choices within the approved architecture.
 - If several material blockers exist, return them in one report rather than one message per question.
@@ -189,18 +219,22 @@ The Product Owner is a non-technical relay between the implementation agent and 
 
 Dialogue lifecycle:
 
-- start one new DeepSeek/Cline dialogue for each canonical Slice or post-MVP Epic;
-- keep every Work Item and correction for that scope in the same dialogue until Accepted;
-- close the dialogue after acceptance; do not carry its speculative or stale context into the next scope;
-- begin the next dialogue with the section-routed read from §2.
+- start one new DeepSeek/Cline dialogue for each legacy Slice or independently reviewable post-MVP Work Item by default;
+- keep corrections for that same Work Item in its dialogue until independently accepted;
+- a small Epic may remain in one dialogue only while its complete diff has one coherent owner route and remains suitable for thorough review;
+- start a fresh dialogue when a Work Item changes the primary owner set or canonical route, or accumulated context contains obsolete implementation hypotheses;
+- close the dialogue after acceptance; use a fresh reviewer context for Epic integration and final acceptance;
+- begin every new dialogue with the identity and section-routed read from §§0–2.
 
 Independent review uses evidence on demand:
 
 1. validate handoff identity;
-2. inspect the actual diff and changed owners;
-3. inspect failed, deviated, manual, or risk-linked evidence;
-4. open full audit records or screenshots only when the changed risk requires them;
-5. run the smallest independent diagnostic needed, followed by every required acceptance gate.
+2. derive likely failure modes, boundary cases, and negative-requirement risks from the contract before reading the implementation agent's test rationale;
+3. inspect the actual diff, changed owners, and every committed test change;
+4. determine whether the tests would fail for a relevant broken implementation; add or request an independent counter-test when author and reviewer could share the same false assumption;
+5. inspect failed, deviated, manual, or risk-linked evidence;
+6. open full audit records or screenshots only when the changed risk requires them;
+7. run the smallest independent diagnostic needed, followed by every required acceptance gate.
 
 Do not load all previous Slice audits, screenshots, or full specifications by default. This changes reading order, not the acceptance threshold.
 
@@ -273,6 +307,8 @@ The Product Owner relays only `DeepSeek completed the cycle.` The independent re
 
 - The implementation agent supplies evidence but cannot accept its own Slice, Epic, or Work Item.
 - The independent acceptance reviewer returns either `Accepted` or one consolidated correction task.
+- The author of production code, committed tests, build configuration, or a canonical governance contract cannot be the only judge of that change's adequacy.
+- If an acceptance reviewer changes production code, committed tests, build configuration, or a canonical governance contract, the amendment becomes `Awaiting Independent Amendment Review`. A different qualified reviewer must inspect the exact amendment and its test adequacy before `Accepted`. If no second reviewer is available, return the correction to the implementation agent instead of self-accepting it.
 - A legacy correction is named `Sxx-WIyy within Slice Sxx`; a post-MVP correction remains inside its parent Epic. Neither is a new parent scope.
 - Complete all corrections, rerun affected scope gates, and return one revised report.
 - Do not begin the next Slice or Epic while acceptance is pending or corrections remain.
@@ -337,11 +373,13 @@ local defect
 → reviewer confirms micro-correction eligibility and root cause
 → reviewer implements the smallest canonical-owner fix plus regression
 → applicable full gates pass
-→ reviewer creates a `fix(sxx): ...` amendment commit
-→ reviewer may push only under the existing clean-working-tree, existing-origin/main, fast-forward authorization
+→ status becomes Awaiting Independent Amendment Review
+→ a different qualified reviewer inspects the exact amendment, independently checks test adequacy, and reruns the risk-linked gates
+→ only that reviewer may return Accepted
+→ an authorized agent may then create and, where separately authorized, push the amendment commit
 ```
 
-A micro-correction does not create a DeepSeek handoff, Product Owner relay, separate defect backlog, or product discussion. Severity and execution path are separate: a narrowly bounded AC defect may be `S2` yet use this lane when all eligibility conditions hold.
+A micro-correction does not create a separate defect backlog or product discussion. It may avoid a DeepSeek correction cycle, but it never avoids independent amendment review. Severity and execution path are separate: a narrowly bounded AC defect may be `S2` yet use this lane when all eligibility conditions hold.
 
 Do not use this lane when the cause is uncertain, more than three logical files are required, an existing contract must change, multiple systems or owners are affected, manual product judgement is needed, or the correction changes Combat/economy/state semantics. Route those cases through one consolidated correction Work Item. If scope expands while fixing, stop the micro-correction and reclassify it; do not stretch the file limit or hide architectural work inside the amendment.
 
@@ -356,7 +394,7 @@ Do not use this lane when the cause is uncertain, more than three logical files 
 - After commit, report only the commit hash, commit subject, whether relevant files changed after accepted verification, and exact remaining working-tree entries.
 - The Product Owner has given the independent acceptance reviewer standing authorization to commit accepted Slices and push only to the existing `origin/main` when the working tree is clean and the push is fast-forward. This authorization does not apply to the implementation agent.
 - Post-MVP Epic commits require an explicit Product Owner command until the Product Owner extends or replaces the legacy Slice authorization. Do not infer that extension from Epic acceptance alone.
-- The same reviewer authorization covers eligible micro-correction amendment commits under §10.4 after applicable gates pass.
+- The standing authorization covers eligible micro-correction amendment commits under §10.4 only after a different qualified reviewer accepts the amendment and applicable gates pass.
 - No agent may push another branch or remote, force push, publish, deploy, or create a PR under that standing authorization.
 - Do not push, publish, deploy, create a remote, open a PR, or contact an external system unless explicitly requested.
 - Never combine unrelated user changes into an agent commit.
@@ -365,6 +403,7 @@ Do not use this lane when the cause is uncertain, more than three logical files 
 ## 12. Documentation and status
 
 - `Project Documentation/` is the only durable product/technical memory.
+- Apply the Canonical Language Policy in §0.2 to every new or materially revised repository document. Translate or retire a non-English canonical document instead of maintaining a full translated pair.
 - Do not create `memory-bank/`, `PLAN.md`, `STATUS.md`, balance mirrors, entity mirrors, or repeated requirement summaries as parallel authority.
 - A temporary plan may exist in the agent conversation, not as canonical product state.
 - When an approved contract changes, update its canonical document and affected traceability in the same authorized change.

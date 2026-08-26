@@ -5,6 +5,7 @@
 **Status:** APPROVED  
 **Decision owner:** Product Owner  
 **Approved:** 2026-08-20
+**Identity and independent-review update:** 2026-08-26
 
 ## 1. Purpose
 
@@ -67,6 +68,18 @@ npm run preview
 ```
 
 Direct `file://` execution is unsupported.
+
+### Project context validation
+
+Before substantive work, run:
+
+```text
+npm run context:validate
+```
+
+This command verifies the canonical Shmup0.1 `origin`, package marker, Git revisions, main-branch divergence against the local `origin/main`, and active handoff revision. It reports unrelated working-tree entries so the agent can preserve them. It does not contact GitHub. Work requested against current `main` therefore requires an explicit `git fetch origin` before this gate.
+
+When `.agent-handoff/control.json` exists, `npm run handoff:validate` runs the context gate first and then validates the handoff schema and result. A stale handoff must fail before implementation begins.
 
 ## 5. Individual automated gates
 
@@ -185,10 +198,12 @@ Evidence belongs in `verification/` only when required for a milestone or build 
 The independent reviewer must inspect evidence in this order:
 
 1. handoff identity and assigned scope;
-2. actual Git diff and changed owners;
-3. failed, deviated, manual, or risk-linked evidence;
-4. full audit records, traces, or screenshots only when the changed risk requires them;
-5. the smallest independent diagnostic needed, followed by every required acceptance gate.
+2. expected failure modes, boundary cases, and negative-requirement risks derived independently from the canonical contract;
+3. actual Git diff, changed owners, and every committed test change;
+4. whether a relevant broken implementation would make the tests fail; use an independent counter-test when shared author/reviewer assumptions are plausible;
+5. failed, deviated, manual, or risk-linked evidence;
+6. full audit records, traces, or screenshots only when the changed risk requires them;
+7. the smallest independent diagnostic needed, followed by every required acceptance gate.
 
 Do not load all prior Slice audits, screenshots, or full evidence packages by default. This rule reduces review context only. It does not authorize skipping a relevant browser, manual, lifecycle, cleanup, production, or performance gate.
 
@@ -282,10 +297,11 @@ A Slice is eligible for `Accepted` only when:
 - applicable manual, browser, accessibility, lifecycle, and performance evidence exists and matches the tested revision;
 - source conflicts, scope deviations, and negative requirements have been reviewed;
 - no ownerless deferral or known-defective foundation is passed to a dependent Slice.
+- a reviewer independent of the substantive author has judged implementation and test adequacy.
 
 `S3` must not create a correction cycle by itself. `S4` is neither reported nor tracked. A failed command, missing mandatory evidence, or materially misleading test is at least `S2` until resolved.
 
-An eligible local defect may use the reviewer-owned Micro-correction lane in `AGENTS.md` §10.4 instead of a separate implementation-agent cycle. Acceptance still requires the defect to be fixed, covered by regression, and verified; the lane reduces relay cost but never lowers the threshold.
+An eligible local defect may use the reviewer-owned Micro-correction lane in `AGENTS.md` §10.4 instead of a separate implementation-agent cycle. A reviewer who changes production code, committed tests, build configuration, or canonical governance cannot accept that amendment. A different qualified reviewer must inspect the exact amendment and test adequacy before `Accepted`. The lane reduces relay cost but never lowers the threshold or permits self-acceptance.
 
 ### 14.2 UI viewport and focus baseline
 
@@ -303,15 +319,16 @@ Use numeric DOM geometry for pass/fail. Screenshots supplement these assertions;
 
 After each accepted post-MVP Epic, the independent reviewer records the compact fields in `verification/process-metrics-template.md`:
 
-- model/provider and dialogue identifier;
-- input, cached-input, and output tokens when exposed;
+- implementation and review model/provider and dialogue identifiers;
+- prompt cache-hit, prompt cache-miss, and output tokens for each agent when exposed;
+- measured API cost for implementation, review, and repair when exposed, without hard-coding provider prices in this document;
 - agent turns, implementation cycles, and correction cycles;
 - loaded canonical sections;
 - control/result size;
 - gate durations;
 - escaped defects found by independent or human review.
 
-If token counts are unavailable, record that fact and use context bytes, turns, cycles, and wall-clock as proxies. These are development-process records. They are not player telemetry and must never be added to the production application.
+If token counts or costs are unavailable, record that fact and use context bytes, turns, cycles, and wall-clock as proxies. Compare cost per accepted scope, not cost per individual prompt. These are development-process records. They are not player telemetry and must never be added to the production application.
 
 Re-audit after three accepted post-MVP scopes. Keep an optimization only when cost improves without increased escaped defects or weakened gates.
 
@@ -321,4 +338,4 @@ The dependency lockfile, repository configuration scaffold, and verification-com
 
 The final cross-document technical audit and `npm run verify:all` passed on `2026-08-20`.
 
-The Verification and Quality Gates are **READY FOR IMPLEMENTATION** and mandatory for every applicable feature slice and milestone.
+The Verification and Quality Gates are **READY FOR IMPLEMENTATION** and mandatory for every applicable Slice, Epic, Work Item, correction, and milestone.

@@ -1,23 +1,33 @@
 # Post-MVP Process Metrics
 
-Scope ID: `<E##>`
+Scope ID: `<Epic and Work Item IDs>`
 
 Accepted revision: `<40-character Git revision>`
 
 Accepted date: `<YYYY-MM-DD>`
 
-Reviewer: `<name or agent role>`
+Independent reviewer: `<name or agent role>`
+
+## Agent usage
+
+| Agent role               | Model / provider | Dialogue ID |    Cache-hit input tokens |   Cache-miss input tokens |             Output tokens |        Measured API cost |      Turns |
+| ------------------------ | ---------------- | ----------- | ------------------------: | ------------------------: | ------------------------: | -----------------------: | ---------: |
+| Implementation           | `<value>`        | `<value>`   | `<number or unavailable>` | `<number or unavailable>` | `<number or unavailable>` | `<value or unavailable>` | `<number>` |
+| Independent review       | `<value>`        | `<value>`   | `<number or unavailable>` | `<number or unavailable>` | `<number or unavailable>` | `<value or unavailable>` | `<number>` |
+| Amendment review, if any | `<value>`        | `<value>`   | `<number or unavailable>` | `<number or unavailable>` | `<number or unavailable>` | `<value or unavailable>` | `<number>` |
+
+Total measured cost per accepted scope: `<value or unavailable>`
+
+Do not estimate token counts or reconstruct cost from a price copied into this file. Use provider-reported usage and the price applied at execution time. If unavailable, record `unavailable` and use the proxies below.
+
+## Flow and quality
 
 | Metric                                | Value                     |
 | ------------------------------------- | ------------------------- |
-| Model / provider                      | `<value>`                 |
-| Dialogue identifier                   | `<value>`                 |
-| Input tokens                          | `<number or unavailable>` |
-| Cached-input tokens                   | `<number or unavailable>` |
-| Output tokens                         | `<number or unavailable>` |
-| Agent turns                           | `<number>`                |
 | Implementation cycles                 | `<number>`                |
 | Correction cycles                     | `<number>`                |
+| Independent review cycles             | `<number>`                |
+| Canonical context bytes               | `<number or unavailable>` |
 | `control.json` bytes                  | `<number>`                |
 | `result.json` bytes                   | `<number>`                |
 | Gate durations                        | `<command = duration>`    |
@@ -29,4 +39,4 @@ Canonical sections loaded:
 
 - `<document §section>`
 
-Notes: `<only unavailable metrics, environment limits, or material interpretation>`
+Notes: `<only unavailable metrics, environment limits, repair-cost attribution, or material interpretation>`

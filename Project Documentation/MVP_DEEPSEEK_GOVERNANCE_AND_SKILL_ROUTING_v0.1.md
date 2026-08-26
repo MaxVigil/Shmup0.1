@@ -1,19 +1,21 @@
-# MVP DeepSeek Governance and Skill Routing v0.1
+# Shmup DeepSeek Governance and Skill Routing v0.1
 
 **Product:** Shmup  
-**Scope:** Implementation-agent authority, workflow, skill audit, and routing  
+**Scope:** Implementation-agent authority, workflow, context cost, skill audit, and routing
 **Status:** APPROVED  
 **Decision owner:** Product Owner  
 **Approved:** 2026-08-20
-**Process routing updated:** 2026-08-24
+**Process routing updated:** 2026-08-26
 
 ## 1. Purpose
 
-This document defines how DeepSeek/Cline and other coding agents must use canonical documentation and optional game-development skills in this repository.
+This document defines how DeepSeek/Cline and other coding agents must use canonical documentation and optional game-development skills for the accepted MVP baseline and approved post-MVP work.
 
 Skills are technique references, not requirements. They cannot select product scope, architecture, engine ownership, balance, narrative, or delivery behaviour.
 
-The executable repository rules are summarized in `/Users/maximvigilev/Shmup0.1/AGENTS.md`. Cline is pointed to that file by `.clinerules/00-project-governance.md`.
+The executable repository rules live in the current validated checkout's `AGENTS.md`. Cline is pointed to that file by `.clinerules/00-project-governance.md`. An absolute path, previous conversation, or similarly named repository is not authority.
+
+Repository documentation, implementation handoffs, agent-to-agent communication, code comments, and test descriptions use English. Communication with Maksym uses Ukrainian by default. This policy keeps one terminology path and one source of truth; it does not claim that English always uses fewer tokens than every other language.
 
 ## 2. Package design
 
@@ -35,13 +37,14 @@ There is no `memory-bank/`, duplicated PLAN/STATUS authority, or copied requirem
 
 The implementation agent must:
 
-1. read the assignment-routed canonical sections before planning;
-2. select the project-specific skill for the assigned subsystem;
-3. load a generic skill only when its narrow technique is needed;
-4. treat every skill statement as subordinate to canonical documentation;
-5. stop the affected task when a material conflict or missing S0–S2 behaviour exists;
-6. implement only the explicitly assigned slice;
-7. provide verification evidence rather than confidence statements.
+1. pass `npm run context:validate` before substantive work;
+2. read the assignment-routed canonical sections before planning;
+3. select the project-specific skill for the assigned subsystem;
+4. load a generic skill only when its narrow technique is needed;
+5. treat every skill statement as subordinate to canonical documentation;
+6. stop the affected task when a material conflict or missing S0–S2 behaviour exists;
+7. implement only the explicitly assigned Slice, Epic, Work Item, or correction;
+8. provide verification evidence rather than confidence statements.
 
 The completed MVP implementation structure contains exactly `S01`–`S14`. Optional legacy `Sxx-WIyy` Work Items are execution units inside a parent Slice and cannot be reported as additional or completed Slices. Post-MVP work uses one approved Epic plus bounded Work Items or corrections inside it.
 
@@ -229,7 +232,7 @@ Other package skills may be used only after confirming that the assigned feature
 
 ### 9.1 Context routing
 
-`AGENTS.md` §2 is the executable context router. Every new dialogue reads `AGENTS.md`, the active assignment, and one selected project skill completely. Canonical documents are then loaded by exact assigned section and change owner rather than as a full package.
+`AGENTS.md` §§0 and 2 are the executable identity and context router. Every new dialogue validates the checkout, then reads `AGENTS.md`, the active assignment, and one selected project skill completely. Canonical documents are loaded by exact assigned section and change owner rather than as a full package.
 
 Minimum behaviour:
 
@@ -242,14 +245,28 @@ Minimum behaviour:
 
 Do not create condensed specification copies, a Memory Bank, or an agent-authored requirements mirror to reduce reading. The saving comes from precise source selection.
 
-### 9.2 Dialogue lifecycle
+### 9.2 Stable prefix and measured context cost
 
-- Use one new DeepSeek/Cline dialogue per canonical Slice or post-MVP Epic.
-- Keep every Work Item and correction for that scope in the same dialogue until Accepted.
-- Close the dialogue after acceptance.
-- Start the next scope with a fresh section-routed read.
+DeepSeek API context caching reuses fully matching input prefixes on a best-effort basis. When the agent interface exposes request construction:
 
-This rule bounds stale context without paying for complete documentation rereads.
+1. keep stable system rules, `AGENTS.md`, and routed canonical sections in a consistent order;
+2. do not rewrite or reorder unchanged standing text between calls;
+3. put Work Item delta, current diff, failures, and questions after the stable prefix;
+4. send only exact routed sections and risk-linked evidence;
+5. record `prompt_cache_hit_tokens`, `prompt_cache_miss_tokens`, and output tokens when the provider exposes them;
+6. compare total implementation-plus-review cost per accepted scope, including repair cycles.
+
+Caching is an optimization, not an acceptance criterion. It is not guaranteed, and required context must never be removed to manufacture a cache hit. Provider prices change; record measured cost when exposed and link to current provider pricing instead of copying price values into canonical policy.
+
+### 9.3 Dialogue and Work Item lifecycle
+
+- Use one new DeepSeek/Cline dialogue per legacy Slice or independently reviewable post-MVP Work Item by default.
+- Keep corrections for that same Work Item in its dialogue until independently accepted.
+- A small Epic may stay in one dialogue only when its complete diff remains one coherent, reviewable change with one routed context set.
+- Start a fresh dialogue when the next Work Item changes the primary owner set, state boundary, or canonical route, or when accumulated context contains obsolete implementation hypotheses.
+- Close the dialogue after acceptance. Run Epic integration and final acceptance from a fresh reviewer context.
+
+This rule bounds stale context and review size. Section routing and a stable prefix limit reread cost.
 
 ### Combat task
 
@@ -313,10 +330,14 @@ A report must not say “all tests pass” without listing the executed gate, an
 The independent reviewer uses evidence on demand:
 
 1. validate `control.json` and `result.json` identity;
-2. inspect the actual diff and changed owners;
-3. inspect failed, deviated, manual, or risk-linked evidence;
-4. open full audit records and screenshots only when the changed risk requires them;
-5. run the smallest independent diagnostic needed and every required acceptance gate.
+2. derive failure modes, boundary cases, and negative-requirement risks from the contract before reading the author's test rationale;
+3. inspect the actual diff, changed owners, and every committed test change;
+4. check that relevant broken behaviour would make the tests fail; add or request an independent counter-test when needed;
+5. inspect failed, deviated, manual, or risk-linked evidence;
+6. open full audit records and screenshots only when the changed risk requires them;
+7. run the smallest independent diagnostic needed and every required acceptance gate.
+
+If the reviewer changes production code, committed tests, build configuration, or canonical governance, a different qualified reviewer must accept that amendment. The first reviewer cannot be both amendment author and final acceptance authority.
 
 Do not preload previous Slice audits or every evidence file. Evidence-on-demand changes review order, not quality gates or independent acceptance.
 
@@ -339,4 +360,11 @@ The DeepSeek/Cline governance package and current skill audit are approved.
 
 The final cross-document technical audit passed on `2026-08-20`.
 
-The governance package is **READY FOR IMPLEMENTATION**. DeepSeek may work only through explicitly assigned feature slices under the authority and routing rules defined here and in `AGENTS.md`.
+The governance package is **READY FOR IMPLEMENTATION**. DeepSeek may work only through an explicitly assigned Slice, Epic, Work Item, or correction under the authority and routing rules defined here and in `AGENTS.md`.
+
+## 14. External references
+
+- [DeepSeek Context Caching](https://api-docs.deepseek.com/guides/kv_cache/)
+- [DeepSeek Models and Pricing](https://api-docs.deepseek.com/quick_start/pricing/)
+- [Google Engineering Practices: Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html)
+- [Google Engineering Practices: What to look for in a code review](https://google.github.io/eng-practices/review/reviewer/looking-for.html)

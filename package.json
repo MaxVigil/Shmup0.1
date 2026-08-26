@@ -22,7 +22,8 @@
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
     "verify:browser": "npm run test:e2e && npm run test:e2e:production",
     "verify:all": "npm run verify && npm run verify:browser",
-    "handoff:validate": "node scripts/validate-agent-handoff.mjs"
+    "context:validate": "node scripts/validate-project-context.mjs",
+    "handoff:validate": "npm run context:validate && node scripts/validate-agent-handoff.mjs"
   },
   "dependencies": {
     "phaser": "4.2.1",

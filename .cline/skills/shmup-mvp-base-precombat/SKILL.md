@@ -3,9 +3,11 @@ name: shmup-mvp-base-precombat
 description: Implement or review approved Shmup Operations, Hangar, Repair, weapon selection, Base Navigation, Mission Details, Settings, and result flows. Use for an assigned MVP Slice or approved post-MVP Base Epic; do not use to invent future strategic-management systems.
 ---
 
-# Shmup MVP Base and Pre-Combat
+# Shmup Base and Pre-Combat Router
 
 Use this skill as a project router, not as a strategic-game design source.
+
+The historical `shmup-mvp-base-precombat` ID remains stable for handoff compatibility. It also routes approved post-MVP work; it does not limit current scope to MVP implementation.
 
 ## Required sources
 

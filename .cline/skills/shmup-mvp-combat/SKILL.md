@@ -3,9 +3,11 @@ name: shmup-mvp-combat
 description: Implement or review approved Shmup Combat work, including deterministic simulation, enemies, weapons, collisions, controls, HUD, lifecycle, and Phaser presentation. Use for an assigned MVP Slice or approved post-MVP Combat Epic; do not use to invent future combat behaviour.
 ---
 
-# Shmup MVP Combat
+# Shmup Combat Router
 
 Use this skill as a project router, not as an alternative combat design document.
+
+The historical `shmup-mvp-combat` ID remains stable for handoff compatibility. It also routes approved post-MVP work; it does not limit current scope to MVP implementation.
 
 ## Required sources
 

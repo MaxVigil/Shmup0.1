@@ -6,6 +6,8 @@
 **Decision owner:** Product Owner  
 **Completed:** 2026-08-20
 
+**Lifecycle:** Historical evidence for the accepted MVP baseline. It does not replace current repository governance or authorize a new post-MVP scope.
+
 ## 1. Verdict
 
 **READY FOR IMPLEMENTATION**

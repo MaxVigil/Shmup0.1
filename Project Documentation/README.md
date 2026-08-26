@@ -1,57 +1,56 @@
 # Project Documentation
 
-This directory is the canonical location for current Shmup project documentation.
+This directory is the single canonical location for Shmup product, architecture, and development-process documentation.
 
-## Authority rule
+## Authority and language
 
-- Files in `/Users/maximvigilev/Shmup0.1/Project Documentation/` are the authoritative local project copies.
-- Future approved documentation changes must be written here in the same change that approves them.
-- ChatGPT, Codex, attachment, export, and conversation copies are working mirrors and are not authoritative when they differ from this directory.
-- DeepSeek and other implementation agents must read documents from this directory before planning or implementation.
-- A missing, conflicting, or stale referenced document is a blocker. The agent must not infer its contents.
+- Repository files in this directory override ChatGPT attachments, exports, conversation copies, and agent summaries.
+- An agent must use the current validated checkout. It must not follow an absolute path into another Shmup repository or worktree.
+- `AGENTS.md` defines authority order, section-level context routing, work authorization, and the Canonical Language Policy.
+- Canonical repository documentation is English. Player-facing localization is outside this rule.
+- Do not maintain complete translated duplicates or condensed agent-authored requirement mirrors.
+- A missing, conflicting, or stale referenced document is a blocker. Do not infer its contents.
 
-## Current approved product package
+The `MVP_` prefix identifies the accepted v0.1 baseline scope. It does not mean that the project is still in the MVP implementation stage. An unaffected MVP rule remains authoritative until a newer approved document explicitly supersedes it.
 
-- `MVP_MASTER_DESIGN_DOCUMENT_v0.1.md`
-- `MVP_BASE_AND_PRECOMBAT_SPEC_v0.1.md`
-- `MVP_COMBAT_SPEC_v0.1.md`
+## Current cross-cutting contracts
+
+These documents govern both accepted MVP behaviour and approved post-MVP work where applicable:
+
+- `MVP_GLOSSARY_v0.1.md`
+- `MVP_NARRATIVE_RULES_v1.0.md`
 - `MVP_DESIGN_SYSTEM_SPEC_v0.1.md`
 - `MVP_DELIVERY_SPEC_v0.1.md`
-- `MVP_GLOSSARY_v0.1.md`
-- `MVP_TRACEABILITY_MATRIX_v0.1.md`
-- `MVP_NARRATIVE_RULES_v1.0.md`
 - `MVP_TECHNICAL_FOUNDATION_v0.1.md`
 - `MVP_REPOSITORY_ARCHITECTURE_v0.1.md`
 - `MVP_CODE_PRINCIPLES_v0.1.md`
 - `MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md`
-- `MVP_IMPLEMENTATION_SLICES_v0.1.md`
 - `MVP_DEEPSEEK_GOVERNANCE_AND_SKILL_ROUTING_v0.1.md`
-- `MVP_FINAL_TECHNICAL_AUDIT_v0.1.md`
-- `MVP_DEVELOPMENT_PROCESS_AUDIT_v1.0.md`
 
-## Post-MVP preparation
+## Accepted MVP baseline contracts
 
-- `POST_MVP_ENEMY_TYPES_EPIC_READINESS_v0.1.md` — preparation gates for the first enemy-types Epic. Its status is `DEFINITION REQUIRED — NOT READY FOR IMPLEMENTATION`; it does not authorise feature implementation.
+These documents define the shipped v0.1 behaviour and its accepted coverage. Use only the sections that remain relevant to the assigned change:
 
-## Current technical package
+- `MVP_MASTER_DESIGN_DOCUMENT_v0.1.md`
+- `MVP_BASE_AND_PRECOMBAT_SPEC_v0.1.md`
+- `MVP_COMBAT_SPEC_v0.1.md`
+- `MVP_TRACEABILITY_MATRIX_v0.1.md`
 
-The architectural foundation and initial dependency matrix are approved in `MVP_TECHNICAL_FOUNDATION_v0.1.md`.
+## Post-MVP scope documents
 
-The repository structure and dependency boundaries are approved in `MVP_REPOSITORY_ARCHITECTURE_v0.1.md`.
+- `POST_MVP_ENEMY_TYPES_EPIC_READINESS_v0.1.md` — historical preparation for an enemy-types Epic. Its committed status is `DEFINITION REQUIRED — NOT READY FOR IMPLEMENTATION`. It does not authorize implementation and may be superseded by a later approved Epic specification.
 
-Mandatory implementation and review rules are approved in `MVP_CODE_PRINCIPLES_v0.1.md`.
+A new post-MVP specification becomes canonical only when it is tracked in this directory, has an explicit approval/readiness state, and is added to this index in the same authorized change. A draft or untracked file never creates implementation authority.
 
-Repository commands and verification evidence rules are approved in `MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md`.
+## Historical delivery and process evidence
 
-The fixed fourteen-Slice implementation sequence and Work Item rules are approved in `MVP_IMPLEMENTATION_SLICES_v0.1.md`.
+These records explain how the MVP was delivered. They are not standing task context unless an audit or legacy correction explicitly needs them:
 
-Implementation-agent authority and skill routing are approved in `MVP_DEEPSEEK_GOVERNANCE_AND_SKILL_ROUTING_v0.1.md`.
+- `MVP_IMPLEMENTATION_SLICES_v0.1.md` — completed `S01`–`S14` sequence and legacy handoff examples;
+- `MVP_FINAL_TECHNICAL_AUDIT_v0.1.md` — final MVP readiness and implementation audit;
+- `MVP_DEVELOPMENT_PROCESS_AUDIT_v1.0.md` — post-MVP process baseline and the changes implemented on 2026-08-24.
 
-All planned product, technical, and governance artifacts have been created and approved. `MVP_FINAL_TECHNICAL_AUDIT_v0.1.md` passed and authorizes feature implementation through explicitly scoped tasks.
-
-The post-MVP process-cost baseline, context analysis, correction review, and optimisation recommendations are recorded in `MVP_DEVELOPMENT_PROCESS_AUDIT_v1.0.md`. This audit does not weaken the approved quality gates.
-
-Post-MVP work uses section-routed context and protocol-v2 filesystem handoffs. The first planned enemy-types Epic is governed by `POST_MVP_ENEMY_TYPES_EPIC_READINESS_v0.1.md` until its product specification and Acceptance Criteria are approved.
+Standing workflow rules derived from these records now live in `AGENTS.md`, Code Principles, Verification and Quality Gates, and DeepSeek Governance. Do not load the historical records merely to recover a rule already present in those owners.
 
 ## Update rule
 
@@ -59,7 +58,9 @@ When an approved decision changes product behaviour, update together:
 
 1. the authoritative feature or technical document;
 2. related acceptance criteria;
-3. `MVP_TRACEABILITY_MATRIX_v0.1.md`;
-4. `MVP_MASTER_DESIGN_DOCUMENT_v0.1.md` when scope or cross-system behaviour changes;
-5. `MVP_GLOSSARY_v0.1.md` or `MVP_NARRATIVE_RULES_v1.0.md` when their domains change;
-6. this index when a canonical document is added, renamed, superseded, or removed.
+3. `MVP_TRACEABILITY_MATRIX_v0.1.md` while it remains the active coverage map;
+4. `MVP_MASTER_DESIGN_DOCUMENT_v0.1.md` when the cross-system or product boundary changes;
+5. the Glossary or Narrative Rules when their domains change;
+6. this index when a canonical document is added, superseded, reclassified, renamed, or removed.
+
+Do not create a new durable document when an existing canonical owner can hold the decision without losing clarity.

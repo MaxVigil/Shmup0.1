@@ -1,6 +1,6 @@
-# Shmup MVP
+# Shmup
 
-This repository contains the browser-based Shmup MVP.
+This repository contains the browser-based Shmup game. The v0.1 MVP is accepted; further development proceeds through explicitly approved post-MVP Epics and Work Items.
 
 ## Authority
 
@@ -22,6 +22,7 @@ npm ci
 ## Commands
 
 ```text
+npm run context:validate
 npm run dev
 npm run verify
 npm run verify:browser
@@ -32,4 +33,4 @@ See [`MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md`](./Project%20Documentation/MVP
 
 ## Current status
 
-The technical scaffold, governance package, and final technical audit are verified. Feature implementation is authorized only through explicitly scoped tasks governed by `AGENTS.md`.
+The MVP baseline is accepted. Current feature implementation is authorized only through explicitly scoped post-MVP work governed by `AGENTS.md` and the canonical documentation index.
