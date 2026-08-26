@@ -2,11 +2,13 @@
 
 **Date:** 2026-08-24
 
-**Status:** `DEFINITION REQUIRED — NOT READY FOR IMPLEMENTATION`
+**Status:** `SUPERSEDED — HISTORICAL PREPARATION RECORD`
 
 **Classification:** content-heavy and Combat-heavy
 
 **Purpose:** define the preparation gates for the first post-MVP Epic without inventing enemy types or behaviour.
+
+**Superseded by:** `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md` and `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` on 2026-08-26. This file remains historical evidence and creates no implementation authority.
 
 ## 1. Decision
 

@@ -104,3 +104,31 @@
 ## 8. Explicitly absent concepts
 
 The MVP has no Title Screen, Main Menu, Save, autosave, Retry, backend, account, progression, enemy fire, secondary weapon, ammunition, terrain, audio, mobile controls, or mobile layout. These terms must not appear as implemented MVP systems.
+
+## 9. Approved v0.2 terminology overrides
+
+The entries above remain correct for the accepted v0.1 baseline. For work governed by `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md`, the following terms replace conflicting v0.1 meanings.
+
+| Canonical term | v0.2 meaning | Supersedes for v0.2 |
+|---|---|---|
+| `Interception Mission` | One of three authored campaign Missions: Interception 01, 02, or 03 | single Interception only |
+| `Evacuation` | Only voluntary active-mission exit; confirmation followed by an irreversible five-second survival commitment | `Return to Base`, `Aborted` |
+| `Evacuated` | Terminal non-completion result retaining the current Hull and 50% of floored net combat reward | `Aborted` result |
+| `Combat Countdown` | Time remaining until the final scheduled enemy arrival; remains at `00:00` until result or Evacuation replacement | `final group` UI inference |
+| `missionInProgress` | Persisted active-mission marker used as exactly-once refresh/crash Defeat authority | session-only active Mission |
+| `campaign state` | Versioned persisted run data: Pilot, Credits, Hull, weapon, mission progression, run status, and active-mission marker | `shared session state` as durable authority |
+| `New Game` | Confirmed atomic replacement of campaign state after Game Over or save-data failure; user Settings remain | fresh page-load session |
+| `Game Over` | Persisted terminal run state when Defeat Repair cannot be paid | Mission Result Overlay synonym |
+| `Repair` | Automatic full restoration to `100` Hull after Defeat for exactly `8 Credits`, when affordable | 1-Credit Hangar Repair and emergency recovery |
+| `Machine Gun` | Primary Weapon with damage `1` and fire rate `5 shots/s` | v0.1 `6 shots/s` |
+| `Cannon` | Primary Weapon with damage `3` and fire rate `1.5 shots/s` | v0.1 `2 shots/s` |
+| `Basic Drone` | Regular formation/contact enemy with no ranged attack | only enemy type |
+| `Ranged Drone` | Regular area-denial enemy firing fixed-trajectory projectiles | v0.1 absence of enemy fire |
+| `Hunter Drone` | Direct-steering kamikaze interceptor that locks one committed attack direction | generic homing or missile |
+| `Elite Drone` | One authored Mission 03 mini-boss alternating Armoured and Vulnerable phases | generic boss framework |
+| `Armoured` | Elite phase in which player hits deal zero but consume the projectile | shield bubble |
+| `Vulnerable` | Elite phase in which the exposed Core receives normal player-weapon damage | colour-only weak state |
+| `enemy projectile` | Single-hit Ranged or Elite attack entity governed by the v0.2 projectile lifecycle | implemented-v0.1 concept |
+| `contact-damage cooldown` | Per Aircraft/Basic-or-Ranged pair cooldown of `0.75 s`; it grants no immunity from other damage | v0.1 global/player-only `0.5 s` wording |
+
+Progression, persistence, enemy fire, and Game Over remain absent from the v0.1 baseline but are approved scope for this bounded v0.2 Epic.

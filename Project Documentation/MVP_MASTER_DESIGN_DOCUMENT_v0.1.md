@@ -575,3 +575,21 @@ Audio is explicitly `OUT OF SCOPE` for the MVP. The implementation must not add:
 - an audio-unlock interaction.
 
 All required MVP feedback must remain understandable without audio.
+
+## 11. Approved post-MVP v0.2 authority
+
+The readiness and accounting above remain the historical accepted v0.1 baseline. They do not constrain an approved post-MVP Epic to the old one-mission/session-only product behaviour.
+
+`SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md` is the authoritative product contract for the Tactical Combat Foundation Epic. For that Epic only, it explicitly supersedes the following v0.1 Master boundaries:
+
+- one Interception Mission becomes three authored Interception Missions with unlock and replay states;
+- one Basic Drone becomes Basic, Ranged, Hunter, and one phase-based Elite;
+- the fixed v0.1 schedule becomes mission-specific authored timelines and Combat Countdown semantics;
+- session-only campaign state becomes versioned local campaign persistence with separately persisted user Settings;
+- refresh during active Combat becomes an exactly-once Defeat recovery rather than a free fresh session;
+- `Return to Base`/`Aborted` is removed and `Evacuation` becomes the only voluntary active-mission exit;
+- free post-Defeat emergency recovery becomes paid full Repair or Game Over;
+- the v0.1 economy, weapon rates, contact cooldown, HUD, result set, and enemy-fire absence are replaced only as enumerated by the v0.2 specification;
+- five approved optimized enemy PNGs extend the runtime manifest, which remains bounded by the unchanged `2 MiB` total budget.
+
+Unaffected Master requirements remain authoritative. The v0.2 specification, its traceability entry, and `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` must be used together; no single document authorizes an unbounded Epic implementation.

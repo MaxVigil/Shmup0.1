@@ -274,3 +274,9 @@ The implementation must not:
 The final cross-document technical audit passed on `2026-08-20`.
 
 The Technical Foundation is **READY FOR IMPLEMENTATION** through explicitly assigned feature slices governed by `AGENTS.md` and the Verification and Quality Gates specification.
+
+## 14. Approved v0.2 persistence extension
+
+For `V02-WI-02` only, the Product Owner approved exactly pinned `dexie@4.4.5` as the IndexedDB persistence adapter defined by `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md` §14. The Work Item must add the exact package and lockfile entry, run the complete dependency and browser gates, and keep Dexie inside the platform persistence adapter. Domain, UI, and Phaser code must not import Dexie or mutate stored records directly.
+
+This approval does not mean Dexie is present in the accepted baseline before `V02-WI-02`, and it does not authorize another persistence dependency, backend, cloud sync, multiple save slots, or mid-Combat restoration.

@@ -113,3 +113,30 @@ Any requirement addition, removal, or behavioural change must update in the same
 5. the canonical glossary if terminology changes.
 
 A change is incomplete if traceability is not updated.
+
+## 8. Shmup v0.2 Tactical Combat Foundation coverage
+
+The authoritative source is `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md`. Work Item ownership is defined in `SHMUP_V0.2_IMPLEMENTATION_SLICES.md`. The MVP rows above remain historical coverage and are superseded only where the v0.2 specification says so explicitly.
+
+| v0.2 requirement domain | Source sections | Acceptance coverage | Work Item owner | Status |
+|---|---|---|---|---|
+| Initial progression, unlock, and replay | §§5, 7, 13, 14 | V02-AC-001–002 | V02-WI-03 | Covered |
+| Authored timelines and no reactive spawn cheating | §§6, 8 | V02-AC-003–004 | V02-WI-03 | Covered |
+| Combat Countdown | §§8, 13, 15 | V02-AC-005 | V02-WI-04 | Covered |
+| Ranged activation and attack | §§9.2, 10 | V02-AC-006 | V02-WI-04 | Covered |
+| Hunter approach, commitment, and outcomes | §§9.3, 11.2, 12 | V02-AC-007–008 | V02-WI-04 | Covered |
+| Elite entry, phases, and bounded attacks | §§8.3, 9.4, 10 | V02-AC-009–010 | V02-WI-06 | Covered |
+| Projectile and regular-contact lifecycle | §§10–11 | V02-AC-011–012 | V02-WI-04 | Covered |
+| Success economy and result commitment | §§12.1–12.2, 13.3, 15.4 | V02-AC-013 | V02-WI-04 | Covered |
+| Evacuation commitment and result | §§12.3, 13.4, 15 | V02-AC-014–015 | V02-WI-05 | Covered |
+| Defeat, paid Repair, and Game Over | §§12.4, 13.5–13.6 | V02-AC-016 | V02-WI-05 | Covered |
+| New Game and Settings separation | §§13.6, 14.1 | V02-AC-017 | V02-WI-02 | Covered |
+| Active-mission recovery and hidden-tab pause | §§14.3–14.4 | V02-AC-018–019 | V02-WI-02 | Covered |
+| Atomic persistence and corrupted-save recovery | §§13.2, 14.1–14.2 | V02-AC-020–021 | V02-WI-02 | Covered |
+| Minimal Combat UI and terminal result UX | §15 | V02-AC-022–023 | V02-WI-04, V02-WI-05 | Covered |
+| Enemy visual vocabulary and runtime asset contract | §16 | V02-AC-024–025 | V02-WI-01 | Covered |
+| Debug authority | §17 | V02-AC-026 | V02-WI-07 | Covered |
+| Cleanup and repeated missions | §§13, 18, 20 | V02-AC-027 | V02-WI-07 | Covered |
+| Representative performance workloads | §§16, 20.1 | V02-AC-028 | V02-WI-07 | Covered |
+
+The negative requirements in §18 apply to every Work Item. Every handoff must cite its owned AC, relevant negative requirements, preceding accepted revision, and exact verification gates. No v0.2 AC is orphaned.

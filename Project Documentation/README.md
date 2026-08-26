@@ -38,7 +38,10 @@ These documents define the shipped v0.1 behaviour and its accepted coverage. Use
 
 ## Post-MVP scope documents
 
-- `POST_MVP_ENEMY_TYPES_EPIC_READINESS_v0.1.md` — historical preparation for an enemy-types Epic. Its committed status is `DEFINITION REQUIRED — NOT READY FOR IMPLEMENTATION`. It does not authorize implementation and may be superseded by a later approved Epic specification.
+- `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md` — approved canonical product contract for the v0.2 Tactical Combat Foundation Epic; ready only for bounded Work Item handoffs.
+- `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` — approved dependency order, ownership, acceptance boundaries, and DeepSeek handoff gates for v0.2 Work Items.
+- `SHMUP_V0.2_RECOVERY_AND_READINESS_AUDIT.md` — recovery evidence, freshness audit, corrected blockers, and implementation-state report.
+- `POST_MVP_ENEMY_TYPES_EPIC_READINESS_v0.1.md` — superseded historical preparation record. It does not authorize implementation.
 
 A new post-MVP specification becomes canonical only when it is tracked in this directory, has an explicit approval/readiness state, and is added to this index in the same authorized change. A draft or untracked file never creates implementation authority.
 
