@@ -36,8 +36,16 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
+      // STAB-E2E-WI01: readiness is TCP-level. This Playwright version starts
+      // every top-level webServer for every project run, so the DEV gate also
+      // launches the production preview server; `vite preview` without a
+      // `dist/` artifact answers HTTP 404 for its readiness URL and the DEV
+      // gate used to time out before running a single test. The preview
+      // process binds and listens regardless of the artifact, so `port`
+      // readiness passes and the production smoke (which builds `dist/`
+      // first) still asserts the real artifact contents.
       command: 'npm run preview -- --host 127.0.0.1 --port 4174',
-      url: 'http://127.0.0.1:4174',
+      port: 4174,
       reuseExistingServer: false,
     },
   ],
