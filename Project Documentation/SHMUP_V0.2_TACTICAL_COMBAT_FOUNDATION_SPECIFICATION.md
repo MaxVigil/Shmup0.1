@@ -638,6 +638,8 @@ The result does not show duration, score, DPS, wave number, enemy HP, or specula
 
 ### 16.1 Shared production contract
 
+**DECISION (2026-08-28):** `V02-DEC-015–017` reuse bounded Boot preparation for enemy assets, define role-specific procedural fallbacks, and separate WI-01 asset-layer evidence from WI-07 final three-mission traversal acceptance.
+
 - Exactly five enemy gameplay sprites are required:
   - `basic-drone.png`;
   - `ranged-drone.png`;
@@ -649,8 +651,9 @@ The result does not show duration, score, DPS, wave number, enemy HP, or specula
 - View is exact top-down orthographic; craft is centred, fully visible, and oriented nose-down towards the player.
 - Role recognition must work at approved gameplay scale, in grayscale, and without text, glow, or colour-only coding.
 - Lighting, rendering quality, tone, and restrained dark metallic palette form one coherent set.
-- Runtime scale and hitbox mapping are presentation/content values and must be verified at the minimum supported viewport.
-- Assets must be registered in the central runtime catalogue, included in a bounded Combat preload with the existing stable-fallback and one-request rules, and covered by applicable licence/provenance records.
+- Runtime scale and complete rendered bounds are presentation/content values and must be verified at the minimum supported viewport in `V02-WI-01`. Authoritative gameplay hitbox mapping is verified by the Work Item that introduces each enemy's simulation consumer: regular enemies in `V02-WI-04` and Elite in `V02-WI-06`.
+- Assets must be registered in the central runtime catalogue and added to the existing bounded Boot preload. The approved manifest therefore grows from twelve to seventeen entries. All five enemy image requests start in parallel with the existing non-critical runtime assets, use the same `5 s` deadline, and are requested no more than once per page load by application loading logic.
+- Each enemy asset is fixed as prepared or fallback for the complete page-load session when the Boot preload settles or reaches its deadline. A late completion is inert. Combat consumes the prepared result and must not issue a second request, introduce another loading state, or replace a fallback later.
 - The five-file enemy runtime pack must not exceed `450,000 bytes`. The complete runtime asset manifest must remain within the existing `2 MiB` on-disk budget; the v0.2 decision does not relax that budget.
 
 ### 16.2 Regular family
@@ -682,6 +685,18 @@ Automated preparation checks confirm that every file contains real transparent p
 **FACT (2026-08-26):** The approved originals are preserved under `assets/source/enemies/`. Deterministic downscaling produced the five runtime PNGs without generative redraw: Basic `192×101`, Ranged `224×163`, Hunter `114×192`, Elite Armoured `214×320`, and Elite Vulnerable `281×320`. All retain alpha. Their combined runtime size is `221,772 bytes`; the complete runtime asset set is `1,800,725 bytes`, within the existing `2 MiB` limit.
 
 **PROVENANCE:** The sprites are Product-Owner-provided and Product-Owner-approved AI-assisted project assets. The exact generator/session chain was not recoverable from the lost chats. This known limitation is recorded in `assets/licenses/enemy-sprites-provenance.md`. These files may be used for local development and evaluation; external distribution remains blocked until the Product Owner confirms the required rights evidence.
+
+### 16.5 Approved procedural fallbacks
+
+An unavailable or timed-out enemy sprite uses a stable procedural fallback with the same configured centre, complete rendered bounds, orientation, and gameplay-scale footprint as its prepared sprite. Fallback selection never changes simulation timing, authoritative bounds, hitbox ownership, or enemy state. The fallback uses existing approved Combat presentation tokens and must remain distinguishable in grayscale through geometry rather than colour alone.
+
+- Basic uses a wide, short swept-wing shape without prominent weapon blocks.
+- Ranged uses a wider heavy-platform shape with two visible weapon housings.
+- Hunter uses a narrow, elongated pointed-interceptor shape and must not read as a missile.
+- Elite Armoured uses the approved large manta/flattened-diamond outer shape with a geometrically closed central housing.
+- Elite Vulnerable retains the exact same outer Elite silhouette and weapon placement while exposing a centred geometric Core opening.
+
+The fallback contains no text, shield bubble, glow, aura, lightning, beam, animation, or decorative effect. Existing rendered fallback objects are not replaced if an image completes late.
 
 ## 17. Debug and observability
 
@@ -916,6 +931,9 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-012 | Approved | Countdown remains at `00:00` until replacement/result | no ambiguous terminal-countdown UI                       |
 | V02-DEC-013 | Approved | Evacuation restores prior pause state and retains Hull | deterministic cancellation and campaign transaction     |
 | V02-DEC-014 | Approved | source/runtime split and `450,000-byte` enemy budget | preserves approved art without relaxing the 2 MiB cap    |
+| V02-DEC-015 | Approved | preload five enemy sprites through bounded Boot      | one established `5 s` lifecycle; no second Combat loader |
+| V02-DEC-016 | Approved | role-specific procedural enemy fallbacks             | failed images remain readable without invented gameplay  |
+| V02-DEC-017 | Approved | split AC-025 implementation and traversal evidence   | WI-01 owns asset contract; WI-07 owns final traversal     |
 
 ## 23. Consistency and Definition of Ready audit
 

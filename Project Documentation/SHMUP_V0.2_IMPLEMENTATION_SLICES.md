@@ -31,17 +31,17 @@ Common prohibitions:
 
 ## 2. V02-WI-01 — Runtime enemy asset contract
 
-**Outcome:** all five prepared enemy PNGs have typed central-catalogue identities, bounded Combat loading, stable fallbacks, correct role/state mapping, and production request evidence without changing gameplay simulation.
+**Outcome:** all five prepared enemy PNGs have typed central-catalogue identities, bounded Boot preparation, stable role-specific procedural fallbacks, correct role/state mapping, and production request evidence without changing gameplay simulation.
 
 - **Depends on:** accepted v0.1 baseline and this recovery/documentation change.
-- **Owned AC:** `V02-AC-024–025`.
+- **Owned AC:** `V02-AC-024`; asset-layer implementation and bounded-fixture evidence for `V02-AC-025`. Final three-mission traversal evidence for `V02-AC-025` is owned by `V02-WI-07` after `V02-WI-06` makes all consumers available.
 - **Primary sources:** Epic §§16, 18, 20; Architecture asset ownership; Master asset/performance boundaries.
 
 IN scope:
 
 - central runtime-catalogue entries for five enemy sprites;
-- Combat-scoped bounded preload/loading rather than source imports or remote requests;
-- one stable fallback per regular family/Elite state where the existing catalogue contract requires it;
+- extension of the existing bounded Boot manifest from twelve to seventeen entries, preserving its `5 s`, non-critical, one-request, per-session fallback, and inert-late-completion rules;
+- the five exact procedural fallbacks from Epic §16.5 with the same configured centre, complete rendered bounds, orientation, and gameplay-scale footprint as their prepared sprites;
 - exact asset-to-role/state mapping and one-request production evidence;
 - asset validation for alpha, dimensions, pack size `≤450,000 bytes`, and complete runtime total `≤2 MiB`;
 - gameplay-scale human review at the minimum supported viewport using a bounded presentation fixture or existing Combat path.
@@ -50,14 +50,16 @@ OUT scope:
 
 - enemy gameplay state, spawning, damage, attacks, mission data, persistence, and UI redesign;
 - regenerating or creatively altering the approved artwork;
+- a second Combat loader, post-Boot image request, late fallback swap, or new loading UI;
 - runtime import from `assets/source/`.
 
 Acceptance evidence:
 
-- catalogue/unit tests and production browser request/failure tests;
+- catalogue/unit tests and production browser request/failure tests for the seventeen-entry Boot manifest and all five enemy fallback mappings;
 - `npm run verify` and `npm run verify:browser`;
 - recorded real-scale colour/grayscale/fallback review;
-- exact runtime byte accounting and clean architecture review.
+- exact runtime byte accounting, cold-Boot budget evidence, and clean architecture review;
+- bounded-fixture evidence for the asset-layer portion of `V02-AC-025`, explicitly labelled as not yet satisfying the final three-mission traversal precondition.
 
 ## 3. V02-WI-02 — Persistent campaign transaction
 
@@ -206,7 +208,7 @@ Acceptance evidence:
 **Outcome:** the integrated Epic has authoritative Debug support, no retained runtimes across mixed outcomes, complete evidence for all approved workloads, current documentation, and an auditable `V02-AC-001–028` closure report.
 
 - **Depends on:** accepted `V02-WI-06` revision.
-- **Owned AC:** `V02-AC-026–028`; final regression of `V02-AC-001–025`.
+- **Owned AC:** final three-mission traversal acceptance for `V02-AC-025`, `V02-AC-026–028`; final regression of `V02-AC-001–024`.
 - **Primary sources:** Epic §§17–20; Verification §11; Delivery and repository governance.
 
 IN scope:
@@ -216,6 +218,7 @@ IN scope:
 - legacy, regular, and Elite production workload records from Epic §20.1;
 - entity/timer/RNG/subscription/Phaser/persistence cleanup evidence;
 - final asset/request/build audit, full traceability review, documentation updates, and residual-risk ledger;
+- production traversal of all three missions proving the complete `V02-AC-025` mapping, request, source-hygiene, and fallback contract;
 - physical-device status recorded honestly as passed or pending.
 
 OUT scope:

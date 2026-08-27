@@ -1,6 +1,6 @@
 # Shmup v0.2 Recovery and Readiness Audit
 
-- **Audit date:** 2026-08-27
+- **Audit date:** 2026-08-28
 - **Audited baseline:** `2812fc0cc3acebd8f5be3d98d8c7ddf798772b6f`
 - **Baseline relation:** local `main` and `origin/main` were identical (`0 ahead / 0 behind`) after fetch
 - **Result:** recovered, corrected, and ready for bounded Work Item handoffs
@@ -47,6 +47,9 @@ The build retains an existing large-chunk warning for the lazy Combat entry. It 
 | Asset provenance history was incomplete | Added a truthful provenance record and external-distribution restriction | Closed for local work; external rights gate remains |
 | Dexie version was unspecified | Approved exact pin `dexie@4.4.5`; install/update remains `V02-WI-02` work | Closed |
 | No bounded implementation sequence existed | Added seven sequential Work Items with AC ownership and gates | Closed |
+| Enemy loading named a bounded Combat preload without defining its lifecycle | Reused the existing seventeen-entry bounded Boot preload and prohibited a second Combat loader | Closed by `V02-DEC-015` |
+| Enemy fallback visuals were required but undefined | Approved five geometry-distinct procedural fallbacks with stable per-session selection | Closed by `V02-DEC-016` |
+| WI-01 could not execute AC-025's three-mission traversal precondition | Assigned asset-layer evidence to WI-01 and final integrated traversal acceptance to WI-07 | Closed by `V02-DEC-017` |
 
 ## 4. Asset evidence
 
@@ -97,7 +100,7 @@ The recovered Epic is current, internally consistent, source-qualified, budgeted
 
 ## 8. Recovery-change verification
 
-The completed recovery change passed on 2026-08-27 against an isolated checkout of the audited baseline plus the exact recovery change:
+The completed recovery change passed on 2026-08-28 against the audited baseline plus the exact recovery change:
 
 - project-context validation against canonical `main` and `origin/main`;
 - Prettier, ESLint, Stylelint, and strict TypeScript checks;

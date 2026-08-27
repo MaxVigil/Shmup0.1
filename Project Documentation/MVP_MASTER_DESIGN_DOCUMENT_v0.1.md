@@ -590,6 +590,6 @@ The readiness and accounting above remain the historical accepted v0.1 baseline.
 - `Return to Base`/`Aborted` is removed and `Evacuation` becomes the only voluntary active-mission exit;
 - free post-Defeat emergency recovery becomes paid full Repair or Game Over;
 - the v0.1 economy, weapon rates, contact cooldown, HUD, result set, and enemy-fire absence are replaced only as enumerated by the v0.2 specification;
-- five approved optimized enemy PNGs extend the runtime manifest, which remains bounded by the unchanged `2 MiB` total budget.
+- five approved optimized enemy PNGs extend the bounded Boot preload manifest from twelve to seventeen entries. They use the existing non-critical `5 s`, one-request, stable-fallback, and inert-late-completion rules; Combat consumes the prepared result without a second loader. The complete runtime set is `1,800,725 bytes` and remains bounded by the unchanged `2 MiB` total budget.
 
 Unaffected Master requirements remain authoritative. The v0.2 specification, its traceability entry, and `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` must be used together; no single document authorizes an unbounded Epic implementation.

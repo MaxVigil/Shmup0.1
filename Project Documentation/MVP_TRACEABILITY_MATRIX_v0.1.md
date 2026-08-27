@@ -134,7 +134,7 @@ The authoritative source is `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION
 | Active-mission recovery and hidden-tab pause | §§14.3–14.4 | V02-AC-018–019 | V02-WI-02 | Covered |
 | Atomic persistence and corrupted-save recovery | §§13.2, 14.1–14.2 | V02-AC-020–021 | V02-WI-02 | Covered |
 | Minimal Combat UI and terminal result UX | §15 | V02-AC-022–023 | V02-WI-04, V02-WI-05 | Covered |
-| Enemy visual vocabulary and runtime asset contract | §16 | V02-AC-024–025 | V02-WI-01 | Covered |
+| Enemy visual vocabulary and runtime asset contract | §16 | V02-AC-024–025 | V02-WI-01 asset layer; V02-WI-07 final three-mission traversal | Covered; staged evidence ownership explicit |
 | Debug authority | §17 | V02-AC-026 | V02-WI-07 | Covered |
 | Cleanup and repeated missions | §§13, 18, 20 | V02-AC-027 | V02-WI-07 | Covered |
 | Representative performance workloads | §§16, 20.1 | V02-AC-028 | V02-WI-07 | Covered |
