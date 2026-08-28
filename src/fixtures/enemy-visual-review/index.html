@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Enemy Visual Review — V02-WI-01</title>
+    <style>
+      /*
+       * V02-WI-01 bounded development/test review surface (Epic §16.1). This
+       * page is served only by the Vite development server and is never
+       * emitted by the production build; it is not part of the player-visible
+       * product UI and has no gameplay authority. Layout values use the
+       * approved Design Token CSS variables from `@ui/styles/tokens.css`.
+       */
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--color-canvas);
+        color: var(--color-text-primary);
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      }
+      .er {
+        padding: var(--space-4);
+        max-width: 1280px;
+      }
+      .er__heading {
+        font-size: var(--text-title-size);
+        font-weight: 600;
+        margin: 0 0 var(--space-2);
+      }
+      .er__sub {
+        color: var(--color-text-secondary);
+        font-size: var(--text-body-size);
+        margin: 0 0 var(--space-6);
+      }
+      .er__panel {
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-surface);
+        padding: var(--space-3);
+        margin-bottom: var(--space-6);
+        background: var(--color-surface);
+      }
+      .er__panel-title {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-heading-size);
+        font-weight: 500;
+      }
+      .er__panel-bounds {
+        margin: 0 0 var(--space-3);
+        color: var(--color-text-secondary);
+        font-size: var(--text-caption-size);
+      }
+      .er__cells {
+        display: flex;
+        gap: var(--space-6);
+        flex-wrap: wrap;
+        align-items: flex-end;
+      }
+      .er__cell {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        align-items: flex-start;
+      }
+      .er__cell-label {
+        color: var(--color-text-secondary);
+        font-size: var(--text-caption-size);
+      }
+      .er__canvas {
+        background: var(--color-canvas);
+        image-rendering: pixelated;
+        border: 1px dashed var(--color-border);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="er" data-testid="enemy-visual-review">
+      <h1 class="er__heading">Enemy Visual Review — V02-WI-01</h1>
+      <p class="er__sub">
+        Exact prepared sprites and procedural fallbacks at the centrally
+        configured gameplay scale for the minimum supported viewport (1280 ×
+        600). Development-only fixture; not part of the production build.
+      </p>
+      <div id="er-panels" data-testid="er-panels"></div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -8,7 +8,7 @@
  * reported as `fallback`; late completions are inert.
  */
 export type RuntimeAssetKind =
-  'background' | 'aircraft-image' | 'font' | 'icon';
+  'background' | 'aircraft-image' | 'enemy-image' | 'font' | 'icon';
 
 export interface PreparedRuntimeAsset {
   readonly id: string;

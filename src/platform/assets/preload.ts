@@ -142,6 +142,7 @@ function loadAsset(
   switch (entry.kind) {
     case 'background':
     case 'aircraft-image':
+    case 'enemy-image':
       return loadImage(url);
     case 'font':
       return loadFont(url, entry.weight, isClosed);

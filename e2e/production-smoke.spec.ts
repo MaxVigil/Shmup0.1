@@ -310,6 +310,11 @@ test('runtime requests stay on localhost, request no prohibited asset, and load 
     '/backgrounds/operations-background.webp',
     '/backgrounds/hangar-background.webp',
     '/aircraft/german-fighter.png',
+    '/enemies/basic-drone.png',
+    '/enemies/ranged-drone.png',
+    '/enemies/hunter-drone.png',
+    '/enemies/elite-drone-armoured.png',
+    '/enemies/elite-drone-vulnerable.png',
     '/fonts/ibm-plex-mono-regular.woff2',
     '/fonts/ibm-plex-mono-medium.woff2',
     '/fonts/ibm-plex-mono-semibold.woff2',
@@ -326,6 +331,119 @@ test('runtime requests stay on localhost, request no prohibited asset, and load 
     );
     expect(matches.length).toBeLessThanOrEqual(1);
   }
+});
+
+test('cold production Boot stays within the response-body and asset budgets and records proportional timing evidence (Master §7.10, Epic §16.1, V02-WI-01)', async ({
+  page,
+}) => {
+  // V02-WI-01 evidence: a fresh context is a cold cache, so this measures the
+  // proportional local cold-production-Boot response body and interactivity
+  // for the seventeen-entry manifest including the five enemy images. The
+  // machine-independent budgets are asserted strictly; the timing value is
+  // recorded as non-reference proxy evidence (Combat §14.3, Master §7.10).
+  const resourceTypes = new Set([
+    'document',
+    'script',
+    'stylesheet',
+    'font',
+    'image',
+    'fetch',
+  ]);
+  let bodyBytes = 0;
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (
+      url.origin !== new URL(page.url()).origin &&
+      url.origin !== 'http://127.0.0.1:4174'
+    ) {
+      return;
+    }
+    if (!resourceTypes.has(response.request().resourceType())) {
+      return;
+    }
+    void response.body().then(
+      (body) => {
+        bodyBytes += body.byteLength;
+      },
+      () => {
+        // A body that cannot be read is excluded; headers are not part of the
+        // approved "response body" definition (Master §7.10).
+      },
+    );
+  });
+
+  const startMs = Date.now();
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  const interactiveMs = Date.now() - startMs;
+  await page.waitForLoadState('networkidle');
+  // Allow the response-body collection microtasks to flush.
+  await page.waitForTimeout(250);
+
+  const navigationDuration = await page.evaluate(() => {
+    const entry = performance.getEntriesByType('navigation')[0];
+    return entry?.duration ?? -1;
+  });
+
+  // Machine-independent budgets: total cold Boot response body ≤ 3 MiB.
+  expect(bodyBytes).toBeGreaterThan(0);
+  expect(bodyBytes).toBeLessThanOrEqual(3 * 1024 * 1024);
+
+  const dist = join(process.cwd(), 'dist');
+  const enemyFiles = readdirSync(join(dist, 'enemies')).filter((file) =>
+    file.endsWith('.png'),
+  );
+  const enemyPackBytes = enemyFiles.reduce(
+    (total, file) => total + statSync(join(dist, 'enemies', file)).size,
+    0,
+  );
+  expect(enemyPackBytes).toBeGreaterThan(0);
+  expect(enemyPackBytes).toBeLessThanOrEqual(450_000);
+
+  const listFiles = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      return entry.isDirectory() ? listFiles(path) : [path];
+    });
+  // Complete runtime assets in the artifact: everything except the build
+  // entry (index.html) and the emitted JS/CSS under dist/assets.
+  const runtimeAssetBytes = listFiles(dist)
+    .filter((path) => {
+      if (path.endsWith('index.html')) {
+        return false;
+      }
+      if (
+        path.includes(`${join('assets', '')}`) &&
+        /\.[cm]?[jt]s$/.test(path)
+      ) {
+        return false;
+      }
+      if (path.endsWith('.css')) {
+        return false;
+      }
+      return true;
+    })
+    .reduce((total, path) => total + statSync(path).size, 0);
+  expect(runtimeAssetBytes).toBeGreaterThan(0);
+  expect(runtimeAssetBytes).toBeLessThanOrEqual(2 * 1024 * 1024);
+
+  // Recorded proportional evidence for the handoff (non-reference proxy).
+  console.log(
+    'V02-WI01-COLD-BOOT',
+    JSON.stringify({
+      bodyBytes,
+      interactiveMs,
+      navigationDurationMs: navigationDuration,
+      enemyPackBytes,
+      runtimeAssetBytes,
+      budget: {
+        bodyBytesMax: 3 * 1024 * 1024,
+        enemyPackMax: 450_000,
+        runtimeAssetMax: 2 * 1024 * 1024,
+      },
+      label: 'non-reference proxy evidence',
+    }),
+  );
 });
 
 test('relative base paths resolve every script, style, and runtime asset under the served origin (Delivery §5, DELIVERY-AC-002)', async ({
@@ -410,6 +528,11 @@ test('the production artifact is locally servable and hygienic with a distinct l
     'aircraft/german-fighter.png',
     'backgrounds/operations-background.webp',
     'backgrounds/hangar-background.webp',
+    'enemies/basic-drone.png',
+    'enemies/ranged-drone.png',
+    'enemies/hunter-drone.png',
+    'enemies/elite-drone-armoured.png',
+    'enemies/elite-drone-vulnerable.png',
     'fonts/ibm-plex-mono-regular.woff2',
     'fonts/ibm-plex-mono-medium.woff2',
     'fonts/ibm-plex-mono-semibold.woff2',

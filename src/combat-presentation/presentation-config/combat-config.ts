@@ -66,7 +66,7 @@ export function resolveCombatGeometry(viewport: {
   };
 }
 
-function readColorToken(token: string, fallback: string): string {
+export function readColorToken(token: string, fallback: string): string {
   if (typeof document === 'undefined') {
     return fallback;
   }

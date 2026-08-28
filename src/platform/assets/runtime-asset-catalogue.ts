@@ -1,9 +1,13 @@
 /// <reference types="vite/client" />
 
 /**
- * The approved Boot runtime asset manifest (Master §5.6): exactly twelve
- * assets under `assets/runtime/`, each requested at most once per page load.
- * Asset source material under `assets/source/` is never requested at runtime.
+ * The approved Boot runtime asset manifest (Master §5.6; v0.2 Epic §16.1):
+ * exactly seventeen assets under `assets/runtime/`, each requested at most
+ * once per page load. The five approved enemy sprites (V02-DEC-014/015/016)
+ * extend the historical twelve-entry manifest while preserving the same
+ * non-critical `5 s`, one-request, stable-fallback, and inert-late-completion
+ * rules. Asset source material under `assets/source/` is never requested at
+ * runtime.
  */
 export type RuntimeAssetManifestEntry =
   | {
@@ -14,6 +18,11 @@ export type RuntimeAssetManifestEntry =
   | {
       readonly id: string;
       readonly kind: 'aircraft-image';
+      readonly sourcePath: string;
+    }
+  | {
+      readonly id: string;
+      readonly kind: 'enemy-image';
       readonly sourcePath: string;
     }
   | {
@@ -39,6 +48,31 @@ export const RUNTIME_ASSET_MANIFEST: readonly RuntimeAssetManifestEntry[] = [
     id: 'german-fighter',
     kind: 'aircraft-image',
     sourcePath: 'assets/runtime/aircraft/german-fighter.png',
+  },
+  {
+    id: 'enemy-basic-drone',
+    kind: 'enemy-image',
+    sourcePath: 'assets/runtime/enemies/basic-drone.png',
+  },
+  {
+    id: 'enemy-ranged-drone',
+    kind: 'enemy-image',
+    sourcePath: 'assets/runtime/enemies/ranged-drone.png',
+  },
+  {
+    id: 'enemy-hunter-drone',
+    kind: 'enemy-image',
+    sourcePath: 'assets/runtime/enemies/hunter-drone.png',
+  },
+  {
+    id: 'enemy-elite-drone-armoured',
+    kind: 'enemy-image',
+    sourcePath: 'assets/runtime/enemies/elite-drone-armoured.png',
+  },
+  {
+    id: 'enemy-elite-drone-vulnerable',
+    kind: 'enemy-image',
+    sourcePath: 'assets/runtime/enemies/elite-drone-vulnerable.png',
   },
   {
     id: 'font-regular',
