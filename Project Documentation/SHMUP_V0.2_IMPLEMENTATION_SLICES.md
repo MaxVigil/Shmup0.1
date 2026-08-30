@@ -252,4 +252,14 @@ Acceptance evidence:
 
 ## 9. Handoff readiness
 
-All seven Work Items have bounded scope, product behaviour, AC ownership, negative requirements, dependency order, and verification expectations. The next authorized implementation action is `V02-WI-01` only. Starting any later Work Item, or sending the whole Epic as one DeepSeek task, violates this plan.
+`V02-WI-01` through `V02-WI-03` have accepted implementation revisions.
+`V02-WI-04` has bounded scope, product behaviour, AC ownership, negative
+requirements, dependency order, and verification expectations and is the next
+Work Item ready for one separately authorized handoff.
+
+`V02-WI-05` and `V02-WI-06` remain NOT READY for their runtime mission staging
+until the Product Owner approves and canonical documentation records the exact
+Arrival Groups and Spawn Placements required by their readiness preconditions.
+`V02-WI-07` remains dependency-blocked until `V02-WI-06` is accepted. Starting
+any later Work Item, combining Work Items, or sending the whole Epic as one
+DeepSeek task violates this plan.
