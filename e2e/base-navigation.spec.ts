@@ -225,7 +225,7 @@ test('pressing F on Base has no control-mode or Settings effect (Base AC-045)', 
   await expect(page.getByRole('checkbox')).toBeChecked();
 });
 
-test('the setting resets to enabled after a page refresh (Base AC-039)', async ({
+test('the separately persisted setting survives a page refresh (Epic §14.1, V02-AC-017)', async ({
   page,
 }) => {
   await page.goto('/');
@@ -237,7 +237,7 @@ test('the setting resets to enabled after a page refresh (Base AC-039)', async (
   await page.reload();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await page.getByRole('button', { name: 'Settings' }).click();
-  await expect(page.getByRole('checkbox')).toBeChecked();
+  await expect(page.getByRole('checkbox')).not.toBeChecked();
 });
 
 test('no horizontal document overflow on either Base Screen or the open Overlay at 1280x600 (Base AC-041)', async ({

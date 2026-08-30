@@ -13,7 +13,11 @@ import type { SessionStore } from '@application/session';
 import type { MissionSnapshot } from '@application/mission';
 import type { AssetPreloadResult } from '@application/ports';
 import { CONTENT_CATALOGUE } from '@test-support/content';
-import { ALL_ICONS_READY } from '@test-support/ui/application-provider';
+import {
+  ALL_ICONS_READY,
+  createApplicationContextValue,
+} from '@test-support/ui/application-provider';
+import { buildNewGameCampaign } from '@application/persistence';
 import { ApplicationContext } from '../application-context';
 import { CombatScreen } from './combat-screen';
 
@@ -45,6 +49,7 @@ function storeWithActiveMission(): SessionStore {
   }
   const snapshot: MissionSnapshot = {
     missionInstanceOrdinal: 0,
+    missionAttemptId: 0,
     combatMissionSeed: 1234,
     aircraftId: session.aircraftId,
     hullIntegrity: session.hullIntegrity,
@@ -63,10 +68,27 @@ function renderScreen(
   unmount: () => void;
 } {
   const preparedAssets: AssetPreloadResult = assets;
+  const value = createApplicationContextValue({
+    store,
+    preparedAssets,
+    content: CONTENT_CATALOGUE,
+  });
+  // Mirror the real before-state: the persisted New Game campaign carries the
+  // missionInProgress marker before Combat becomes active (Epic §13.2), so the
+  // bound abort/terminal commands can commit through the in-memory store.
+  const session = store.getState();
+  if (session !== null) {
+    const campaign = buildNewGameCampaign(
+      CONTENT_CATALOGUE,
+      session.sessionSeed,
+    );
+    void value.campaignStore.replace({
+      ...campaign,
+      missionInProgress: { missionId: 'interception-01', attemptId: 0 },
+    });
+  }
   const { unmount } = render(
-    <ApplicationContext.Provider
-      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
-    >
+    <ApplicationContext.Provider value={value}>
       <CombatScreen />
     </ApplicationContext.Provider>,
   );
@@ -149,7 +171,7 @@ describe('CombatScreen', () => {
     expect(store.getState()?.activeMission).toBe('none');
     expect(store.getState()?.missionStartFailed).toBe(true);
     // Base state is unchanged.
-    expect(store.getState()?.credits).toBe(1);
+    expect(store.getState()?.credits).toBe(12);
   });
 
   it('renders the utility cluster with Pause and Settings controls (DS §8.21)', async () => {
@@ -306,8 +328,12 @@ describe('CombatScreen', () => {
     await act(async () => {});
     // Open Pause before the owner loads, then select Return to Base.
     fireEvent.keyDown(window, { code: 'KeyP' });
-    fireEvent.click(screen.getByRole('button', { name: 'Return to Base' }));
-    // The S12 abort seam used the immutable snapshot identity + Hull.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Return to Base' }));
+    });
+    await act(async () => {});
+    // The S12 abort seam used the immutable snapshot identity + Hull and
+    // committed through the persisted campaign transaction first.
     expect(store.getState()?.activeMission).toBe('none');
     expect(store.getState()?.missionResult).toBeNull();
     // Resolve the lazy import after Abort. The post-import creation guard must

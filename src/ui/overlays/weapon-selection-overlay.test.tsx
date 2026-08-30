@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSessionStore, initializeSession } from '@application/session';
 import type { SessionStore } from '@application/session';
 import { CONTENT_CATALOGUE } from '@test-support/content';
+import { createApplicationContextValue } from '@test-support/ui';
 import { ApplicationContext } from '../application-context';
 import { WeaponSelectionOverlay } from './weapon-selection-overlay';
 
@@ -33,7 +34,11 @@ function storeWithWeapon(
 function renderOverlay(store: SessionStore, onClose: () => void): void {
   render(
     <ApplicationContext.Provider
-      value={{ store, preparedAssets: [], content: CONTENT_CATALOGUE }}
+      value={createApplicationContextValue({
+        store,
+        preparedAssets: [],
+        content: CONTENT_CATALOGUE,
+      })}
     >
       <WeaponSelectionOverlay open onClose={onClose} />
     </ApplicationContext.Provider>,

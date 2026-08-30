@@ -13,6 +13,7 @@ function snapshotFor(
   }
   return {
     missionInstanceOrdinal: 0,
+    missionAttemptId: 0,
     combatMissionSeed: 1234,
     aircraftId: session.aircraftId,
     hullIntegrity: session.hullIntegrity,
@@ -170,7 +171,7 @@ describe('createSessionStore', () => {
       },
     });
     store.dispatch({ type: 'session/repair' });
-    expect(store.getState()?.credits).toBe(0);
+    expect(store.getState()?.credits).toBe(11);
     expect(store.getState()?.hullIntegrity).toBe(100);
   });
 
@@ -179,7 +180,7 @@ describe('createSessionStore', () => {
     const before = store.getState();
     store.dispatch({ type: 'session/repair' });
     expect(store.getState()).toBe(before);
-    expect(store.getState()?.credits).toBe(1);
+    expect(store.getState()?.credits).toBe(12);
   });
 
   it('never spends a Credit without enough Credits (Base AC-027, AC-030)', () => {
@@ -210,7 +211,7 @@ describe('createSessionStore', () => {
     const afterFirst = store.getState();
     store.dispatch({ type: 'session/repair' });
     expect(store.getState()).toBe(afterFirst);
-    expect(store.getState()?.credits).toBe(0);
+    expect(store.getState()?.credits).toBe(11);
   });
 
   it('equips a selected weapon only through Confirm (Base AC-022, §7.6)', () => {
@@ -256,7 +257,7 @@ describe('createSessionStore', () => {
     expect(store.getState()?.activeMission).toBe('none');
     expect(store.getState()?.missionStartFailed).toBe(true);
     // Base state (Credits, Hull, weapon, Pilot, Settings) is unchanged.
-    expect(store.getState()?.credits).toBe(1);
+    expect(store.getState()?.credits).toBe(12);
     expect(store.getState()?.hullIntegrity).toBe(100);
   });
 
@@ -308,7 +309,8 @@ describe('createSessionStore', () => {
       result: {
         kind: 'aborted',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 100,
+        creditsAfter: 12,
+        hullIntegrityAfter: 100,
       },
     });
     expect(store.getState()?.combatLifecycle).toEqual({
@@ -333,7 +335,12 @@ describe('createSessionStore', () => {
     });
     store.dispatch({
       type: 'mission/result',
-      result: { kind: 'defeat', missionInstanceOrdinal: 0 },
+      result: {
+        kind: 'defeat',
+        missionInstanceOrdinal: 0,
+        creditsAfter: 12,
+        hullIntegrityAfter: 25,
+      },
     });
     const committed = store.getState();
     if (committed === null || committed.missionResult === null) {
@@ -395,7 +402,8 @@ describe('createSessionStore', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 80,
+        creditsAfter: 13,
+        hullIntegrityAfter: 80,
       },
     });
     store.dispatch({
@@ -405,6 +413,7 @@ describe('createSessionStore', () => {
     const second = {
       ...snapshotFor(store),
       missionInstanceOrdinal: 1,
+      missionAttemptId: 1,
       combatMissionSeed: 999,
     };
     store.dispatch({ type: 'mission/start', snapshot: second });
@@ -426,6 +435,6 @@ describe('createSessionStore', () => {
     }
     expect(store.getState()?.combatLifecycle.overlay).toBe('none');
     expect(store.getState()?.combatLifecycle.running).toBe(true);
-    expect(store.getState()?.credits).toBe(2); // mission N reward applied once
+    expect(store.getState()?.credits).toBe(13); // mission N reward applied once
   });
 });

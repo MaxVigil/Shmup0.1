@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
+import { createApplicationContextValue } from '@test-support/ui';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
 import { BaseShell } from './base-shell';
@@ -19,10 +20,13 @@ afterEach(() => {
 
 function renderShell(store: SessionStore): void {
   const preparedAssets: AssetPreloadResult = [];
+  const value = createApplicationContextValue({
+    store,
+    preparedAssets,
+    content: CONTENT_CATALOGUE,
+  });
   render(
-    <ApplicationContext.Provider
-      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
-    >
+    <ApplicationContext.Provider value={value}>
       <BaseShell />
     </ApplicationContext.Provider>,
   );
@@ -38,6 +42,7 @@ function storeWithPendingResult(): SessionStore {
     type: 'mission/start',
     snapshot: {
       missionInstanceOrdinal: 0,
+      missionAttemptId: 0,
       combatMissionSeed: 0,
       aircraftId: session.aircraftId,
       hullIntegrity: session.hullIntegrity,
@@ -51,7 +56,8 @@ function storeWithPendingResult(): SessionStore {
     result: {
       kind: 'success',
       missionInstanceOrdinal: 0,
-      combatHullIntegrity: 80,
+      creditsAfter: 13,
+      hullIntegrityAfter: 80,
     },
   });
   return store;
@@ -133,13 +139,13 @@ describe('BaseShell', () => {
     expect(document.activeElement).toBe(settingsButton);
   });
 
-  it('retains the shared setting across Base navigation (Base AC-039, AC-037)', () => {
+  it('retains the shared setting across Base navigation (Base AC-039, AC-037)', async () => {
     const store = createInitializedSessionStore();
     renderShell(store);
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     });
-    act(() => {
+    await act(async () => {
       fireEvent.click(screen.getByRole('checkbox'));
     });
     expect(store.getState()?.mouseMovementEnabled).toBe(false);

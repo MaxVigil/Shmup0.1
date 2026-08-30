@@ -10,6 +10,7 @@ export {
   ENEMY_TYPES,
   HULL_INTEGRITY_MAX,
   HULL_INTEGRITY_MIN,
+  MISSION_IDS,
   MISSION_TYPES,
   WEAPON_TYPES,
   isCredits,
@@ -17,12 +18,14 @@ export {
   isEnemyType,
   isFireRate,
   isHullIntegrity,
+  isMissionId,
   isMissionType,
   isPositiveFinite,
   isSeconds,
   isWeaponType,
 } from './model';
-export type { EnemyType, MissionType, WeaponType } from './model';
+export type { EnemyType, MissionId, MissionType, WeaponType } from './model';
+export * from './persistence';
 export { createAabb, isSeparated, overlaps } from './geometry';
 export type { Aabb } from './geometry';
 export {

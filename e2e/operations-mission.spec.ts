@@ -21,7 +21,7 @@ test('Operations renders background, Mission Point, Credits Panel, and Settings 
     page.getByRole('button', { name: 'Interception' }),
   ).toBeVisible();
   await expect(page.getByText('Interception')).toBeVisible();
-  await expect(page.getByText('Credits: 1')).toBeVisible();
+  await expect(page.getByText('Credits: 12')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
 
   // The Mission Point sits at 50% Ã— 50% of the foreground content area
@@ -65,7 +65,7 @@ test('a failed background keeps the solid dark fallback with functional controls
   await expect(
     page.getByRole('button', { name: 'Interception' }),
   ).toBeVisible();
-  await expect(page.getByText('Credits: 1')).toBeVisible();
+  await expect(page.getByText('Credits: 12')).toBeVisible();
   await page.getByRole('button', { name: 'Interception' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 });
@@ -174,7 +174,7 @@ test('Start Mission crosses into Combat without spending Credits (Base AC-013, Â
   // Base UI closes and Combat opens; Credits are untouched.
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.getByTestId('operations-screen')).toBeHidden();
-  await expect(page.getByText('Credits: 1')).not.toBeVisible();
+  await expect(page.getByText('Credits: 12')).not.toBeVisible();
   await expect(page.getByRole('dialog')).toBeHidden();
 });
 

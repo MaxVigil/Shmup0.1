@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { CONTENT_CATALOGUE } from '@content/index';
+import { V02_STARTING_CREDITS } from '@domain/index';
 import { initializeSession } from '../session/initialize-session';
 import { createSessionStore } from '../session/store';
 import type { SessionStore } from '../session/store';
 import type { MissionSnapshot } from './snapshot';
-import { abortMission, buildMissionResult } from './mission-result';
-import { startMission } from './start-mission';
 
 function snapshotFor(store: SessionStore): MissionSnapshot {
   const session = store.getState();
@@ -14,6 +13,7 @@ function snapshotFor(store: SessionStore): MissionSnapshot {
   }
   return {
     missionInstanceOrdinal: session.missionInstanceCount,
+    missionAttemptId: session.missionInstanceCount,
     combatMissionSeed: 1234,
     aircraftId: session.aircraftId,
     hullIntegrity: session.hullIntegrity,
@@ -36,22 +36,8 @@ function startMissionIn(store: SessionStore): void {
   store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
 }
 
-describe('buildMissionResult (S12 mapper)', () => {
-  it('maps Defeat without a hull and Success with the retained Combat Hull, both bound to the Mission Instance', () => {
-    expect(buildMissionResult({ kind: 'defeat' }, 40, 0)).toEqual({
-      kind: 'defeat',
-      missionInstanceOrdinal: 0,
-    });
-    expect(buildMissionResult({ kind: 'success' }, 80, 3)).toEqual({
-      kind: 'success',
-      missionInstanceOrdinal: 3,
-      combatHullIntegrity: 80,
-    });
-  });
-});
-
-describe('mission/result commitment (Base §9.5, AC-032/033/034)', () => {
-  it('commits Success exactly once: +1 Credit, retained Hull, result recorded', () => {
+describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-AC-020)', () => {
+  it('commits Success exactly once with the pre-committed campaign values', () => {
     const store = initializedStore();
     startMissionIn(store);
     store.dispatch({
@@ -59,11 +45,12 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034)', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 80,
+        creditsAfter: V02_STARTING_CREDITS + 1,
+        hullIntegrityAfter: 80,
       },
     });
     const session = store.getState()!;
-    expect(session.credits).toBe(2);
+    expect(session.credits).toBe(V02_STARTING_CREDITS + 1);
     expect(session.hullIntegrity).toBe(80);
     expect(session.activeMission).toBe('none');
     expect(session.missionResult).toMatchObject({
@@ -78,32 +65,60 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034)', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 80,
+        creditsAfter: V02_STARTING_CREDITS + 1,
+        hullIntegrityAfter: 80,
       },
     });
-    expect(store.getState()!.credits).toBe(2);
+    expect(store.getState()!.credits).toBe(V02_STARTING_CREDITS + 1);
   });
 
-  it('commits Defeat exactly once: no Credit, Hull exactly 25, no full Repair', () => {
+  it('commits Defeat exactly once with the pre-committed campaign values', () => {
     const store = initializedStore();
     startMissionIn(store);
     store.dispatch({
       type: 'mission/result',
-      result: { kind: 'defeat', missionInstanceOrdinal: 0 },
+      result: {
+        kind: 'defeat',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS,
+        hullIntegrityAfter: 25,
+      },
     });
     const session = store.getState()!;
-    expect(session.credits).toBe(1);
+    expect(session.credits).toBe(V02_STARTING_CREDITS);
     expect(session.hullIntegrity).toBe(25);
     expect(session.activeMission).toBe('none');
     expect(session.missionResult).toMatchObject({
       kind: 'defeat',
       missionInstanceOrdinal: 0,
     });
+    // Duplicate terminal signals are strict no-ops.
     store.dispatch({
       type: 'mission/result',
-      result: { kind: 'defeat', missionInstanceOrdinal: 0 },
+      result: {
+        kind: 'defeat',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS,
+        hullIntegrityAfter: 25,
+      },
     });
     expect(store.getState()!.hullIntegrity).toBe(25);
+  });
+
+  it('ignores a result with invalid carried values (defensive boundary)', () => {
+    const store = initializedStore();
+    startMissionIn(store);
+    const before = store.getState()!;
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'success',
+        missionInstanceOrdinal: 0,
+        creditsAfter: -1,
+        hullIntegrityAfter: 80,
+      },
+    });
+    expect(store.getState()).toBe(before);
   });
 
   it('ignores mission/result when no active mission remains (duplicate resistance)', () => {
@@ -114,23 +129,40 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034)', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 80,
+        creditsAfter: V02_STARTING_CREDITS + 1,
+        hullIntegrityAfter: 80,
       },
     });
     expect(store.getState()).toBe(before);
   });
 
-  it('commits Aborted through the same path: no reward/recovery, retained Hull, no Overlay', () => {
+  it('commits Aborted: no reward/recovery, retained Hull, no Overlay', () => {
     const store = initializedStore();
     startMissionIn(store);
-    abortMission(store, 60, 0);
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'aborted',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS,
+        hullIntegrityAfter: 60,
+      },
+    });
     const session = store.getState()!;
-    expect(session.credits).toBe(1);
+    expect(session.credits).toBe(V02_STARTING_CREDITS);
     expect(session.hullIntegrity).toBe(60);
     expect(session.activeMission).toBe('none');
     expect(session.missionResult).toBeNull();
     // Repeated Aborted signals are no-ops.
-    abortMission(store, 60, 0);
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'aborted',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS,
+        hullIntegrityAfter: 60,
+      },
+    });
     expect(store.getState()!.hullIntegrity).toBe(60);
   });
 
@@ -139,7 +171,12 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034)', () => {
     startMissionIn(store);
     store.dispatch({
       type: 'mission/result',
-      result: { kind: 'defeat', missionInstanceOrdinal: 0 },
+      result: {
+        kind: 'defeat',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS,
+        hullIntegrityAfter: 25,
+      },
     });
     expect(store.getState()!.missionResult).toMatchObject({
       kind: 'defeat',
@@ -168,10 +205,11 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034)', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 75,
+        creditsAfter: V02_STARTING_CREDITS + 1,
+        hullIntegrityAfter: 75,
       },
     });
-    expect(store.getState()!.credits).toBe(2);
+    expect(store.getState()!.credits).toBe(V02_STARTING_CREDITS + 1);
     store.dispatch({
       type: 'mission/result-consumed',
       missionInstanceOrdinal: 0,
@@ -190,9 +228,7 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034)', () => {
     expect(active.missionInstanceOrdinal).toBe(1);
     expect(active.hullIntegrity).toBe(75);
   });
-});
 
-describe('S12-WI01 Mission Instance identity binding', () => {
   it('a delayed terminal from mission 0 cannot resolve mission 1', () => {
     const store = initializedStore();
     startMissionIn(store); // mission 0, count 1
@@ -201,7 +237,8 @@ describe('S12-WI01 Mission Instance identity binding', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 75,
+        creditsAfter: V02_STARTING_CREDITS + 1,
+        hullIntegrityAfter: 75,
       },
     });
     store.dispatch({
@@ -217,12 +254,13 @@ describe('S12-WI01 Mission Instance identity binding', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 99,
+        creditsAfter: V02_STARTING_CREDITS + 99,
+        hullIntegrityAfter: 99,
       },
     });
     const after = store.getState()!;
     expect(after).toBe(before); // strict no-op: no reward, no result, mission 1 intact
-    expect(after.credits).toBe(2);
+    expect(after.credits).toBe(V02_STARTING_CREDITS + 1);
     expect(after.missionResult).toBeNull();
     if (after.activeMission === 'none') {
       throw new Error('Mission 1 must still be active.');
@@ -239,7 +277,8 @@ describe('S12-WI01 Mission Instance identity binding', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 75,
+        creditsAfter: V02_STARTING_CREDITS + 1,
+        hullIntegrityAfter: 75,
       },
     });
     store.dispatch({
@@ -250,7 +289,15 @@ describe('S12-WI01 Mission Instance identity binding', () => {
 
     const before = store.getState()!;
     // A stale Return-to-Base callback still bound to mission 0.
-    abortMission(store, 55, 0);
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'aborted',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS + 1,
+        hullIntegrityAfter: 55,
+      },
+    });
     const after = store.getState()!;
     expect(after).toBe(before); // strict no-op: mission 1 not aborted
     if (after.activeMission === 'none') {
@@ -268,7 +315,8 @@ describe('S12-WI01 Mission Instance identity binding', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 75,
+        creditsAfter: V02_STARTING_CREDITS + 1,
+        hullIntegrityAfter: 75,
       },
     });
     store.dispatch({
@@ -281,7 +329,8 @@ describe('S12-WI01 Mission Instance identity binding', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 1,
-        combatHullIntegrity: 60,
+        creditsAfter: V02_STARTING_CREDITS + 2,
+        hullIntegrityAfter: 60,
       },
     });
 
@@ -295,7 +344,7 @@ describe('S12-WI01 Mission Instance identity binding', () => {
       kind: 'success',
       missionInstanceOrdinal: 1,
     });
-    expect(store.getState()!.credits).toBe(3);
+    expect(store.getState()!.credits).toBe(V02_STARTING_CREDITS + 2);
 
     // The matching Continue clears the presented result.
     store.dispatch({
@@ -305,7 +354,7 @@ describe('S12-WI01 Mission Instance identity binding', () => {
     expect(store.getState()!.missionResult).toBeNull();
   });
 
-  it('Start Mission is rejected at the application boundary and raw action while a result is pending', () => {
+  it('Start Mission raw action is a strict no-op while a result is pending', () => {
     const store = initializedStore();
     startMissionIn(store); // mission 0
     store.dispatch({
@@ -313,13 +362,9 @@ describe('S12-WI01 Mission Instance identity binding', () => {
       result: {
         kind: 'success',
         missionInstanceOrdinal: 0,
-        combatHullIntegrity: 75,
+        creditsAfter: V02_STARTING_CREDITS + 1,
+        hullIntegrityAfter: 75,
       },
-    });
-    // Result pending: application boundary rejects.
-    expect(startMission(store)).toEqual({
-      kind: 'rejected',
-      reason: 'mission-result-pending',
     });
     // Raw action is a strict no-op too: no active mission and no ordinal advance.
     const before = store.getState()!;

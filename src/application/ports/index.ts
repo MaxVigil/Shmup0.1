@@ -5,3 +5,12 @@ export type {
   RuntimeAssetKind,
   RuntimeAssetPreload,
 } from './runtime-asset-preload';
+export type {
+  CampaignReadResult,
+  CampaignStorePort,
+  CampaignUpdateOutcome,
+} from '../persistence';
+export type {
+  UserSettingsReadResult,
+  UserSettingsStorePort,
+} from '../persistence';

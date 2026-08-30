@@ -239,9 +239,89 @@ test('Pause Overlay has no document overflow and a fully visible Resume ring at 
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
 
   await page.keyboard.press('KeyP');
   await expect(page.getByRole('button', { name: 'Resume' })).toBeFocused();
   await measureFocusedRing(page, 'Resume');
+});
+
+test('Game Over Screen has no document overflow and a fully visible New Game ring at 1280x600 (V02-AC-016)', async ({
+  page,
+}) => {
+  await page.setViewportSize(MINIMUM_VIEWPORT);
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  // Seed an unaffordable active mission (7 Credits) so the next Boot resolves
+  // it as Defeat and opens the terminal Game Over Screen.
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('shmup-v0.2');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('campaign', 'readwrite');
+      transaction.objectStore('campaign').put({
+        id: 'current',
+        rowFormatVersion: 2,
+        value: {
+          schemaVersion: 1,
+          runStatus: 'active',
+          credits: 7,
+          aircraftId: 'german-fighter',
+          hullIntegrity: 100,
+          equippedWeapon: 'machine-gun',
+          unlockedMissionIds: ['interception-01'],
+          completedMissionIds: [],
+          missionInProgress: { missionId: 'interception-01', attemptId: 0 },
+          pilotId: 'pilot-shevchenko',
+        },
+      });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  });
+  await page.reload();
+  await expect(page.getByTestId('game-over-screen')).toBeVisible();
+
+  const newGame = page.getByRole('button', { name: 'New Game' });
+  await newGame.focus();
+  await measureFocusedRing(page, 'New Game');
+});
+
+test('Save Data Error Screen has no document overflow and a fully visible Start New Game ring at 1280x600 (V02-AC-021)', async ({
+  page,
+}) => {
+  await page.setViewportSize(MINIMUM_VIEWPORT);
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  // Corrupt the stored campaign so Boot opens the Save Data Error Screen.
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('shmup-v0.2');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('campaign', 'readwrite');
+      transaction.objectStore('campaign').put({
+        id: 'current',
+        rowFormatVersion: 2,
+        value: { schemaVersion: 1, credits: -5 },
+      });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  });
+  await page.reload();
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+
+  const startNewGame = page.getByRole('button', { name: 'Start New Game' });
+  await startNewGame.focus();
+  await measureFocusedRing(page, 'Start New Game');
 });

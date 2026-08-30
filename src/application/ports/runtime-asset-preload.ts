@@ -24,6 +24,18 @@ export interface PreparedRuntimeAsset {
    * DS §13.2). Absent for non-icon assets, fallback icons, and non-ready icons.
    */
   readonly iconDataUri?: string;
+  /**
+   * Inline `data:image/...;base64` source for ready prepared images that a
+   * later layer re-consumes — the aircraft (Combat §12.7) and the Base Screen
+   * backgrounds (Base §3) — built once by the bounded Boot preload from the
+   * fetched bytes so the re-consuming layers reuse the prepared asset without
+   * a second application/network request across re-entry (MASTER-AC-014,
+   * V02-WI-02 correction C02). A string, never a DOM element: application
+   * ports expose no `HTMLImageElement` or other concrete DOM element
+   * (Repository Architecture §5.5). Absent for other assets, fallback entries,
+   * and non-ready entries.
+   */
+  readonly imageDataUri?: string;
   readonly status: 'ready' | 'fallback';
 }
 

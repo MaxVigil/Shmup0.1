@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
+import { createApplicationContextValue } from '@test-support/ui';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
 import { MissionResultOverlay } from './mission-result-overlay';
@@ -27,6 +28,7 @@ function storeWithResult(result: 'success' | 'defeat'): SessionStore {
     type: 'mission/start',
     snapshot: {
       missionInstanceOrdinal: 0,
+      missionAttemptId: 0,
       combatMissionSeed: 0,
       aircraftId: session.aircraftId,
       hullIntegrity: session.hullIntegrity,
@@ -42,19 +44,28 @@ function storeWithResult(result: 'success' | 'defeat'): SessionStore {
         ? {
             kind: 'success',
             missionInstanceOrdinal: 0,
-            combatHullIntegrity: 80,
+            creditsAfter: 13,
+            hullIntegrityAfter: 80,
           }
-        : { kind: 'defeat', missionInstanceOrdinal: 0 },
+        : {
+            kind: 'defeat',
+            missionInstanceOrdinal: 0,
+            creditsAfter: 12,
+            hullIntegrityAfter: 25,
+          },
   });
   return store;
 }
 
 function renderOverlay(store: SessionStore): void {
   const preparedAssets: AssetPreloadResult = [];
+  const value = createApplicationContextValue({
+    store,
+    preparedAssets,
+    content: CONTENT_CATALOGUE,
+  });
   render(
-    <ApplicationContext.Provider
-      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
-    >
+    <ApplicationContext.Provider value={value}>
       <MissionResultOverlay />
     </ApplicationContext.Provider>,
   );

@@ -6,6 +6,7 @@ import type { SessionStore } from '@application/session';
 import type { MissionSnapshot } from '@application/mission';
 import type { AssetPreloadResult } from '@application/ports';
 import { CONTENT_CATALOGUE } from '@test-support/content';
+import { createApplicationContextValue } from '@test-support/ui';
 import { ApplicationContext } from '../application-context';
 import { SessionRouter } from './session-router';
 
@@ -23,7 +24,11 @@ function renderRouter(store: SessionStore): void {
   const preparedAssets: AssetPreloadResult = [];
   render(
     <ApplicationContext.Provider
-      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
+      value={createApplicationContextValue({
+        store,
+        preparedAssets,
+        content: CONTENT_CATALOGUE,
+      })}
     >
       <SessionRouter />
     </ApplicationContext.Provider>,
@@ -37,6 +42,7 @@ function startMissionIn(store: SessionStore): void {
   }
   const snapshot: MissionSnapshot = {
     missionInstanceOrdinal: 0,
+    missionAttemptId: 0,
     combatMissionSeed: 1234,
     aircraftId: session.aircraftId,
     hullIntegrity: session.hullIntegrity,

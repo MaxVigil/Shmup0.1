@@ -22,16 +22,18 @@ export interface MissionDetailsOverlayProps {
  *
  * Start Mission immediately disables to prevent duplicate request emission
  * (Base §5.5) and sends one accepted start command (`startMission`), which
- * records the immutable Mission Snapshot and transitions the application to
- * Combat. A rejected command keeps the Overlay open, re-enables the action,
- * and displays `Unable to start mission.` (Base AC-014 structure).
+ * persists `missionInProgress` before Combat entry (Epic §13.2, V02-AC-020),
+ * records the immutable Mission Snapshot, and transitions the application to
+ * Combat. A rejected or persist-failed command keeps the Overlay open,
+ * re-enables the action, and displays `Unable to start mission.` (Base AC-014
+ * structure).
  */
 export function MissionDetailsOverlay({
   open,
   onClose,
   initialError = false,
 }: MissionDetailsOverlayProps): ReactElement | null {
-  const { store } = useApplication();
+  const { store, campaignStore, content } = useApplication();
   const [startRequested, setStartRequested] = useState(false);
   const [startError, setStartError] = useState(false);
 
@@ -42,12 +44,12 @@ export function MissionDetailsOverlay({
     }
   }, [open, initialError]);
 
-  const handleStart = (): void => {
+  const handleStart = async (): Promise<void> => {
     if (startRequested) {
       return;
     }
     setStartRequested(true);
-    const result = startMission(store);
+    const result = await startMission({ store, campaignStore, content });
     if (result.kind === 'rejected') {
       setStartRequested(false);
       setStartError(true);
@@ -70,7 +72,9 @@ export function MissionDetailsOverlay({
           <Button
             variant="primary"
             disabled={startRequested}
-            onClick={handleStart}
+            onClick={() => {
+              void handleStart();
+            }}
           >
             Start Mission
           </Button>

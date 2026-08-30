@@ -1,4 +1,5 @@
 import type { WeaponType } from '@domain/index';
+import { isCredits, isHullIntegrity } from '@domain/index';
 import {
   IDLE_COMBAT_LIFECYCLE,
   RUNNING_COMBAT_LIFECYCLE,
@@ -15,10 +16,13 @@ import type { BaseScreenId, SessionState } from './session-state';
  * and the Combat-initialization-failure return signal; S12 adds the single
  * typed, idempotent mission-result commitment path and its consumption; S13
  * adds the application-owned Combat lifecycle command matrix (Pause/Settings/
- * Debug/browser-safety transitions).
+ * Debug/browser-safety transitions). V02-WI-02 adds `session/new-game` (the
+ * confirmed atomic New Game reset) and makes `mission/result` apply the
+ * pre-committed persisted campaign values instead of computing economy here.
  */
 export type SessionAction =
   | { readonly type: 'session/initialized'; readonly session: SessionState }
+  | { readonly type: 'session/new-game'; readonly session: SessionState }
   | { readonly type: 'session/navigate'; readonly target: BaseScreenId }
   | {
       readonly type: 'session/set-mouse-movement-enabled';
@@ -51,6 +55,13 @@ export function sessionReducer(
     case 'session/initialized':
       // Idempotent: a repeated initialization is ignored (MASTER-AC-002).
       return state === null ? action.session : state;
+    case 'session/new-game':
+      // Confirmed New Game reset (Epic §13.6, V02-AC-017): the application
+      // command has already atomically replaced the persisted campaign and
+      // built the fresh hydrated session; this action replaces the in-memory
+      // session unconditionally (the blocking confirmation makes it single-
+      // flight, so a stale duplicate can never follow a later state).
+      return action.session;
     case 'session/navigate':
       // Base §3.4 / AC-003: selecting the current Screen must not reload,
       // reset, or change the session — returning the same state object makes
@@ -131,15 +142,17 @@ export function sessionReducer(
       return { ...state, missionStartFailed: false };
     case 'mission/result':
       // S12 single typed, idempotent commitment path bound to the originating
-      // Mission Instance (Base §9.5, AC-032/033/034). Ignored when no active
-      // mission remains OR when the command's missionInstanceOrdinal does not
-      // exactly match the active Mission Snapshot, so a delayed or duplicated
-      // terminal/Aborted command from an older mission can never resolve,
-      // reward, recover, or abort another Mission Instance. Success retains the
-      // Combat Hull and grants exactly +1 Credit; Defeat grants no Credit and
-      // applies the free emergency recovery to exactly 25; Aborted retains the
-      // Combat Hull with no reward or recovery. Neither path performs full
-      // Repair.
+      // Mission Instance (Base §9.5, AC-032/033/034; Epic §13, V02-AC-020).
+      // Ignored when no active mission remains OR when the command's
+      // missionInstanceOrdinal does not exactly match the active Mission
+      // Snapshot, so a delayed or duplicated terminal/Aborted command from an
+      // older mission can never resolve, reward, recover, or abort another
+      // Mission Instance. V02-WI-02: the result carries the pre-committed
+      // persisted campaign values (`creditsAfter`, `hullIntegrityAfter`)
+      // computed by the domain transition inside the campaign transaction;
+      // this reducer only applies them defensively and never computes economy
+      // as a parallel authority. Success/Defeat record the presented Result;
+      // Aborted opens Operations directly.
       if (
         state === null ||
         state.activeMission === 'none' ||
@@ -148,11 +161,18 @@ export function sessionReducer(
       ) {
         return state;
       }
+      if (
+        !isCredits(action.result.creditsAfter) ||
+        !isHullIntegrity(action.result.hullIntegrityAfter)
+      ) {
+        return state;
+      }
       if (action.result.kind === 'defeat') {
         return {
           ...state,
           activeMission: 'none',
-          hullIntegrity: 25,
+          credits: action.result.creditsAfter,
+          hullIntegrity: action.result.hullIntegrityAfter,
           missionResult: {
             kind: 'defeat',
             missionInstanceOrdinal: action.result.missionInstanceOrdinal,
@@ -166,8 +186,8 @@ export function sessionReducer(
         return {
           ...state,
           activeMission: 'none',
-          credits: state.credits + 1,
-          hullIntegrity: action.result.combatHullIntegrity,
+          credits: action.result.creditsAfter,
+          hullIntegrity: action.result.hullIntegrityAfter,
           missionResult: {
             kind: 'success',
             missionInstanceOrdinal: action.result.missionInstanceOrdinal,
@@ -179,7 +199,8 @@ export function sessionReducer(
       return {
         ...state,
         activeMission: 'none',
-        hullIntegrity: action.result.combatHullIntegrity,
+        credits: action.result.creditsAfter,
+        hullIntegrity: action.result.hullIntegrityAfter,
         missionResult: null,
         combatLifecycle: IDLE_COMBAT_LIFECYCLE,
       };

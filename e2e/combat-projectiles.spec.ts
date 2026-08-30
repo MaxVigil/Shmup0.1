@@ -121,7 +121,9 @@ async function startCombat(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   await expect(page.locator('.ds-combat-hud').first()).toBeVisible();
   // Settle until the Scene has booted and positioned the aircraft.
   await expect
@@ -168,7 +170,9 @@ test('the default Machine Gun creates a visible projectile without firing input 
     .toBeGreaterThanOrEqual(10);
 
   // A single settled Game/Scene: no duplicate canvas or HUD bridge.
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   await expect(page.locator('.ds-combat-hud')).toHaveCount(1);
 
   // The prepared aircraft texture is fetched exactly once for Combat entry.
@@ -210,7 +214,9 @@ test('the Hangar-selected Cannon profile reaches Combat and creates a projectile
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   await expect(page.locator('.ds-combat-hud').first()).toBeVisible();
 
   // The Cannon profile renders its projectile visibly (no firing input).

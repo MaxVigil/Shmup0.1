@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
 import { createSessionStore } from '@application/session';
 import { CONTENT_CATALOGUE } from '@test-support/content';
+import { createApplicationContextValue } from '@test-support/ui';
 import { ApplicationContext, useApplication } from './application-context';
 
 afterEach(() => {
@@ -42,7 +43,11 @@ describe('useApplication', () => {
     }
     render(
       <ApplicationContext.Provider
-        value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
+        value={createApplicationContextValue({
+          store,
+          preparedAssets,
+          content: CONTENT_CATALOGUE,
+        })}
       >
         <Capture />
       </ApplicationContext.Provider>,

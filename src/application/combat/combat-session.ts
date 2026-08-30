@@ -12,6 +12,7 @@ import {
   INTERCEPTION,
   MACHINE_GUN,
 } from '../content';
+import type { CombatTerminalResult } from '../mission';
 import type { MissionSnapshot } from '../mission/snapshot';
 import type { AssetPreloadResult } from '../ports';
 import type { SessionAction, SessionStore } from '../session';
@@ -146,6 +147,26 @@ export interface CombatSessionInput {
    * mutable globals.
    */
   readonly debugMode: boolean;
+  /**
+   * WI-02 application command ports: bound at the composition root to the
+   * canonical persisted campaign transaction. Combat relays the authoritative
+   * terminal trigger + final Combat Hull; the command persists the coherent
+   * before/after state first and only then updates the Session Store. Phaser
+   * never calculates a result, mutates Credits/Hull, or touches persistence
+   * directly (Epic §13, V02-AC-020).
+   */
+  readonly commitTerminalResult: (
+    terminal: CombatTerminalResult,
+    combatHullIntegrity: number,
+    missionAttemptId: number,
+    missionInstanceOrdinal: number,
+  ) => void;
+  /** Bound Aborted (Return to Base) application command through the seam. */
+  readonly abortMission: (
+    combatHullIntegrity: number,
+    missionAttemptId: number,
+    missionInstanceOrdinal: number,
+  ) => void;
 }
 
 /**

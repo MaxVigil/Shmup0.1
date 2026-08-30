@@ -1,8 +1,13 @@
 import type { PilotRecord } from '@content/index';
-import type { AircraftId } from '@domain/index';
-import type { WeaponType } from '@domain/index';
+import type { AircraftId, CampaignRunStatus, WeaponType } from '@domain/index';
 import type { CombatLifecycleState } from '../combat/lifecycle';
 import type { MissionSnapshot } from '../mission/snapshot';
+
+/**
+ * Persisted campaign run status (Epic §14.1, V02-AC-016–018); re-exported for
+ * the session surface.
+ */
+export type { CampaignRunStatus };
 
 /**
  * The canonical Base Screen discriminant (Base §3.1). Navigation between these
@@ -21,9 +26,10 @@ export interface PresentedMissionResult {
 }
 
 /**
- * The single authoritative Shared Session State (Base §9.1, §9.3). Application
- * and presentation read this; mutations occur only through named actions in
- * `src/application/session/store.ts`.
+ * The single authoritative Shared Session State (Base §9.1, §9.3; Epic §14.1).
+ * Application and presentation read this; mutations occur only through named
+ * actions in `src/application/session/store.ts`. WI-02 hydrates it exactly
+ * once from the persisted campaign plus persisted user Settings.
  */
 export interface SessionState {
   readonly currentScreen: BaseScreenId;
@@ -32,6 +38,7 @@ export interface SessionState {
   readonly hullIntegrity: number;
   readonly equippedWeapon: WeaponType;
   readonly mouseMovementEnabled: boolean;
+  readonly runStatus: CampaignRunStatus;
   readonly missionAvailable: boolean;
   readonly activeMission: 'none' | MissionSnapshot;
   /** Session RNG seed (Technical Foundation §8), retained for stream derivation. */

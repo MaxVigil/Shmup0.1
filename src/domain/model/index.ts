@@ -67,3 +67,19 @@ export type MissionType = (typeof MISSION_TYPES)[number];
 export function isMissionType(value: unknown): value is MissionType {
   return MISSION_TYPES.some((type) => type === value);
 }
+
+// --- Authored v0.2 mission identity (Epic §6.1, §14.1) ---
+// Closed set of the three authored Interception Missions used by the versioned
+// campaign persistence contract and the active-mission marker. Content
+// definitions and the Operations registry arrive with V02-WI-03; the typed
+// identity set is required now by the WI-02 persisted campaign schema.
+export const MISSION_IDS = [
+  'interception-01',
+  'interception-02',
+  'interception-03',
+] as const;
+export type MissionId = (typeof MISSION_IDS)[number];
+
+export function isMissionId(value: unknown): value is MissionId {
+  return MISSION_IDS.some((id) => id === value);
+}

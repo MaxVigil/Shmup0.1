@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
+import { createApplicationContextValue } from '@test-support/ui';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
 import { OperationsScreen } from './operations-screen';
@@ -35,10 +36,13 @@ function renderScreenWithStore(
   assets: AssetPreloadResult,
   store: SessionStore,
 ): void {
+  const value = createApplicationContextValue({
+    store,
+    preparedAssets: assets,
+    content: CONTENT_CATALOGUE,
+  });
   render(
-    <ApplicationContext.Provider
-      value={{ store, preparedAssets: assets, content: CONTENT_CATALOGUE }}
-    >
+    <ApplicationContext.Provider value={value}>
       <OperationsScreen />
     </ApplicationContext.Provider>,
   );
@@ -54,6 +58,7 @@ function storeWithPendingResult(): SessionStore {
     type: 'mission/start',
     snapshot: {
       missionInstanceOrdinal: 0,
+      missionAttemptId: 0,
       combatMissionSeed: 0,
       aircraftId: session.aircraftId,
       hullIntegrity: session.hullIntegrity,
@@ -67,7 +72,8 @@ function storeWithPendingResult(): SessionStore {
     result: {
       kind: 'success',
       missionInstanceOrdinal: 0,
-      combatHullIntegrity: 80,
+      creditsAfter: 13,
+      hullIntegrityAfter: 80,
     },
   });
   return store;
@@ -86,9 +92,24 @@ describe('OperationsScreen', () => {
     renderScreen(BACKGROUND_READY);
     expect(screen.getByRole('main', { name: 'Operations' })).toBeDefined();
     expect(screen.queryByRole('heading', { name: 'Operations' })).toBeNull();
-    expect(screen.getByText('Credits: 1')).toBeDefined();
+    expect(screen.getByText('Credits: 12')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Interception' })).toBeDefined();
     expect(backgroundElement().style.backgroundImage).toContain(
+      '/backgrounds/operations-background.webp',
+    );
+  });
+
+  it('reuses the prepared background inline data URI instead of a second request (MASTER-AC-014, V02-WI-02 C02)', () => {
+    renderScreen([
+      {
+        ...BACKGROUND_READY[0]!,
+        imageDataUri: 'data:image/webp;base64,AAAA',
+      },
+    ]);
+    expect(backgroundElement().style.backgroundImage).toContain(
+      'data:image/webp;base64,AAAA',
+    );
+    expect(backgroundElement().style.backgroundImage).not.toContain(
       '/backgrounds/operations-background.webp',
     );
   });

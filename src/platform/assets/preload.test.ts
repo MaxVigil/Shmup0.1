@@ -140,6 +140,92 @@ describe('raceSettledOrDeadline', () => {
   });
 });
 
+describe('aircraft preload reuse (Combat §12.7, MASTER-AC-014, V02-WI-02 C02)', () => {
+  const AIRCRAFT_PATH = '/aircraft/german-fighter.png';
+
+  /** Stubs every non-aircraft manifest load so only the aircraft resolves. */
+  function stubNonAircraftFailures(): void {
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { add: () => {} },
+    });
+    vi.stubGlobal(
+      'FontFace',
+      class {
+        load(): Promise<never> {
+          return Promise.reject(new Error('font load failed'));
+        }
+      },
+    );
+  }
+
+  it('prepares the aircraft bytes as an inline data URI when they load and decode', async () => {
+    vi.useFakeTimers();
+    stubNonAircraftFailures();
+    const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]).buffer;
+    vi.stubGlobal('fetch', (input: string | URL) =>
+      String(input).includes(AIRCRAFT_PATH)
+        ? Promise.resolve({
+            ok: true,
+            arrayBuffer: () => Promise.resolve(pngBytes),
+          })
+        : Promise.resolve({ ok: false }),
+    );
+    const decodeSpy = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal(
+      'Image',
+      class {
+        src = '';
+        decode(): Promise<void> {
+          return decodeSpy();
+        }
+      },
+    );
+
+    const resultPromise = preloadRuntimeAssets();
+    // Flush the aircraft fetch → arrayBuffer → base64 → decode → settle
+    // microtask chain before the deadline timer fires (mirrors the enemy-image
+    // ready test pattern).
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve();
+    }
+    vi.advanceTimersByTime(PRELOAD_DEADLINE_MS);
+    const result = await resultPromise;
+
+    const aircraft = result.find((asset) => asset.id === 'german-fighter');
+    expect(aircraft).toBeDefined();
+    expect(aircraft?.status).toBe('ready');
+    // The prepared bytes are carried as an inline data URI (a string — never
+    // a DOM element), so Combat reuses them with no second network request.
+    expect(aircraft?.imageDataUri).toMatch(/^data:image\/png;base64,/);
+    expect(aircraft?.imageDataUri?.length).toBeGreaterThan(16);
+    expect(decodeSpy).toHaveBeenCalled();
+  });
+
+  it('keeps the aircraft on its stable fallback with no data source when the fetch fails', async () => {
+    vi.useFakeTimers();
+    stubNonAircraftFailures();
+    vi.stubGlobal('fetch', () => Promise.resolve({ ok: false }));
+    vi.stubGlobal(
+      'Image',
+      class {
+        src = '';
+        decode(): Promise<void> {
+          return Promise.resolve();
+        }
+      },
+    );
+
+    const resultPromise = preloadRuntimeAssets();
+    vi.advanceTimersByTime(PRELOAD_DEADLINE_MS);
+    const result = await resultPromise;
+
+    const aircraft = result.find((asset) => asset.id === 'german-fighter');
+    expect(aircraft?.status).toBe('fallback');
+    expect(aircraft?.imageDataUri).toBeUndefined();
+  });
+});
+
 describe('enemy image preload behaviour (V02-WI-01)', () => {
   const ENEMY_PATHS = [
     '/enemies/basic-drone.png',

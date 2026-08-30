@@ -1,53 +1,38 @@
 import type { ContentCatalogue } from '@content/index';
-import { createPilotSelectionStream } from '@domain/index';
-import { IDLE_COMBAT_LIFECYCLE } from '../combat/lifecycle';
+import { DEFAULT_USER_SETTINGS, createNewGameCampaign } from '@domain/index';
+import type { UserSettingsV1 } from '@domain/index';
+import { hydrateSessionFromCampaign } from './hydrate-session';
 import type { SessionState } from './session-state';
 
 /**
- * Creates the approved initial session for one page load (Base §9.1–9.2).
- *
- * The session seed is serialized and hashed by the approved pilot-selection
- * stream (Technical Foundation §8); the selected Pilot is drawn with equal
- * probability from the approved list. Values come from the canonical content
+ * Creates the approved v0.2 initial session for a fresh page load that has no
+ * persisted campaign (Epic §14.1, Base §9.1–9.2): the canonical New Game
+ * campaign (12 Starting Credits, full Hull, default Machine Gun, Interception
+ * 01 unlocked, one Pilot drawn with equal probability) is hydrated into the
+ * single authoritative session. Values come from the canonical content
  * catalogue so no balance value is duplicated here.
  */
 export function initializeSession(
   sessionSeed: number,
   content: ContentCatalogue,
+  settings: UserSettingsV1 = DEFAULT_USER_SETTINGS,
 ): SessionState {
   const aircraft = content.aircraft[0];
-  const defaultWeapon = content.weapons.find(
-    (weapon) => weapon.type === 'machine-gun',
-  );
-  if (aircraft === undefined || defaultWeapon === undefined) {
+  if (aircraft === undefined) {
     throw new Error(
       'Session initialization failed: canonical content is incomplete',
     );
   }
-  const pilotStream = createPilotSelectionStream(sessionSeed);
-  const pilotIndex = pilotStream.nextInt(content.pilots.length);
-  const pilot = content.pilots[pilotIndex];
-  if (pilot === undefined) {
-    throw new Error(
-      'Session initialization failed: no Pilot selected from the approved list',
-    );
-  }
-  return {
-    currentScreen: 'operations',
-    credits: 1,
+  const campaign = createNewGameCampaign({
     aircraftId: aircraft.id,
-    hullIntegrity: aircraft.maximumHullIntegrity,
-    equippedWeapon: defaultWeapon.type,
-    mouseMovementEnabled: true,
-    missionAvailable: true,
-    activeMission: 'none',
-    // The session seed is retained so later Combat mission streams can be
-    // derived deterministically (Technical Foundation §8).
+    maximumHullIntegrity: aircraft.maximumHullIntegrity,
+    pilotIds: content.pilots.map((pilot) => pilot.id),
     sessionSeed,
-    missionInstanceCount: 0,
-    missionStartFailed: false,
-    missionResult: null,
-    combatLifecycle: IDLE_COMBAT_LIFECYCLE,
-    pilot,
-  };
+  });
+  return hydrateSessionFromCampaign({
+    campaign,
+    settings,
+    sessionSeed,
+    content,
+  });
 }

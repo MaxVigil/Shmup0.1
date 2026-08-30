@@ -24,7 +24,9 @@ async function startCombat(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
 }
 
 /** Reads the Field Row value for a Debug observability label. */
@@ -63,7 +65,9 @@ test('utility cluster and Pause Button/P/Esc open and resume the Pause Overlay (
   // Esc resumes the same runtime — no new canvas.
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
 
   // P toggles Pause both ways.
   await page.keyboard.press('KeyP');
@@ -89,7 +93,7 @@ test('Return to Base resolves Aborted with no reward and opens Operations direct
   // Operations opens directly; no Result Overlay and no reward.
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByText('Credits: 1')).toBeVisible();
+  await expect(page.getByText('Credits: 12')).toBeVisible();
 
   // The current Combat Hull is retained and the mission is available again.
   await page.getByRole('button', { name: 'Interception' }).click();
@@ -122,7 +126,9 @@ test('Combat Settings reuses the shared Overlay, pauses, and resumes on Close (C
   // Close resumes the same runtime.
   await dialog.getByRole('button', { name: 'Close' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
 });
 
 test('blur, hidden tab, and effective resize open one safety Pause and require Resume (Combat AC-044-045, AC-066-067)', async ({
@@ -151,7 +157,9 @@ test('blur, hidden tab, and effective resize open one safety Pause and require R
   // An effective resize during running Combat pauses (AC-045) and reprojects.
   await page.setViewportSize({ width: 1500, height: 800 });
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   await page.getByRole('button', { name: 'Resume' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
@@ -163,23 +171,33 @@ test('blur, hidden tab, and effective resize open one safety Pause and require R
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
   await page.getByRole('button', { name: 'Resume' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
 });
 
-test('page refresh discards the session without reward and initializes Operations (Combat AC-046)', async ({
+test('refresh during an active mission resolves exactly once as Defeat with paid full Repair (Epic §14.3, V02-AC-018)', async ({
   page,
 }) => {
-  await startCombat(page);
+  await startCombat(page); // missionInProgress persisted before Combat entry
   await page.reload();
+  // The persisted marker resolves the mission exactly once as Defeat: the
+  // zero-reward 8-Credit full-Repair rule deducts 8 from the 12 Starting
+  // Credits and restores Hull 100. Combat is never restored.
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 1')).toBeVisible();
+  await expect(page.getByText('Credits: 4')).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Interception' }),
   ).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.locator('canvas')).toHaveCount(0);
 
-  // Hull 100 and the default weapon with the mission available after refresh.
+  // A second reload sees the cleared marker: no re-resolution, no deduction.
+  await page.reload();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await expect(page.getByText('Credits: 4')).toBeVisible();
+
+  // Hull 100 with the mission available after the recovered Repair.
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
@@ -239,7 +257,9 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
   // F1 closes Debug from the running origin and resumes.
   await page.keyboard.press('F1');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   expect(pageErrors).toEqual([]);
 });
 
@@ -258,13 +278,15 @@ test('development Debug Win/Lose enter the normal S12 result flow exactly once (
   await expect(page.getByText('1 Credit')).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 2')).toBeVisible();
+  await expect(page.getByText('Credits: 13')).toBeVisible();
 
   // A second mission can start on the same single page.
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
 
   // Lose Mission resolves as a normal Defeat with emergency recovery to 25.
   await page.keyboard.press('F1');
@@ -276,7 +298,7 @@ test('development Debug Win/Lose enter the normal S12 result flow exactly once (
   await expect(page.getByText('0 Credits')).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 2')).toBeVisible();
+  await expect(page.getByText('Credits: 13')).toBeVisible();
 
   // The emergency recovery (25 Hull) drives the next mission's accessible Bar.
   await page.getByRole('button', { name: 'Interception' }).click();

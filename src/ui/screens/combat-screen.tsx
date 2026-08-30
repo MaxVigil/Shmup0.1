@@ -13,7 +13,12 @@ import type {
   CombatObservability,
   CombatSession,
 } from '@application/combat';
-import { abortMission } from '@application/mission';
+import {
+  abortMission as abortMissionCommand,
+  commitMissionResult as commitMissionResultCommand,
+  failMissionStart,
+} from '@application/mission';
+import type { CombatTerminalResult } from '@application/mission';
 import { useApplication } from '../application-context';
 import { SettingsButton } from '../components';
 import { useSessionState } from '../hooks';
@@ -51,11 +56,42 @@ const DebugOverlayComponent = DEV_MODE
  * signals the failure so Base reopens Mission Details (Base AC-014).
  */
 export function CombatScreen(): ReactElement | null {
-  const { store, preparedAssets, content } = useApplication();
+  const { store, preparedAssets, content, campaignStore } = useApplication();
   const session = useSessionState();
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<CombatSession | null>(null);
   const lifecycle = session.combatLifecycle;
+
+  // WI-02 application command ports (bound at the composition root through the
+  // context): Combat/UI relay typed intents; the commands persist the campaign
+  // transaction first and only then update the Session Store. UI never touches
+  // persistence directly (Epic §14.2, V02-AC-020).
+  const commitTerminalResult = (
+    terminal: CombatTerminalResult,
+    combatHullIntegrity: number,
+    missionAttemptId: number,
+    missionInstanceOrdinal: number,
+  ): void => {
+    void commitMissionResultCommand(
+      { store, campaignStore, content },
+      terminal,
+      combatHullIntegrity,
+      missionAttemptId,
+      missionInstanceOrdinal,
+    );
+  };
+  const abortMission = (
+    combatHullIntegrity: number,
+    missionAttemptId: number,
+    missionInstanceOrdinal: number,
+  ): void => {
+    void abortMissionCommand(
+      { store, campaignStore },
+      combatHullIntegrity,
+      missionAttemptId,
+      missionInstanceOrdinal,
+    );
+  };
 
   // S13-WI01: the active Mission Instance ordinal for every lifecycle command
   // this screen relays (keyboard, utility cluster, browser-safety listeners).
@@ -102,6 +138,9 @@ export function CombatScreen(): ReactElement | null {
           // S13-WI01: build-time Debug capability passed into the lazy boundary;
           // the runtime enforces Debug eligibility from this value.
           debugMode: DEV_MODE,
+          // WI-02 persisted command ports bound to this Mission Instance.
+          commitTerminalResult,
+          abortMission,
         },
         // The dynamic import cannot be cancelled. Check ownership after it
         // resolves and immediately before synchronous owner creation so an
@@ -140,7 +179,22 @@ export function CombatScreen(): ReactElement | null {
         })
         .catch(() => {
           if (!disposed) {
-            store.dispatch({ type: 'mission/start-failed' });
+            // Base AC-014 correction: the start persisted its missionInProgress
+            // marker before Combat entry; the initialization failure must
+            // atomically clear that exact marker before reconciling in-memory
+            // state, so the same-session retry works and a later reload can
+            // never turn the failed start into a paid Defeat (V02-AC-018/020).
+            // The rollback is bound to this snapshot's durable per-attempt
+            // identity so a delayed stale completion can never clear a newer
+            // attempt's marker. The command never rejects; this catch is an
+            // explicit guard so a contract violation can never leak an
+            // unhandled rejection into the page.
+            failMissionStart(
+              { store, campaignStore },
+              snapshot.missionAttemptId,
+            ).catch(() => {
+              // Guarded: the command handles persistence failures itself.
+            });
           }
         });
     });
@@ -306,9 +360,13 @@ export function CombatScreen(): ReactElement | null {
     }
     const snapshot = session.activeMission;
     if (snapshot !== 'none') {
+      // WI-02: the persisted Aborted command through the composition-root
+      // binding (fire-and-forget; the command is idempotent and inert for
+      // stale/duplicate activations). The exact campaign attempt id binds the
+      // durable marker clear (V02-WI-02 C03).
       abortMission(
-        store,
         snapshot.hullIntegrity,
+        snapshot.missionAttemptId,
         snapshot.missionInstanceOrdinal,
       );
     }

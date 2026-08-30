@@ -12,6 +12,7 @@ import { createSessionStore } from '@application/session';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
+import { createApplicationContextValue } from '@test-support/ui';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
 import { MissionDetailsOverlay } from './mission-details-overlay';
@@ -32,6 +33,7 @@ function acceptedResult(store: SessionStore): MissionStartResult {
     kind: 'accepted',
     snapshot: {
       missionInstanceOrdinal: 0,
+      missionAttemptId: 0,
       combatMissionSeed: 0,
       aircraftId: session.aircraftId,
       hullIntegrity: session.hullIntegrity,
@@ -48,10 +50,13 @@ function renderOverlay(
   open = true,
 ): void {
   const preparedAssets: AssetPreloadResult = [];
+  const value = createApplicationContextValue({
+    store,
+    preparedAssets,
+    content: CONTENT_CATALOGUE,
+  });
   render(
-    <ApplicationContext.Provider
-      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
-    >
+    <ApplicationContext.Provider value={value}>
       <MissionDetailsOverlay open={open} onClose={onClose} />
     </ApplicationContext.Provider>,
   );
@@ -105,36 +110,36 @@ describe('MissionDetailsOverlay', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('disables Start Mission and emits exactly one accepted start command (Base AC-013, §5.5)', () => {
+  it('disables Start Mission and emits exactly one accepted start command (Base AC-013, §5.5)', async () => {
     const store = createInitializedSessionStore();
     const spy = vi
       .spyOn(mission, 'startMission')
-      .mockReturnValue(acceptedResult(store));
+      .mockImplementation(async () => acceptedResult(store));
     renderOverlay(store, vi.fn());
     const start = screen.getByRole('button', {
       name: 'Start Mission',
     }) as HTMLButtonElement;
 
-    act(() => {
+    await act(async () => {
       fireEvent.click(start);
     });
     expect(start.disabled).toBe(true);
     // A repeated click on the disabled action cannot emit a second request.
-    act(() => {
+    await act(async () => {
       fireEvent.click(start);
     });
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(store.getState()?.credits).toBe(1);
+    expect(store.getState()?.credits).toBe(12);
   });
 
-  it('shows the failure message, keeps the Overlay open, and re-enables Start Mission on rejection (Base AC-014)', () => {
+  it('shows the failure message, keeps the Overlay open, and re-enables Start Mission on rejection (Base AC-014)', async () => {
     const store = createSessionStore();
     renderOverlay(store, vi.fn());
     const start = screen.getByRole('button', {
       name: 'Start Mission',
     }) as HTMLButtonElement;
 
-    act(() => {
+    await act(async () => {
       fireEvent.click(start);
     });
     expect(screen.getByText('Unable to start mission.')).toBeDefined();
@@ -142,23 +147,24 @@ describe('MissionDetailsOverlay', () => {
     expect(screen.getByRole('dialog')).toBeDefined();
   });
 
-  it('resets the request state when the Overlay opens again', () => {
+  it('resets the request state when the Overlay opens again', async () => {
     const store = createInitializedSessionStore();
     const spy = vi
       .spyOn(mission, 'startMission')
-      .mockReturnValue(acceptedResult(store));
+      .mockImplementation(async () => acceptedResult(store));
     const onClose = vi.fn();
+    const value = createApplicationContextValue({
+      store,
+      preparedAssets: [] as AssetPreloadResult,
+      content: CONTENT_CATALOGUE,
+    });
     const { rerender } = render(
-      <ApplicationContext.Provider
-        value={{ store, preparedAssets: [], content: CONTENT_CATALOGUE }}
-      >
+      <ApplicationContext.Provider value={value}>
         <MissionDetailsOverlay open={false} onClose={onClose} />
       </ApplicationContext.Provider>,
     );
     rerender(
-      <ApplicationContext.Provider
-        value={{ store, preparedAssets: [], content: CONTENT_CATALOGUE }}
-      >
+      <ApplicationContext.Provider value={value}>
         <MissionDetailsOverlay open onClose={onClose} />
       </ApplicationContext.Provider>,
     );
@@ -166,7 +172,7 @@ describe('MissionDetailsOverlay', () => {
       name: 'Start Mission',
     }) as HTMLButtonElement;
     expect(start.disabled).toBe(false);
-    act(() => {
+    await act(async () => {
       fireEvent.click(start);
     });
     expect(spy).toHaveBeenCalledTimes(1);

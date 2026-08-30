@@ -48,7 +48,12 @@ export function OperationsScreen(): ReactElement {
   );
   const backgroundStyle: CSSProperties | undefined =
     background?.status === 'ready'
-      ? { backgroundImage: `url("${background.url}")` }
+      ? // V02-WI-02 C02 (MASTER-AC-014): the prepared background bytes are
+        // reused as an inline data URI so re-entering this Screen never issues
+        // a second request for the prepared asset.
+        {
+          backgroundImage: `url("${background.imageDataUri ?? background.url}")`,
+        }
       : undefined;
 
   return (

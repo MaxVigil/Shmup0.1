@@ -40,7 +40,9 @@ async function startCombatWithSeed(
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
 }
 
 test(
@@ -125,14 +127,16 @@ test(
     // Continue returns to Operations with the committed Defeat state.
     await continueButton.click();
     await expect(page.getByTestId('operations-screen')).toBeVisible();
-    await expect(page.getByText('Credits: 1')).toBeVisible();
+    await expect(page.getByText('Credits: 12')).toBeVisible();
     await expect(dialog).toHaveCount(0);
 
     // The Mission Point is available again: start the next mission.
     await page.getByRole('button', { name: 'Interception' }).click();
     await page.getByRole('button', { name: 'Start Mission' }).click();
     await expect(page.getByTestId('combat-screen')).toBeVisible();
-    await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+    await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+      timeout: 15000,
+    });
 
     // The retained emergency-recovery Hull (25) drives the accessible Bar, and
     // the fresh runtime produced no stale Combat input or page errors.

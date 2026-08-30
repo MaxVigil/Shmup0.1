@@ -6,11 +6,18 @@ import type { AircraftId, WeaponType } from '@domain/index';
  * receives from one accepted Start Mission command. It captures the current
  * shared values exactly once and is never mutated by presentation or Phaser.
  * `combatMissionSeed` is the derived deterministic stream seed (Technical
- * Foundation §8) and `missionInstanceOrdinal` owns the per-session instance
- * counter, each incrementing exactly once per accepted start.
+ * Foundation §8), `missionInstanceOrdinal` owns the per-session instance
+ * counter (each incrementing exactly once per accepted start), and
+ * `missionAttemptId` is the campaign-authoritative durable attempt serial
+ * allocated atomically by the mission-start transaction (V02-WI-02 correction
+ * C03) — carried separately so every persisted mission-ending callback can
+ * require an exact durable match that survives reload and other application
+ * instances.
  */
 export interface MissionSnapshot {
   readonly missionInstanceOrdinal: number;
+  /** Campaign-authoritative durable per-attempt identity (V02-WI-02 C03). */
+  readonly missionAttemptId: number;
   readonly combatMissionSeed: number;
   readonly aircraftId: AircraftId;
   readonly hullIntegrity: number;

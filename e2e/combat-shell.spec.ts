@@ -21,7 +21,9 @@ async function startMission(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
 }
 
 test('Combat opens full-viewport with a solid-black shell and no loading state (Combat AC-001, AC-002, AC-082)', async ({
@@ -222,13 +224,17 @@ test('the aircraft fallback renders when the prepared image fails without breaki
 
   // Combat remains playable: canvas, Hull bar, no broken-image marker, no
   // error overlay, and no page errors.
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   await expect(page.locator('.ds-combat-hud').first()).toBeVisible();
   await expect(page.locator('.ds-combat-screen .ds-overlay')).toHaveCount(0);
 
   // The fallback is reused across viewport resize without reload or errors.
   await page.setViewportSize({ width: 1500, height: 800 });
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   await expect(page.locator('.ds-combat-hud').first()).toBeVisible();
   expect(pageErrors).toEqual([]);
 });

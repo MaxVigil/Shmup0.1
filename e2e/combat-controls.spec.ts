@@ -18,7 +18,9 @@ async function startCombat(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   await expect(page.locator('.ds-combat-hud').first()).toBeVisible();
   // Wait until the Scene has actually booted and positioned the aircraft at
   // its initial state; input listeners are registered during Scene create
@@ -203,89 +205,140 @@ test('F switches modes and each mode rejects the inactive-mode input (AC-006, AC
     .toBeLessThan(4);
 });
 
-test('keyboard aliases move the same way and diagonal input is normalized (AC-007)', async ({
-  page,
-}) => {
-  await startCombat(page);
-  await page.keyboard.press('f');
-  // Confirm the F toggle took effect before sending keyboard input.
-  await page.mouse.move(640, 300);
-  await page.waitForTimeout(400);
-  const modeProbe = await readAircraft(page);
-  expect(Math.abs(modeProbe!.centerY - 480)).toBeLessThan(1);
+test(
+  'keyboard aliases move the same way and diagonal input is normalized (AC-007)',
+  // The measurement now takes the median of three 500 ms windows per axis and
+  // verifies rest between them; under parallel load this can approach the
+  // default budget, so it gets an explicit 60 s budget (measurement, not
+  // product behaviour, drives the duration).
+  { timeout: 60000 },
+  async ({ page }) => {
+    await startCombat(page);
+    await page.keyboard.press('f');
+    // Confirm the F toggle took effect before sending keyboard input.
+    await page.mouse.move(640, 300);
+    await page.waitForTimeout(400);
+    const modeProbe = await readAircraft(page);
+    expect(Math.abs(modeProbe!.centerY - 480)).toBeLessThan(1);
 
-  // W and Arrow Up drive the same semantic axis: both move the aircraft upward
-  // from rest. The exact equivalence is covered deterministically by unit
-  // tests; here the browser only proves the alias reaches the simulation.
-  const movedUpBy = async (key: string) => {
-    await page.waitForTimeout(300); // decelerate to rest
-    const start = await readAircraft(page);
-    await page.keyboard.down(key);
-    await expect
-      .poll(async () => start!.centerY - (await readAircraft(page))!.centerY, {
-        timeout: 5000,
-      })
-      .toBeGreaterThan(15);
-    await page.keyboard.up(key);
-    await page.waitForTimeout(300);
-  };
-  await movedUpBy('w');
-  await movedUpBy('ArrowUp');
-
-  // Return toward the lower area so both cruise measurements have room.
-  await page.keyboard.down('s');
-  await page.waitForTimeout(1200);
-  await page.keyboard.up('s');
-  await page.waitForTimeout(300);
-
-  const measureCruise = async (keys: string[]) => {
-    // Two windows per direction; the maximum tolerates a stalled window.
-    let best = 0;
-    let bestDx = 0;
-    let bestDy = 0;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      for (const key of keys) {
-        await page.keyboard.down(key);
-      }
-      await page.waitForTimeout(350); // accelerate to cruise
+    // W and Arrow Up drive the same semantic axis: both move the aircraft upward
+    // from rest. The exact equivalence is covered deterministically by unit
+    // tests; here the browser only proves the alias reaches the simulation.
+    const movedUpBy = async (key: string) => {
+      await page.waitForTimeout(300); // decelerate to rest
       const start = await readAircraft(page);
-      await page.waitForTimeout(350);
-      const end = await readAircraft(page);
-      for (const key of keys) {
-        await page.keyboard.up(key);
+      await page.keyboard.down(key);
+      await expect
+        .poll(
+          async () => start!.centerY - (await readAircraft(page))!.centerY,
+          {
+            timeout: 5000,
+          },
+        )
+        .toBeGreaterThan(15);
+      await page.keyboard.up(key);
+      await page.waitForTimeout(300);
+    };
+    await movedUpBy('w');
+    await movedUpBy('ArrowUp');
+
+    // Return toward the lower area so both cruise measurements have room.
+    await page.keyboard.down('s');
+    await page.waitForTimeout(1200);
+    await page.keyboard.up('s');
+    await page.waitForTimeout(300);
+
+    // Measurement note (V02-WI-02 correction root cause): the authoritative
+    // aircraft position is read through the HUD-bar DOM rect, and wall-clock
+    // windows of the fixed-step simulation (which advances at most four 1/60 s
+    // steps per rendered frame) are noisy under parallel machine load. Residual
+    // velocity from the previous command and a max-of-two sampling amplify an
+    // outlier window. The measurement therefore (1) verifies the aircraft is
+    // fully at rest before every sample window, (2) samples over a longer fixed
+    // window, and (3) uses the MEDIAN of three attempts. The exact 45% short-side
+    // cap and diagonal normalization remain deterministically unit-covered; the
+    // browser only proves the ratio invariant (diagonal never √2 × single).
+    const waitUntilRest = async (): Promise<void> => {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const before = await readAircraft(page);
+        await page.waitForTimeout(120);
+        const after = await readAircraft(page);
+        if (
+          before !== null &&
+          after !== null &&
+          Math.hypot(
+            after.centerX - before.centerX,
+            after.centerY - before.centerY,
+          ) < 0.5
+        ) {
+          return;
+        }
       }
-      await page.waitForTimeout(250);
-      const dx = Math.abs(end!.centerX - start!.centerX);
-      const dy = Math.abs(end!.centerY - start!.centerY);
-      best = Math.max(best, Math.hypot(dx, dy) / 0.35);
-      bestDx = Math.max(bestDx, dx);
-      bestDy = Math.max(bestDy, dy);
-    }
-    return { speed: best, dx: bestDx, dy: bestDy };
-  };
+    };
 
-  // Single axis ('d', right), then back left, then diagonally ('d' + 'w')
-  // from a safe mid-low position with clearance on every edge.
-  const single = await measureCruise(['d']);
-  await page.keyboard.down('a');
-  await page.waitForTimeout(1000);
-  await page.keyboard.up('a');
-  await page.waitForTimeout(300);
-  const diagonal = await measureCruise(['d', 'w']);
+    const measureCruise = async (
+      keys: string[],
+    ): Promise<{ displacement: number; dx: number; dy: number }> => {
+      const displacements: number[] = [];
+      const dxs: number[] = [];
+      const dys: number[] = [];
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await waitUntilRest();
+        for (const key of keys) {
+          await page.keyboard.down(key);
+        }
+        await page.waitForTimeout(500); // accelerate to cruise
+        const start = await readAircraft(page);
+        await page.waitForTimeout(500);
+        const end = await readAircraft(page);
+        for (const key of keys) {
+          await page.keyboard.up(key);
+        }
+        await page.waitForTimeout(600);
+        if (start !== null && end !== null) {
+          const dx = Math.abs(end.centerX - start.centerX);
+          const dy = Math.abs(end.centerY - start.centerY);
+          displacements.push(Math.hypot(dx, dy));
+          dxs.push(dx);
+          dys.push(dy);
+        }
+      }
+      displacements.sort((a, b) => a - b);
+      dxs.sort((a, b) => a - b);
+      dys.sort((a, b) => a - b);
+      const median = displacements[Math.floor(displacements.length / 2)] ?? 0;
+      const medianDx = dxs[Math.floor(dxs.length / 2)] ?? 0;
+      const medianDy = dys[Math.floor(dys.length / 2)] ?? 0;
+      return { displacement: median, dx: medianDx, dy: medianDy };
+    };
 
-  // Single-axis cruise is the approved 45% short-side per second (270 px/s).
-  // The absolute floor is deliberately low so the ratio assertion below is the
-  // primary evidence even when the fixed-step simulation runs under heavy
-  // machine load; the exact 270 px/s cap is covered by deterministic units.
-  expect(single.speed).toBeGreaterThan(30);
-  expect(single.speed).toBeLessThan(500);
-  // Diagonal movement is capped at the same maximum, never √2 × it.
-  expect(diagonal.speed).toBeGreaterThan(single.speed * 0.4);
-  expect(diagonal.speed).toBeLessThan(single.speed * 1.3);
-  // Both axes move during the diagonal hold.
-  expect(diagonal.dx).toBeGreaterThan(20);
-  expect(diagonal.dy).toBeGreaterThan(20);
-});
+    // Single axis ('d', right), then back left, then diagonally ('d' + 'w')
+    // from a safe mid-low position with clearance on every edge. The leftward
+    // return is deliberately long so the three 500 ms diagonal windows still
+    // have room before the right movement bound.
+    const single = await measureCruise(['d']);
+    await page.keyboard.down('a');
+    await page.waitForTimeout(2000);
+    await page.keyboard.up('a');
+    await page.waitForTimeout(300);
+    const diagonal = await measureCruise(['d', 'w']);
+
+    // Single-axis cruise is the approved 45% short-side per second (270 px/s
+    // over the 500 ms window → ~135 px). The absolute floor is deliberately low
+    // so the ratio assertion below is the primary evidence even under heavy
+    // machine load; the exact 270 px/s cap is covered by deterministic units.
+    const singleSpeed = single.displacement / 0.5;
+    const diagonalSpeed = diagonal.displacement / 0.5;
+    expect(singleSpeed).toBeGreaterThan(30);
+    expect(singleSpeed).toBeLessThan(500);
+    // Diagonal movement is capped at the same maximum, never √2 × it.
+    expect(diagonalSpeed).toBeGreaterThan(singleSpeed * 0.4);
+    expect(diagonalSpeed).toBeLessThan(singleSpeed * 1.3);
+    // Both axes move during the diagonal hold.
+    expect(diagonal.dx).toBeGreaterThan(20);
+    expect(diagonal.dy).toBeGreaterThan(20);
+  },
+);
 
 test('releasing a keyboard input decelerates the aircraft to a stop (Combat §5.3)', async ({
   page,

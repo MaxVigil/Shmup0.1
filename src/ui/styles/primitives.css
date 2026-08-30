@@ -634,3 +634,17 @@
   justify-content: center;
   background-color: var(--color-canvas);
 }
+
+/* --- Terminal Screens (Game Over Epic §13.6; Save Data Error Epic §14.2) ---
+ * Both terminal Screens share one centred column layout at the minimum
+ * supported viewport; their content is short, so centring never overflows. */
+.ds-game-over-screen,
+.ds-save-data-error-screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  background-color: var(--color-canvas);
+}

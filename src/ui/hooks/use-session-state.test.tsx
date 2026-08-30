@@ -6,6 +6,7 @@ import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
 import { CONTENT_CATALOGUE } from '@test-support/content';
+import { createApplicationContextValue } from '@test-support/ui';
 import { ApplicationContext } from '../application-context';
 import { useSessionState } from './use-session-state';
 
@@ -20,7 +21,11 @@ function renderWithStore(
   const preparedAssets: AssetPreloadResult = [];
   render(
     <ApplicationContext.Provider
-      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
+      value={createApplicationContextValue({
+        store,
+        preparedAssets,
+        content: CONTENT_CATALOGUE,
+      })}
     >
       {probe()}
     </ApplicationContext.Provider>,

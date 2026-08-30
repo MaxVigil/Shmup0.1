@@ -478,38 +478,49 @@ export class CombatScene extends Phaser.Scene {
     this.aircraftLoadStarted = true;
     const { aircraftUrl } = this.context;
     if (aircraftUrl === null) {
-      this.fallbackGraphics = this.add.graphics();
-      this.fallbackGraphics.setDepth(COMBAT_RENDER_DEPTH.aircraft);
-      this.layoutAircraft();
+      this.showFallbackAircraft();
       return;
     }
+    // MASTER-AC-014 / V02-WI-02 correction C02: `aircraftUrl` is the prepared
+    // `data:image/png;base64` bytes built once by the bounded Boot preload
+    // (Combat §12.7). Decoding it here issues no second application/network
+    // request across first Combat entry, viewport resize, or repeated mission
+    // entry, and no application port ever exposes a DOM element.
     const image = new Image();
     image.onload = () => {
       if (this.isShuttingDown) {
-        // The Game was disposed while the cached asset finished decoding.
+        // The Game was disposed while the prepared asset finished decoding.
         return;
       }
-      if (this.textures.addImage(AIRCRAFT_TEXTURE_KEY, image) === null) {
-        this.fallbackGraphics = this.add.graphics();
-        this.fallbackGraphics.setDepth(COMBAT_RENDER_DEPTH.aircraft);
-        this.layoutAircraft();
-        return;
-      }
-      this.aircraftAspectRatio = image.naturalWidth / image.naturalHeight;
-      this.aircraftImage = this.add.image(0, 0, AIRCRAFT_TEXTURE_KEY);
-      this.aircraftImage.setDepth(COMBAT_RENDER_DEPTH.aircraft);
-      // Re-layout from the current geometry so a resize that raced the asset
-      // load is honoured without re-fetching the prepared texture.
-      this.layoutAircraft();
+      this.createAircraftTexture(image);
     };
     image.onerror = () => {
       if (!this.isShuttingDown) {
-        this.fallbackGraphics = this.add.graphics();
-        this.fallbackGraphics.setDepth(COMBAT_RENDER_DEPTH.aircraft);
-        this.layoutAircraft();
+        this.showFallbackAircraft();
       }
     };
     image.src = aircraftUrl;
+  }
+
+  /** Registers the decoded aircraft element as the texture and lays it out. */
+  private createAircraftTexture(image: HTMLImageElement): void {
+    if (this.textures.addImage(AIRCRAFT_TEXTURE_KEY, image) === null) {
+      this.showFallbackAircraft();
+      return;
+    }
+    this.aircraftAspectRatio = image.naturalWidth / image.naturalHeight;
+    this.aircraftImage = this.add.image(0, 0, AIRCRAFT_TEXTURE_KEY);
+    this.aircraftImage.setDepth(COMBAT_RENDER_DEPTH.aircraft);
+    // Re-layout from the current geometry so a resize that raced the asset
+    // load is honoured without re-fetching the prepared texture.
+    this.layoutAircraft();
+  }
+
+  /** Approved solid light-grey upward triangle fallback (Combat AC-056). */
+  private showFallbackAircraft(): void {
+    this.fallbackGraphics = this.add.graphics();
+    this.fallbackGraphics.setDepth(COMBAT_RENDER_DEPTH.aircraft);
+    this.layoutAircraft();
   }
 
   /** Approved solid light-grey upward triangle fallback (Combat AC-056). */

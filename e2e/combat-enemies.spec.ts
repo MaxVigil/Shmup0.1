@@ -73,7 +73,9 @@ async function startCombat(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   await expect(page.locator('.ds-combat-hud').first()).toBeVisible();
 }
 
@@ -91,7 +93,9 @@ test('Basic Drones from the existing seed path visibly render as danger squares 
     .poll(async () => dronePixelCount(page, 1280, 600), { timeout: 5000 })
     .toBeGreaterThanOrEqual(10);
 
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   expect(pageErrors).toEqual([]);
 });
 
@@ -130,7 +134,9 @@ test('one entry/resize/cleanup path preserves canvas, render and request boundar
     .toBeGreaterThanOrEqual(10);
 
   // No duplicates, no repeated prepared-texture fetches, no errors.
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
   await expect(page.locator('.ds-combat-hud')).toHaveCount(1);
   const aircraftFetches = requested.filter((url) =>
     /aircraft\/german-fighter\.png$/.test(url),

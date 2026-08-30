@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSessionStore, initializeSession } from '@application/session';
 import type { SessionStore } from '@application/session';
 import { CONTENT_CATALOGUE } from '@test-support/content';
+import { createApplicationContextValue } from '@test-support/ui';
 import { ApplicationContext } from '../application-context';
 import { AircraftConfigurationPanel } from './aircraft-configuration-panel';
 
@@ -32,7 +33,11 @@ function storeWithHull(hullIntegrity: number, credits = 1): SessionStore {
 function renderPanel(store: SessionStore): void {
   render(
     <ApplicationContext.Provider
-      value={{ store, preparedAssets: [], content: CONTENT_CATALOGUE }}
+      value={createApplicationContextValue({
+        store,
+        preparedAssets: [],
+        content: CONTENT_CATALOGUE,
+      })}
     >
       <AircraftConfigurationPanel onOpenWeaponSelection={vi.fn()} />
     </ApplicationContext.Provider>,
@@ -97,11 +102,11 @@ describe('AircraftConfigurationPanel', () => {
     const onOpenWeaponSelection = vi.fn();
     render(
       <ApplicationContext.Provider
-        value={{
+        value={createApplicationContextValue({
           store: storeWithHull(100),
           preparedAssets: [],
           content: CONTENT_CATALOGUE,
-        }}
+        })}
       >
         <AircraftConfigurationPanel
           onOpenWeaponSelection={onOpenWeaponSelection}

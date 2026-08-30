@@ -26,6 +26,7 @@
     "handoff:validate": "npm run context:validate && node scripts/validate-agent-handoff.mjs"
   },
   "dependencies": {
+    "dexie": "4.4.5",
     "phaser": "4.2.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"

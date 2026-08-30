@@ -34,10 +34,12 @@ export function buildFallbackPreloadResult(): AssetPreloadResult {
   }));
 }
 
-/** The ready/fallback + optional inline icon mask outcome of one load. */
+/** The ready/fallback + optional inline mask/data source of one load. */
 export interface AssetLoadOutcome {
   readonly ok: boolean;
   readonly iconDataUri?: string;
+  /** Prepared `data:image/png;base64` bytes for a ready aircraft image. */
+  readonly imageDataUri?: string;
 }
 
 /**
@@ -76,6 +78,12 @@ export function preloadRuntimeAssets(): Promise<
             // the single preload fetch, so the Icon render never re-requests it.
             ...(ready && loaded.iconDataUri !== undefined
               ? { iconDataUri: loaded.iconDataUri }
+              : {}),
+            // V02-WI-02 C02: a ready aircraft carries the prepared PNG bytes
+            // as an inline data URI so Combat reuses it without a second
+            // application/network request (MASTER-AC-014).
+            ...(ready && loaded.imageDataUri !== undefined
+              ? { imageDataUri: loaded.imageDataUri }
               : {}),
             status: ready ? 'ready' : 'fallback',
           };
@@ -142,6 +150,14 @@ function loadAsset(
   switch (entry.kind) {
     case 'background':
     case 'aircraft-image':
+      // The prepared aircraft is re-consumed as an Image by Combat and the
+      // prepared backgrounds as CSS background-images by the re-mounting Base
+      // Screens (Combat §12.7, Base §3). Their bytes are prepared once as an
+      // inline data URI so every re-consumption decodes the prepared asset
+      // with no second application/network request (MASTER-AC-014, V02-WI-02
+      // C02). Enemies render as deterministic shapes and are only prepared for
+      // readiness, so they keep the Image load.
+      return loadPreparedImageDataUri(url);
     case 'enemy-image':
       return loadImage(url);
     case 'font':
@@ -168,6 +184,61 @@ function loadImage(url: string): Promise<AssetLoadOutcome> {
     image.onerror = () => resolve({ ok: false });
     image.src = url;
   });
+}
+
+/**
+ * One prepared-image load for every asset that a later layer re-consumes
+ * (Combat §12.7, Base §3; MASTER-AC-014, V02-WI-02 correction C02): the
+ * manifest request itself (`fetch`, once) plus the prepared inline data URI
+ * derived from its bytes, so the re-consuming layers reuse the already
+ * prepared asset across re-entry without a second application/network request.
+ * The port carries the source as a string — never a DOM element. Master §5.6
+ * success still requires the prepared bytes to decode.
+ */
+function loadPreparedImageDataUri(url: string): Promise<AssetLoadOutcome> {
+  return fetch(url).then(
+    async (response) => {
+      if (!response.ok) {
+        return { ok: false };
+      }
+      const bytes = await response.arrayBuffer();
+      const imageDataUri = `data:${mimeForUrl(url)};base64,${bytesToBase64(
+        bytes,
+      )}`;
+      const image = new Image();
+      image.src = imageDataUri;
+      try {
+        await image.decode();
+      } catch {
+        return { ok: false };
+      }
+      return { ok: true, imageDataUri };
+    },
+    () => ({ ok: false }),
+  );
+}
+
+/** The prepared asset's inline MIME derived from its runtime URL. */
+function mimeForUrl(url: string): string {
+  if (/\.webp($|\?)/i.test(url)) {
+    return 'image/webp';
+  }
+  if (/\.jpe?g($|\?)/i.test(url)) {
+    return 'image/jpeg';
+  }
+  return 'image/png';
+}
+
+/** Base64-encodes an ArrayBuffer in chunks (btoa cannot take a large
+ *  `String.fromCharCode(...)` spread without a call-stack overflow). */
+function bytesToBase64(bytes: ArrayBuffer): string {
+  const uint8 = new Uint8Array(bytes);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < uint8.length; index += chunkSize) {
+    binary += String.fromCharCode(...uint8.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
 }
 
 /** Font success requires the approved weight to be ready for use. */

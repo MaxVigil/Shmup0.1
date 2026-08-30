@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactElement, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ReactElement, ReactNode, Ref } from 'react';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'destructive';
 
@@ -9,6 +9,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** Icon-only utility button; requires an accessible name (DS §8.3). */
   readonly iconOnly?: boolean;
   readonly children?: ReactNode;
+  /** React 19 ref-as-prop, used by overlays that focus a safe default action. */
+  readonly ref?: Ref<HTMLButtonElement>;
 }
 
 /**
@@ -23,6 +25,7 @@ export function Button({
   className,
   children,
   type = 'button',
+  ref,
   ...rest
 }: ButtonProps): ReactElement {
   const classes = [
@@ -35,7 +38,7 @@ export function Button({
     .filter((part) => part !== '')
     .join(' ');
   return (
-    <button type={type} className={classes} {...rest}>
+    <button ref={ref} type={type} className={classes} {...rest}>
       {children}
     </button>
   );

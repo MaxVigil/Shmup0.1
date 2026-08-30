@@ -9,6 +9,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
+import { createApplicationContextValue } from '@test-support/ui';
+import { InMemoryUserSettingsStore } from '@test-support/persistence';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
 import { SettingsOverlay } from './settings-overlay';
@@ -19,10 +21,13 @@ afterEach(() => {
 
 function renderOverlay(store: SessionStore, onClose: () => void): void {
   const preparedAssets: AssetPreloadResult = [];
+  const value = createApplicationContextValue({
+    store,
+    preparedAssets,
+    content: CONTENT_CATALOGUE,
+  });
   render(
-    <ApplicationContext.Provider
-      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
-    >
+    <ApplicationContext.Provider value={value}>
       <SettingsOverlay open onClose={onClose} />
     </ApplicationContext.Provider>,
   );
@@ -50,13 +55,28 @@ describe('SettingsOverlay', () => {
     expect(document.activeElement).toBe(screen.getByRole('checkbox'));
   });
 
-  it('updates the single shared setting immediately (Base AC-044)', () => {
+  it('persists and updates the single shared setting immediately (Base AC-044, V02-AC-017)', async () => {
     const store = createInitializedSessionStore();
-    renderOverlay(store, vi.fn());
+    const userSettingsStore = new InMemoryUserSettingsStore();
+    const value = createApplicationContextValue({
+      store,
+      preparedAssets: [] as AssetPreloadResult,
+      content: CONTENT_CATALOGUE,
+      userSettingsStore,
+    });
+    render(
+      <ApplicationContext.Provider value={value}>
+        <SettingsOverlay open onClose={vi.fn()} />
+      </ApplicationContext.Provider>,
+    );
     const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
-    act(() => {
+    await act(async () => {
       fireEvent.click(checkbox);
+    });
+    // The command persisted the separate Settings record before the session.
+    expect(userSettingsStore.current).toEqual({
+      mouseMovementEnabled: false,
     });
     expect(store.getState()?.mouseMovementEnabled).toBe(false);
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(

@@ -1,5 +1,8 @@
 import { COMBAT_MISSION_STREAM, deriveStreamSeed } from '@domain/index';
+import type { ContentCatalogue } from '../content';
+import type { CampaignStorePort } from '../persistence';
 import type { SessionStore } from '../session';
+import { SEAM_MISSION_ID } from './compatibility-seam';
 import type { MissionSnapshot } from './snapshot';
 
 export type MissionStartResult =
@@ -10,23 +13,41 @@ export type MissionStartResult =
         | 'no-session'
         | 'mission-not-available'
         | 'active-mission-exists'
-        | 'mission-result-pending';
+        | 'mission-result-pending'
+        | 'persist-failed';
     };
 
+export interface StartMissionDeps {
+  readonly store: SessionStore;
+  readonly campaignStore: CampaignStorePort;
+  readonly content: ContentCatalogue;
+}
+
 /**
- * One accepted Start Mission command (Base §5.5, §9.4; S07).
+ * One accepted Start Mission command (Base §5.5, §9.4; Epic §13.2, V02-AC-020).
  *
- * Validates the current Shared Session State and, when accepted, builds the
- * immutable Mission Snapshot that Combat receives: current aircraft, Hull
- * Integrity, equipped Primary Weapon, Pilot, and Mouse Movement setting, plus
- * the Mission Instance ordinal and the deterministic combat-mission stream
- * seed derived from the session seed (Technical Foundation §8). The snapshot
- * is recorded by the store exactly once; a second command while a mission is
- * active is rejected (Base AC-035). No Credits are spent and no reward is
- * applied here.
+ * Validates the current Shared Session State and, when accepted, calls the
+ * atomic campaign-start port (V02-WI-02 correction C04): the adapter validates
+ * the campaign, allocates the next globally unique monotonic attempt id from
+ * the dedicated non-resetting allocator store, persists the exact
+ * `missionInProgress` marker, and returns the applied campaign plus the
+ * allocated id — all in one IndexedDB transaction. Combat becomes active ONLY
+ * after that durable write succeeds (Epic §13.2). The command carries the
+ * allocated id in the immutable Mission Snapshot as `missionAttemptId`,
+ * SEPARATE from the session-local `missionInstanceOrdinal`; it is never
+ * inferred, predicted, or precomputed outside the transaction. The port rejects
+ * when a mission is already in progress, so repeated/racing start callbacks
+ * can never create a second snapshot or run.
+ *
+ * If the persistence write fails, Combat does not start and the existing
+ * mission-initialization-failure UX applies; no reward or progression changes
+ * (Epic §13.2). The snapshot carries the temporary seam's single mission
+ * identity (`interception-01`) until V02-WI-03 adds the mission registry.
  */
-export function startMission(store: SessionStore): MissionStartResult {
-  const session = store.getState();
+export async function startMission(
+  deps: StartMissionDeps,
+): Promise<MissionStartResult> {
+  const session = deps.store.getState();
   if (session === null) {
     return { kind: 'rejected', reason: 'no-session' };
   }
@@ -43,8 +64,26 @@ export function startMission(store: SessionStore): MissionStartResult {
     return { kind: 'rejected', reason: 'mission-result-pending' };
   }
   const missionInstanceOrdinal = session.missionInstanceCount;
+
+  let outcome;
+  try {
+    outcome = await deps.campaignStore.startMission(SEAM_MISSION_ID);
+  } catch {
+    // Allocator overflow or infrastructure failure: fail safely before any
+    // partial campaign state; no id is reissued and no marker is written.
+    return { kind: 'rejected', reason: 'persist-failed' };
+  }
+  if (outcome.kind === 'missing' || outcome.kind === 'invalid') {
+    return { kind: 'rejected', reason: 'persist-failed' };
+  }
+  if (outcome.kind === 'no-change') {
+    // missionInProgress is already persisted for this run (stale/racing start
+    // callback): no second snapshot, Pilot, or run is created.
+    return { kind: 'rejected', reason: 'active-mission-exists' };
+  }
   const snapshot: MissionSnapshot = {
     missionInstanceOrdinal,
+    missionAttemptId: outcome.attemptId,
     combatMissionSeed: deriveStreamSeed(
       session.sessionSeed,
       COMBAT_MISSION_STREAM,
@@ -56,6 +95,7 @@ export function startMission(store: SessionStore): MissionStartResult {
     pilot: session.pilot,
     mouseMovementEnabled: session.mouseMovementEnabled,
   };
-  store.dispatch({ type: 'mission/start', snapshot });
+
+  deps.store.dispatch({ type: 'mission/start', snapshot });
   return { kind: 'accepted', snapshot };
 }

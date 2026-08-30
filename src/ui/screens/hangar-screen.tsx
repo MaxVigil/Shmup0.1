@@ -28,7 +28,12 @@ export function HangarScreen(): ReactElement {
   );
   const backgroundStyle: CSSProperties | undefined =
     background?.status === 'ready'
-      ? { backgroundImage: `url("${background.url}")` }
+      ? // V02-WI-02 C02 (MASTER-AC-014): the prepared background bytes are
+        // reused as an inline data URI so re-entering this Screen never issues
+        // a second request for the prepared asset.
+        {
+          backgroundImage: `url("${background.imageDataUri ?? background.url}")`,
+        }
       : undefined;
   const aircraftAsset = preparedAssets.find(
     (asset) => asset.id === 'german-fighter',
@@ -55,7 +60,10 @@ export function HangarScreen(): ReactElement {
         {aircraftAsset?.status === 'ready' ? (
           <img
             className="ds-hangar-aircraft"
-            src={aircraftAsset.url}
+            // V02-WI-02 C02 (MASTER-AC-014): reuse the prepared aircraft
+            // bytes as an inline data URI so re-entering this Screen never
+            // issues a second request for the prepared asset.
+            src={aircraftAsset.imageDataUri ?? aircraftAsset.url}
             alt={aircraftName}
           />
         ) : (

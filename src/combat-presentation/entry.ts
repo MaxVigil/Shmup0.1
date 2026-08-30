@@ -9,7 +9,6 @@ import {
   type CombatObservability,
   type CombatSimulationState,
 } from '@application/combat';
-import { abortMission, buildMissionResult } from '@application/mission';
 import { createCombatHudBridge } from './hud-bridge/combat-hud-bridge';
 import { createCombatGame } from './phaser/combat-game';
 import { CombatScene } from './phaser/combat-scene';
@@ -73,23 +72,23 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
   };
 
   // S12: relay the authoritative terminal trigger exactly once. Phaser/React
-  // never calculate a result or apply effects — the application reducer owns
-  // the typed commitment. S13: forced Debug results reuse the same relay, so
-  // the runtime disposes once through normal mission resolution.
+  // never calculate a result, mutate Credits/Hull, or touch persistence — the
+  // WI-02 application command owns the persisted campaign transaction and then
+  // updates the Session Store (Epic §13, V02-AC-020). S13: forced Debug results
+  // reuse the same relay, so the runtime disposes once through normal mission
+  // resolution.
   let terminalDispatched = false;
   const relayTerminalIfPresent = (state: CombatSimulationState): void => {
     if (terminalDispatched || state.terminalResult === null) {
       return;
     }
     terminalDispatched = true;
-    input.store.dispatch({
-      type: 'mission/result',
-      result: buildMissionResult(
-        state.terminalResult,
-        state.playerHullIntegrity,
-        input.snapshot.missionInstanceOrdinal,
-      ),
-    });
+    input.commitTerminalResult(
+      state.terminalResult,
+      state.playerHullIntegrity,
+      input.snapshot.missionAttemptId,
+      input.snapshot.missionInstanceOrdinal,
+    );
   };
   const advanceFrame = (frameDeltaSeconds: number): CombatSimulationState => {
     const state = runtime.advance(frameDeltaSeconds);
@@ -122,7 +121,10 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
   const game = createCombatGame(container, {
     geometry,
     bridge,
-    aircraftUrl: aircraftAsset?.status === 'ready' ? aircraftAsset.url : null,
+    aircraftUrl:
+      aircraftAsset?.status === 'ready'
+        ? (aircraftAsset.imageDataUri ?? aircraftAsset.url)
+        : null,
     submitCommand,
     advanceFrame,
     getSimulationState: () => runtime.getState(),
@@ -184,12 +186,13 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
       if (disposed) {
         return;
       }
-      // S12 abortMission seam: the originating Mission Instance ordinal plus
-      // the current authoritative Combat Hull; no reward, recovery, or Result
-      // Overlay, and Operations opens directly.
-      abortMission(
-        input.store,
+      // S12 abortMission seam through the WI-02 persisted command: the
+      // originating Mission Instance ordinal plus the current authoritative
+      // Combat Hull; no reward, recovery, or Result Overlay, and Operations
+      // opens directly. The command persists the marker clear first.
+      input.abortMission(
         runtime.getState().playerHullIntegrity,
+        input.snapshot.missionAttemptId,
         input.snapshot.missionInstanceOrdinal,
       );
     },

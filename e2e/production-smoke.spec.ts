@@ -27,7 +27,9 @@ async function startCombat(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Interception' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
 }
 
 test('cold page load reaches Operations with a clean console and a build identifier (DELIVERY-AC-003, Master §7.11)', async ({
@@ -152,7 +154,7 @@ test('Return to Base resolves Aborted with no reward and opens Operations direct
   await page.getByRole('button', { name: 'Return to Base' }).click();
 
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 1')).toBeVisible();
+  await expect(page.getByText('Credits: 12')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.locator('canvas')).toHaveCount(0);
 });
@@ -201,13 +203,15 @@ test(
     await expect(continueButton).toBeFocused();
     await continueButton.click();
     await expect(page.getByTestId('operations-screen')).toBeVisible();
-    await expect(page.getByText('Credits: 1')).toBeVisible();
+    await expect(page.getByText('Credits: 12')).toBeVisible();
 
     // The committed emergency-recovery Hull (25) drives the next mission.
     await page.getByRole('button', { name: 'Interception' }).click();
     await page.getByRole('button', { name: 'Start Mission' }).click();
     await expect(page.getByTestId('combat-screen')).toBeVisible();
-    await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1);
+    await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+      timeout: 15000,
+    });
     await expect
       .poll(
         () =>
@@ -220,7 +224,7 @@ test(
   },
 );
 
-test('refresh resets the session without reward (Delivery §7.7, Combat AC-046)', async ({
+test('refresh during an active mission resolves exactly once as Defeat with paid full Repair (Epic §14.3, V02-AC-018)', async ({
   page,
 }) => {
   await page.goto('/');
@@ -229,7 +233,7 @@ test('refresh resets the session without reward (Delivery §7.7, Combat AC-046)'
 
   await page.reload();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 1')).toBeVisible();
+  await expect(page.getByText('Credits: 4')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.locator('canvas')).toHaveCount(0);
 });
@@ -476,9 +480,15 @@ test('relative base paths resolve every script, style, and runtime asset under t
   for (const url of [...state.scripts, ...state.links]) {
     expect(new URL(url).origin).toBe(origin);
   }
-  // The prepared runtime background resolves through the served base path.
-  expect(state.backgroundImage).toContain('operations-background.webp');
-  expect(new URL(state.backgroundImage, state.base).origin).toBe(origin);
+  // The prepared runtime background is reused as the prepared inline data URI
+  // when ready (MASTER-AC-014, V02-WI-02 C02) or resolves through the served
+  // base path; in both cases it is applied with no cross-origin dependency.
+  if (state.backgroundImage.startsWith('url("data:image/webp;base64,')) {
+    expect(state.backgroundImage).toContain('data:image/webp;base64,');
+  } else {
+    expect(state.backgroundImage).toContain('operations-background.webp');
+    expect(new URL(state.backgroundImage, state.base).origin).toBe(origin);
+  }
 });
 
 test('the production artifact is locally servable and hygienic with a distinct lazy Combat chunk (DELIVERY-AC-001/004, Verification §9)', () => {

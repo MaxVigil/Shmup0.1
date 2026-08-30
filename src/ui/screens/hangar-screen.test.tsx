@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
 import { CONTENT_CATALOGUE } from '@test-support/content';
+import { createApplicationContextValue } from '@test-support/ui';
 import { ApplicationContext } from '../application-context';
 import { HangarScreen } from './hangar-screen';
 
@@ -37,7 +38,11 @@ function renderScreen(assets: AssetPreloadResult): void {
   const store = createInitializedSessionStore();
   render(
     <ApplicationContext.Provider
-      value={{ store, preparedAssets: assets, content: CONTENT_CATALOGUE }}
+      value={createApplicationContextValue({
+        store,
+        preparedAssets: assets,
+        content: CONTENT_CATALOGUE,
+      })}
     >
       <HangarScreen />
     </ApplicationContext.Provider>,
@@ -62,6 +67,33 @@ describe('HangarScreen', () => {
     expect(background.style.backgroundImage).toContain(
       '/backgrounds/hangar-background.webp',
     );
+  });
+
+  it('reuses the prepared inline data URI instead of a second request for the background and aircraft (MASTER-AC-014, V02-WI-02 C02)', () => {
+    renderScreen([
+      {
+        ...HANGAR_ASSETS[0]!,
+        imageDataUri: 'data:image/webp;base64,BBBB',
+      },
+      {
+        ...HANGAR_ASSETS[1]!,
+        imageDataUri: 'data:image/png;base64,CCCC',
+      },
+    ]);
+    const background = document.querySelector(
+      '.ds-hangar-background',
+    ) as HTMLElement;
+    expect(background.style.backgroundImage).toContain(
+      'data:image/webp;base64,BBBB',
+    );
+    expect(background.style.backgroundImage).not.toContain(
+      '/backgrounds/hangar-background.webp',
+    );
+    const image = document.querySelector(
+      'img.ds-hangar-aircraft',
+    ) as HTMLImageElement;
+    expect(image.src).toContain('data:image/png;base64,CCCC');
+    expect(image.src).not.toContain('/aircraft/german-fighter.png');
   });
 
   it('shows the neutral German Fighter placeholder when the asset is not ready (Base AC-017)', () => {

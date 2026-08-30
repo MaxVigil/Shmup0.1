@@ -5,6 +5,7 @@ import { createSessionStore, initializeSession } from '@application/session';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import { CONTENT_CATALOGUE } from '@content/index';
+import { createApplicationContextValue } from '@test-support/ui';
 import { ApplicationContext, useApplication } from '@ui/application-context';
 import { App } from './app';
 
@@ -19,11 +20,14 @@ function renderReadyApp(): { store: SessionStore } {
     session: initializeSession(3735928559, CONTENT_CATALOGUE),
   });
   const preparedAssets: AssetPreloadResult = [];
+  const value = createApplicationContextValue({
+    store,
+    preparedAssets,
+    content: CONTENT_CATALOGUE,
+  });
   render(
-    <ApplicationContext.Provider
-      value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
-    >
-      <App phase="ready" onReload={vi.fn()} />
+    <ApplicationContext.Provider value={value}>
+      <App phase="ready" onReload={vi.fn()} onSaveDataResolved={vi.fn()} />
     </ApplicationContext.Provider>,
   );
   return { store };
@@ -31,7 +35,9 @@ function renderReadyApp(): { store: SessionStore } {
 
 describe('App', () => {
   it('renders the Boot View while booting', () => {
-    render(<App phase="boot" onReload={vi.fn()} />);
+    render(
+      <App phase="boot" onReload={vi.fn()} onSaveDataResolved={vi.fn()} />,
+    );
     expect(screen.getByTestId('boot-view').textContent).toBe('Loading…');
   });
 
@@ -48,9 +54,29 @@ describe('App', () => {
 
   it('renders the fatal view and wires Reload', () => {
     const onReload = vi.fn();
-    render(<App phase="fatal" onReload={onReload} />);
+    render(
+      <App phase="fatal" onReload={onReload} onSaveDataResolved={vi.fn()} />,
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(onReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the Save Data Error Screen with its destructive New Game resolution', () => {
+    const onSaveDataResolved = vi.fn();
+    const value = createApplicationContextValue({});
+    render(
+      <ApplicationContext.Provider value={value}>
+        <App
+          phase="save-data-error"
+          onReload={vi.fn()}
+          onSaveDataResolved={onSaveDataResolved}
+        />
+      </ApplicationContext.Provider>,
+    );
+    expect(screen.getByTestId('save-data-error-screen')).toBeDefined();
+    expect(
+      screen.getByText('Saved game data could not be loaded.'),
+    ).toBeDefined();
   });
 
   it('delivers the exact initialized store and prepared assets to the ready composition', () => {
@@ -76,12 +102,15 @@ describe('App', () => {
       observedAssets = application.preparedAssets;
       return null;
     }
+    const value = createApplicationContextValue({
+      store,
+      preparedAssets,
+      content: CONTENT_CATALOGUE,
+    });
     render(
-      <ApplicationContext.Provider
-        value={{ store, preparedAssets, content: CONTENT_CATALOGUE }}
-      >
+      <ApplicationContext.Provider value={value}>
         <Capture />
-        <App phase="ready" onReload={vi.fn()} />
+        <App phase="ready" onReload={vi.fn()} onSaveDataResolved={vi.fn()} />
       </ApplicationContext.Provider>,
     );
     expect(observedStore).toBe(store);
