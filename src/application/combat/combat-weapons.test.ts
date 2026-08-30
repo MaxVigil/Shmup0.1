@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASIC_DRONE, INTERCEPTION } from '@content/index';
+import { BASIC_DRONE, MVP_ENEMY_GROUP_SCHEDULE } from '@content/index';
 import { CANNON, MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import type { WeaponDefinition } from '@content/weapons';
 import type { WeaponType } from '@domain/index';
@@ -55,7 +55,7 @@ function createState(
     projectile,
     missionSeed: 1234,
     enemy: BASIC_DRONE,
-    schedule: INTERCEPTION.schedule,
+    schedule: MVP_ENEMY_GROUP_SCHEDULE,
     playerHullIntegrity: 100,
     playerMaximumHullIntegrity: 100,
   });
@@ -400,7 +400,7 @@ describe('player projectile simulation integration (S09)', () => {
       projectile: PLAYER_PROJECTILE,
       missionSeed: 1234,
       enemy: BASIC_DRONE,
-      schedule: INTERCEPTION.schedule,
+      schedule: MVP_ENEMY_GROUP_SCHEDULE,
       playerHullIntegrity: 100,
       playerMaximumHullIntegrity: 100,
     });

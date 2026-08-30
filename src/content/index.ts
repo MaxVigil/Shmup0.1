@@ -19,8 +19,32 @@ export { CANNON, MACHINE_GUN, PLAYER_PROJECTILE, WEAPONS } from './weapons';
 export type { PlayerProjectileConfig, WeaponDefinition } from './weapons';
 export { BASIC_DRONE, ENEMIES } from './enemies';
 export type { EnemyDefinition } from './enemies';
-export { INTERCEPTION, MISSIONS, totalDrones } from './missions';
-export type { EnemyGroupSchedule, MissionDefinition } from './missions';
+export {
+  ENCOUNTER_ENTRY_REGIONS,
+  ENCOUNTER_FORMATIONS,
+  INTERCEPTION_01,
+  INTERCEPTION_02,
+  INTERCEPTION_03,
+  INTERCEPTION_MISSION_DESCRIPTION,
+  MISSIONS,
+  MVP_ENEMY_GROUP_SCHEDULE,
+  derivedTotals,
+  isEncounterEntryRegion,
+  isEncounterFormation,
+  totalDrones,
+} from './missions';
+export type {
+  EncounterCompositionEntry,
+  EncounterDefinition,
+  EncounterEntry,
+  EncounterEntryRegion,
+  EncounterFormation,
+  EnemyGroupSchedule,
+  MissionDefinition,
+  MissionTotals,
+  RoleDelay,
+  SeededEntryVariants,
+} from './missions';
 export { PILOTS } from './pilots';
 export type { PilotRecord } from './pilots';
 export { isContentCatalogue, validateCatalogue } from './validation';

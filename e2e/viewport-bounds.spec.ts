@@ -128,6 +128,31 @@ test('Operations has no document overflow and a fully visible active Navigation 
   expect(ring.left).toBeGreaterThanOrEqual(0);
   expect(ring.right).toBeLessThanOrEqual(metrics.clientWidth);
   expect(ring.bottom).toBeLessThanOrEqual(metrics.clientHeight);
+
+  // V02-WI-03 shared regression (Verification §14.2): all three visible
+  // Mission Points are fully inside the minimum viewport without overlap and
+  // without horizontal/vertical clipping.
+  const pointBounds = await page.evaluate(() => {
+    const points = Array.from(
+      document.querySelectorAll<HTMLElement>('.ds-mission-point'),
+    );
+    return points.map((point) => {
+      const rect = point.getBoundingClientRect();
+      return {
+        top: rect.top,
+        left: rect.left,
+        right: rect.right,
+        bottom: rect.bottom,
+      };
+    });
+  });
+  expect(pointBounds).toHaveLength(3);
+  for (const bounds of pointBounds) {
+    expect(bounds.top).toBeGreaterThanOrEqual(0);
+    expect(bounds.left).toBeGreaterThanOrEqual(0);
+    expect(bounds.right).toBeLessThanOrEqual(metrics.clientWidth);
+    expect(bounds.bottom).toBeLessThanOrEqual(metrics.clientHeight);
+  }
 });
 
 test('Mission Details has no document overflow and a fully visible initial-action ring at 1280x600', async ({
@@ -136,7 +161,7 @@ test('Mission Details has no document overflow and a fully visible initial-actio
   await page.setViewportSize(MINIMUM_VIEWPORT);
   await page.goto('/');
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await expect(
     page.getByRole('button', { name: 'Start Mission' }),
   ).toBeFocused();
@@ -236,7 +261,7 @@ test('Pause Overlay has no document overflow and a fully visible Resume ring at 
 }) => {
   await page.setViewportSize(MINIMUM_VIEWPORT);
   await page.goto('/');
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {

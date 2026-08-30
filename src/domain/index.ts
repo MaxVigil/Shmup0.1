@@ -30,11 +30,14 @@ export { createAabb, isSeparated, overlaps } from './geometry';
 export type { Aabb } from './geometry';
 export {
   COMBAT_MISSION_STREAM,
+  MISSION_DATA_ORDINAL,
+  MISSION_DATA_STREAM,
   PILOT_SELECTION_ORDINAL,
   PILOT_SELECTION_STREAM,
   RNG_INPUT_VERSION,
   Mulberry32,
   createCombatMissionStream,
+  createMissionDataStream,
   createPilotSelectionStream,
   createStream,
   deriveStreamSeed,

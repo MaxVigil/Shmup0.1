@@ -205,7 +205,7 @@ test('Base sequential focus order is Navigation, Screen actions, then Settings (
   await expect(page.getByRole('button', { name: 'Hangar' })).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(
-    page.getByRole('button', { name: 'Interception' }),
+    page.getByRole('button', { name: 'Interception 01' }),
   ).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();

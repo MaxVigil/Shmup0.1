@@ -5,14 +5,16 @@ import { FieldRow } from '../components';
 import { Button, Overlay, Text } from '../primitives';
 
 /**
- * Mission Result Overlay (Base §9.5, S12): the only post-Success/Defeat
- * continuation point. Shows only the approved title (`Mission Complete` /
- * `Mission Failed`), the Reward row (exactly `1 Credit` / `0 Credits`), and a
- * fill-width primary `Continue` action. Initial focus is `Continue`; `Esc`,
- * Scrim interaction, Base Navigation, Settings, `F`, movement, and firing do
- * not close or bypass it. `Continue` performs navigation/cleanup only — it
- * clears the consumed result boundary and never reapplies Hull or reward.
- * No `Retry` action exists.
+ * Mission Result Overlay (Base §9.5, S12; V02-WI-03 seam): the only
+ * post-Success/Defeat continuation point. Shows only the approved title
+ * (`Mission Complete` / `Mission Failed`), the Reward row (the earned seam
+ * completion reward / `0 Credits`), and a fill-width primary `Continue` action.
+ * Initial focus is `Continue`; `Esc`, Scrim interaction, Base Navigation,
+ * Settings, `F`, movement, and firing do not close or bypass it. `Continue`
+ * performs navigation/cleanup only — it clears the consumed result boundary
+ * and never reapplies Hull or reward. No `Retry` action exists. The full v0.2
+ * result presentation (Destroyed/Escaped counts, combat rewards, completion
+ * reward, escape penalties, unlocked mission) is V02-WI-04/WI-05 scope.
  */
 export function MissionResultOverlay(): ReactElement | null {
   const { store } = useApplication();
@@ -21,7 +23,12 @@ export function MissionResultOverlay(): ReactElement | null {
   if (result === null) {
     return null;
   }
-  const reward = result.kind === 'success' ? '1 Credit' : '0 Credits';
+  const reward =
+    result.kind === 'success'
+      ? result.creditsEarned === 1
+        ? '1 Credit'
+        : `${result.creditsEarned} Credits`
+      : '0 Credits';
   const title =
     result.kind === 'success' ? 'Mission Complete' : 'Mission Failed';
 

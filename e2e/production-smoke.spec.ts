@@ -24,7 +24,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function startCombat(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
@@ -206,7 +206,7 @@ test(
     await expect(page.getByText('Credits: 12')).toBeVisible();
 
     // The committed emergency-recovery Hull (25) drives the next mission.
-    await page.getByRole('button', { name: 'Interception' }).click();
+    await page.getByRole('button', { name: 'Interception 01' }).click();
     await page.getByRole('button', { name: 'Start Mission' }).click();
     await expect(page.getByTestId('combat-screen')).toBeVisible();
     await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {

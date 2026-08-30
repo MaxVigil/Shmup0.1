@@ -14,6 +14,8 @@ import type { AssetPreloadResult } from '@application/ports';
 import { createInitializedSessionStore } from '@test-support/session';
 import { createApplicationContextValue } from '@test-support/ui';
 import { CONTENT_CATALOGUE } from '@test-support/content';
+import { INTERCEPTION_01 } from '@application/content';
+import type { MissionDefinition } from '@application/content';
 import { ApplicationContext } from '../application-context';
 import { MissionDetailsOverlay } from './mission-details-overlay';
 
@@ -32,6 +34,7 @@ function acceptedResult(store: SessionStore): MissionStartResult {
   return {
     kind: 'accepted',
     snapshot: {
+      missionId: INTERCEPTION_01.id,
       missionInstanceOrdinal: 0,
       missionAttemptId: 0,
       combatMissionSeed: 0,
@@ -47,8 +50,10 @@ function acceptedResult(store: SessionStore): MissionStartResult {
 function renderOverlay(
   store: SessionStore,
   onClose: () => void,
+  mission: MissionDefinition | undefined | null = INTERCEPTION_01,
   open = true,
 ): void {
+  const resolvedMission = mission === null ? undefined : mission;
   const preparedAssets: AssetPreloadResult = [];
   const value = createApplicationContextValue({
     store,
@@ -57,20 +62,29 @@ function renderOverlay(
   });
   render(
     <ApplicationContext.Provider value={value}>
-      <MissionDetailsOverlay open={open} onClose={onClose} />
+      <MissionDetailsOverlay
+        open={open}
+        mission={resolvedMission}
+        state={resolvedMission === undefined ? 'locked' : 'available'}
+        onClose={onClose}
+      />
     </ApplicationContext.Provider>,
   );
 }
 
 describe('MissionDetailsOverlay', () => {
-  it('displays the approved content and action order (Base AC-010, DS §8.17)', () => {
+  it('displays the approved content and action order for the selected mission (Base AC-010, DS §8.17, V02-WI-03)', () => {
     const store = createInitializedSessionStore();
     renderOverlay(store, vi.fn());
     const dialog = screen.getByRole('dialog');
-    expect(screen.getByRole('heading', { name: 'Interception' })).toBeDefined();
-    expect(screen.getByText('Resolve the incoming enemy wave.')).toBeDefined();
+    expect(
+      screen.getByRole('heading', { name: INTERCEPTION_01.displayName }),
+    ).toBeDefined();
+    expect(screen.getByText(INTERCEPTION_01.description)).toBeDefined();
     expect(screen.getByText('Reward')).toBeDefined();
-    expect(screen.getByText('1 Credit')).toBeDefined();
+    expect(
+      screen.getByText(`${INTERCEPTION_01.completionReward} Credits`),
+    ).toBeDefined();
     const start = screen.getByRole('button', { name: 'Start Mission' });
     const cancel = screen.getByRole('button', { name: 'Cancel' });
     expect(start.className).toContain('ds-button--primary');
@@ -78,6 +92,34 @@ describe('MissionDetailsOverlay', () => {
     // Exactly the two approved actions; no aircraft selector or Open Hangar.
     expect(dialog.querySelectorAll('button')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: 'Open Hangar' })).toBeNull();
+  });
+
+  it('renders nothing when no validated mission definition is selected', () => {
+    const store = createInitializedSessionStore();
+    renderOverlay(store, vi.fn(), null);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a locked mission renders no Start Mission action (Epic §6.1)', () => {
+    const store = createInitializedSessionStore();
+    const value = createApplicationContextValue({
+      store,
+      preparedAssets: [] as AssetPreloadResult,
+      content: CONTENT_CATALOGUE,
+    });
+    render(
+      <ApplicationContext.Provider value={value}>
+        <MissionDetailsOverlay
+          open
+          mission={INTERCEPTION_01}
+          state="locked"
+          onClose={vi.fn()}
+        />
+      </ApplicationContext.Provider>,
+    );
+    expect(screen.getByRole('dialog')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Start Mission' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDefined();
   });
 
   it('moves initial focus to Start Mission (DS §10.4)', () => {
@@ -160,12 +202,22 @@ describe('MissionDetailsOverlay', () => {
     });
     const { rerender } = render(
       <ApplicationContext.Provider value={value}>
-        <MissionDetailsOverlay open={false} onClose={onClose} />
+        <MissionDetailsOverlay
+          open={false}
+          mission={INTERCEPTION_01}
+          state="available"
+          onClose={onClose}
+        />
       </ApplicationContext.Provider>,
     );
     rerender(
       <ApplicationContext.Provider value={value}>
-        <MissionDetailsOverlay open onClose={onClose} />
+        <MissionDetailsOverlay
+          open
+          mission={INTERCEPTION_01}
+          state="available"
+          onClose={onClose}
+        />
       </ApplicationContext.Provider>,
     );
     const start = screen.getByRole('button', {

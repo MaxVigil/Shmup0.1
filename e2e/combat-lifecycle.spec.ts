@@ -21,7 +21,7 @@ test.beforeEach(async ({ page }) => {
  *  the settled single Combat canvas (the dev StrictMode transient is disposed). */
 async function startCombat(page: Page): Promise<void> {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
@@ -96,7 +96,7 @@ test('Return to Base resolves Aborted with no reward and opens Operations direct
   await expect(page.getByText('Credits: 12')).toBeVisible();
 
   // The current Combat Hull is retained and the mission is available again.
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect
@@ -187,7 +187,7 @@ test('refresh during an active mission resolves exactly once as Defeat with paid
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await expect(page.getByText('Credits: 4')).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Interception' }),
+    page.getByRole('button', { name: 'Interception 01' }),
   ).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.locator('canvas')).toHaveCount(0);
@@ -198,7 +198,7 @@ test('refresh during an active mission resolves exactly once as Defeat with paid
   await expect(page.getByText('Credits: 4')).toBeVisible();
 
   // Hull 100 with the mission available after the recovered Repair.
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect
@@ -268,20 +268,21 @@ test('development Debug Win/Lose enter the normal S12 result flow exactly once (
 }) => {
   await startCombat(page);
 
-  // Win Mission resolves as a normal one-time Success (+1 Credit).
+  // Win Mission resolves as a normal one-time Success (+8 completion reward
+  // for Interception 01, Epic §12; V02-WI-03).
   await page.keyboard.press('F1');
   await page.getByRole('button', { name: 'Win Mission' }).click();
   await expect(
     page.getByRole('heading', { name: 'Mission Complete' }),
   ).toBeVisible();
   await expect(page.getByText('Reward')).toBeVisible();
-  await expect(page.getByText('1 Credit')).toBeVisible();
+  await expect(page.getByText('8 Credits')).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 13')).toBeVisible();
+  await expect(page.getByText('Credits: 20')).toBeVisible();
 
   // A second mission can start on the same single page.
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
@@ -298,10 +299,10 @@ test('development Debug Win/Lose enter the normal S12 result flow exactly once (
   await expect(page.getByText('0 Credits')).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 13')).toBeVisible();
+  await expect(page.getByText('Credits: 20')).toBeVisible();
 
   // The emergency recovery (25 Hull) drives the next mission's accessible Bar.
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect

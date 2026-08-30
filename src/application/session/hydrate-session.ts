@@ -45,15 +45,13 @@ export function hydrateSessionFromCampaign(
     equippedWeapon: input.campaign.equippedWeapon,
     mouseMovementEnabled: input.settings.mouseMovementEnabled,
     runStatus: input.campaign.runStatus,
-    // The temporary v0.1 single-mission seam starts only Interception 01 and
-    // only while the run is active; the full Operations registry is V02-WI-03.
-    missionAvailable:
-      input.campaign.runStatus === 'active' &&
-      input.campaign.unlockedMissionIds.includes('interception-01'),
+    unlockedMissionIds: [...input.campaign.unlockedMissionIds],
+    completedMissionIds: [...input.campaign.completedMissionIds],
     activeMission: 'none',
     sessionSeed: input.sessionSeed,
     missionInstanceCount: 0,
     missionStartFailed: false,
+    missionStartFailedMissionId: null,
     missionResult: null,
     combatLifecycle: IDLE_COMBAT_LIFECYCLE,
     pilot,

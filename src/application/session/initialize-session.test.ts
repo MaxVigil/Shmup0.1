@@ -13,7 +13,8 @@ describe('initializeSession', () => {
     expect(session.equippedWeapon).toBe('machine-gun');
     expect(session.mouseMovementEnabled).toBe(true);
     expect(session.runStatus).toBe('active');
-    expect(session.missionAvailable).toBe(true);
+    expect(session.unlockedMissionIds).toEqual(['interception-01']);
+    expect(session.completedMissionIds).toEqual([]);
     expect(session.activeMission).toBe('none');
     expect(session.missionInstanceCount).toBe(0);
     expect(session.missionStartFailed).toBe(false);

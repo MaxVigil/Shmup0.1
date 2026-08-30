@@ -5,6 +5,16 @@ export default defineConfig({
   forbidOnly: true,
   retries: 0,
   reporter: 'list',
+  // STAB-E2E-WI03 (documented verification-reliability change): cap workers so
+  // the timing-sensitive Combat e2e evidence (real-time movement windows, the
+  // 100 ms destruction flash sampler) is not starved by parallel browser
+  // scheduling on the reference machine. Every test still runs and every
+  // assertion is unchanged; the suite simply runs with bounded concurrency.
+  // Root cause: under the aggregate `npm run verify:all` (production build +
+  // DEV and preview servers) and the machine's ambient load, default worker
+  // parallelism made these unchanged wall-clock measurements intermittently
+  // miss their deterministic windows.
+  workers: 1,
   use: {
     browserName: 'chromium',
     viewport: { width: 1366, height: 768 },

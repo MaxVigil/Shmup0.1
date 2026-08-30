@@ -9,8 +9,8 @@ import type {
 import {
   BASIC_DRONE,
   GERMAN_FIGHTER,
-  INTERCEPTION,
   MACHINE_GUN,
+  MVP_ENEMY_GROUP_SCHEDULE,
 } from '../content';
 import type { CombatTerminalResult } from '../mission';
 import type { MissionSnapshot } from '../mission/snapshot';
@@ -72,14 +72,13 @@ export function resolveBasicDrone(
 }
 
 /**
- * Resolves the validated Interception enemy-group schedule (S10). The MVP has
- * exactly one mission; the fallback is defensive and never reached in a
- * validated build.
+ * Resolves the temporary v0.1 enemy-group schedule used by the Combat
+ * compatibility seam (S10): the accepted legacy single-Interception schedule,
+ * consumed until V02-WI-04 routes Combat onto the v0.2 mission registry. It is
+ * the single retained seam schedule and never a second mission authority.
  */
-export function resolveMissionSchedule(
-  catalogue: ContentCatalogue,
-): EnemyGroupSchedule {
-  return catalogue.missions[0]?.schedule ?? INTERCEPTION.schedule;
+export function resolveMissionSchedule(): EnemyGroupSchedule {
+  return MVP_ENEMY_GROUP_SCHEDULE;
 }
 
 /**

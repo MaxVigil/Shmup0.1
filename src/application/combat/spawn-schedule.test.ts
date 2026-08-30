@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INTERCEPTION } from '@content/index';
+import { MVP_ENEMY_GROUP_SCHEDULE } from '@content/index';
 import { Mulberry32 } from '@domain/random';
 import { FIXED_STEP_SECONDS } from './combat-simulation';
 import { planEnemyGroups, spawnGroupDrones } from './spawn-schedule';
@@ -18,7 +18,7 @@ const SIZE = 24; // 4% of short side
 
 function planFor(seed: number): ReturnType<typeof planEnemyGroups> {
   return planEnemyGroups(
-    INTERCEPTION.schedule,
+    MVP_ENEMY_GROUP_SCHEDULE,
     new Mulberry32(seed),
     FIXED_STEP_SECONDS,
   );

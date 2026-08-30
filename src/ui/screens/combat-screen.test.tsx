@@ -48,6 +48,7 @@ function storeWithActiveMission(): SessionStore {
     throw new Error('Expected an initialized session.');
   }
   const snapshot: MissionSnapshot = {
+    missionId: 'interception-01',
     missionInstanceOrdinal: 0,
     missionAttemptId: 0,
     combatMissionSeed: 1234,

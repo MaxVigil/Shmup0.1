@@ -14,9 +14,9 @@ export type {
 } from './campaign-state';
 export {
   applyDefeatRecoveryOrGameOver,
+  applyMissionSuccess,
   applySeamAbort,
   applySeamDefeat,
-  applySeamSuccess,
   beginMission,
   clearMissionInProgress,
 } from './campaign-transitions';

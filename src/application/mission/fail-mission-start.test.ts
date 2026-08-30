@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONTENT_CATALOGUE } from '@content/index';
+import { CONTENT_CATALOGUE, INTERCEPTION_01 } from '@content/index';
 import {
   V02_STARTING_CREDITS,
   V02_DEFEAT_REPAIR_COST_CREDITS,
@@ -53,11 +53,14 @@ class RejectingUpdateCampaignStore implements CampaignStorePort {
 describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
   it('atomically clears the persisted marker and reconciles the session so a same-session retry succeeds', async () => {
     const app = createInitializedTestApplication();
-    const started = await startMission({
-      store: app.store,
-      campaignStore: app.campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const started = await startMission(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(started.kind).toBe('accepted');
     expect(app.campaignStore.current?.missionInProgress).toEqual({
       missionId: SEAM_MISSION_ID,
@@ -80,11 +83,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
 
     // The failure does not strand the same-session retry: the retry is a NEW
     // attempt (ordinal 1) of the same mission id.
-    const retry = await startMission({
-      store: app.store,
-      campaignStore: app.campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const retry = await startMission(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(retry.kind).toBe('accepted');
     expect(app.campaignStore.current?.missionInProgress).toEqual({
       missionId: SEAM_MISSION_ID,
@@ -94,11 +100,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
 
   it('never becomes a paid Defeat on reload after the failed start (no marker, no 8-Credit deduction)', async () => {
     const app = createInitializedTestApplication();
-    const started = await startMission({
-      store: app.store,
-      campaignStore: app.campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const started = await startMission(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(started.kind).toBe('accepted');
     await failMissionStart(
       {
@@ -138,11 +147,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
 
   it('is inert for a stale duplicate failure after the marker is cleared', async () => {
     const app = createInitializedTestApplication();
-    await startMission({
-      store: app.store,
-      campaignStore: app.campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    await startMission(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     await failMissionStart(
       {
         store: app.store,
@@ -181,11 +193,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
   it('race regression: an older delayed failure completion never clears a newer attempt of the same mission', async () => {
     const app = createInitializedTestApplication();
     // Attempt 0 starts, then its initialization rejects and is rolled back.
-    await startMission({
-      store: app.store,
-      campaignStore: app.campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    await startMission(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     await failMissionStart(
       {
         store: app.store,
@@ -195,11 +210,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
     );
     // A NEWER attempt of the SAME mission (same mission id, ordinal 1) starts
     // and persists its own marker before the old failure callback completes.
-    const retry = await startMission({
-      store: app.store,
-      campaignStore: app.campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const retry = await startMission(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(retry.kind).toBe('accepted');
     expect(app.campaignStore.current?.missionInProgress).toEqual({
       missionId: SEAM_MISSION_ID,
@@ -234,11 +252,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
 
   it('a rejected durable update is handled explicitly: no unhandled rejection, no dispatch, and the session stays aligned with the still-present marker', async () => {
     const app = createInitializedTestApplication();
-    await startMission({
-      store: app.store,
-      campaignStore: app.campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    await startMission(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     const rejectingStore = new RejectingUpdateCampaignStore(app.campaignStore);
 
     // The command itself catches the rejection and returns `failed`.
@@ -264,11 +285,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
 
   it('an unreadable record is reported as failed without clearing the in-memory mission', async () => {
     const app = createInitializedTestApplication();
-    await startMission({
-      store: app.store,
-      campaignStore: app.campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    await startMission(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     // Corrupt the stored record after the marker was written.
     app.campaignStore.seed({
       ...(app.campaignStore.current as CampaignStateV1),
@@ -307,11 +331,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
     });
 
     // Instance A starts the mission: campaign attempt id 0.
-    const startedA = await startMission({
-      store: storeA,
-      campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const startedA = await startMission(
+      {
+        store: storeA,
+        campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(startedA.kind).toBe('accepted');
     if (startedA.kind !== 'accepted') {
       throw new Error('Expected instance A to start.');
@@ -329,11 +356,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
 
     // Instance B starts the SAME mission: the campaign allocates the NEXT
     // attempt id (1), never reusing the session-restarted ordinal.
-    const startedB = await startMission({
-      store: storeB,
-      campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const startedB = await startMission(
+      {
+        store: storeB,
+        campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(startedB.kind).toBe('accepted');
     if (startedB.kind !== 'accepted') {
       throw new Error('Expected instance B to start.');
@@ -378,11 +408,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
       session: initializeSession(444, CONTENT_CATALOGUE),
     });
 
-    const startedA = await startMission({
-      store: storeA,
-      campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const startedA = await startMission(
+      {
+        store: storeA,
+        campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(startedA.kind).toBe('accepted');
     if (startedA.kind !== 'accepted') {
       throw new Error('Expected instance A to start.');
@@ -400,11 +433,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
       V02_STARTING_CREDITS - V02_DEFEAT_REPAIR_COST_CREDITS;
     expect(campaignStore.current?.credits).toBe(creditsAfterRecovery);
 
-    const startedB = await startMission({
-      store: storeB,
-      campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const startedB = await startMission(
+      {
+        store: storeB,
+        campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(startedB.kind).toBe('accepted');
     if (startedB.kind !== 'accepted') {
       throw new Error('Expected instance B to start.');
@@ -455,7 +491,9 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
       ),
     ).toBe('committed');
     expect(campaignStore.current?.missionInProgress).toBeNull();
-    expect(campaignStore.current?.credits).toBe(creditsAfterRecovery + 1);
+    expect(campaignStore.current?.credits).toBe(
+      creditsAfterRecovery + INTERCEPTION_01.completionReward,
+    );
     expect(campaignStore.current?.hullIntegrity).toBe(80);
     expect(storeB.getState()?.activeMission).toBe('none');
   });
@@ -472,11 +510,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
     });
 
     // Old run: instance A starts attempt A (campaign attempt id 0).
-    const startedA = await startMission({
-      store: storeA,
-      campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const startedA = await startMission(
+      {
+        store: storeA,
+        campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(startedA.kind).toBe('accepted');
     if (startedA.kind !== 'accepted') {
       throw new Error('Expected instance A to start.');
@@ -494,11 +535,14 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
       type: 'session/initialized',
       session: initializeSession(777, CONTENT_CATALOGUE),
     });
-    const startedB = await startMission({
-      store: storeB,
-      campaignStore,
-      content: CONTENT_CATALOGUE,
-    });
+    const startedB = await startMission(
+      {
+        store: storeB,
+        campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      SEAM_MISSION_ID,
+    );
     expect(startedB.kind).toBe('accepted');
     if (startedB.kind !== 'accepted') {
       throw new Error('Expected instance B to start.');
@@ -568,7 +612,9 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
       ),
     ).toBe('committed');
     expect(campaignStore.current?.missionInProgress).toBeNull();
-    expect(campaignStore.current?.credits).toBe(V02_STARTING_CREDITS + 1);
+    expect(campaignStore.current?.credits).toBe(
+      V02_STARTING_CREDITS + INTERCEPTION_01.completionReward,
+    );
     expect(campaignStore.current?.hullIntegrity).toBe(80);
   });
 });

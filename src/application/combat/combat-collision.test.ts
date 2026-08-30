@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { BASIC_DRONE, GERMAN_FIGHTER, INTERCEPTION } from '@content/index';
+import {
+  BASIC_DRONE,
+  GERMAN_FIGHTER,
+  MVP_ENEMY_GROUP_SCHEDULE,
+} from '@content/index';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import {
@@ -46,7 +50,7 @@ function createState(): CombatSimulationState {
     projectile: PLAYER_PROJECTILE,
     missionSeed: 1234,
     enemy: BASIC_DRONE,
-    schedule: INTERCEPTION.schedule,
+    schedule: MVP_ENEMY_GROUP_SCHEDULE,
     playerHullIntegrity: 100,
     playerMaximumHullIntegrity: 100,
   });
@@ -501,7 +505,7 @@ describe('S11 hardening and cleanup', () => {
       projectile: PLAYER_PROJECTILE,
       missionSeed: 1234,
       enemy: BASIC_DRONE,
-      schedule: INTERCEPTION.schedule,
+      schedule: MVP_ENEMY_GROUP_SCHEDULE,
       playerHullIntegrity: 101,
       playerMaximumHullIntegrity: 100,
     };
@@ -529,7 +533,7 @@ describe('S11 hardening and cleanup', () => {
       projectile: PLAYER_PROJECTILE,
       missionSeed: 1234,
       enemy: BASIC_DRONE,
-      schedule: INTERCEPTION.schedule,
+      schedule: MVP_ENEMY_GROUP_SCHEDULE,
       playerHullIntegrity: 100,
       playerMaximumHullIntegrity: 100,
     });

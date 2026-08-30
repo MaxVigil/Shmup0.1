@@ -8,6 +8,9 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
+import type { ContentCatalogue } from '@application/content';
+import { INTERCEPTION_01, INTERCEPTION_03 } from '@application/content';
+import { contentCatalogueWith } from '@test-support/content';
 import { createInitializedSessionStore } from '@test-support/session';
 import { createApplicationContextValue } from '@test-support/ui';
 import { CONTENT_CATALOGUE } from '@test-support/content';
@@ -36,10 +39,18 @@ function renderScreenWithStore(
   assets: AssetPreloadResult,
   store: SessionStore,
 ): void {
+  renderScreenWithContent(assets, store, CONTENT_CATALOGUE);
+}
+
+function renderScreenWithContent(
+  assets: AssetPreloadResult,
+  store: SessionStore,
+  content: ContentCatalogue,
+): void {
   const value = createApplicationContextValue({
     store,
     preparedAssets: assets,
-    content: CONTENT_CATALOGUE,
+    content,
   });
   render(
     <ApplicationContext.Provider value={value}>
@@ -57,6 +68,7 @@ function storeWithPendingResult(): SessionStore {
   store.dispatch({
     type: 'mission/start',
     snapshot: {
+      missionId: 'interception-01',
       missionInstanceOrdinal: 0,
       missionAttemptId: 0,
       combatMissionSeed: 0,
@@ -74,6 +86,9 @@ function storeWithPendingResult(): SessionStore {
       missionInstanceOrdinal: 0,
       creditsAfter: 13,
       hullIntegrityAfter: 80,
+      unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+      completedMissionIdsAfter: ['interception-01'],
+      creditsEarned: 8,
     },
   });
   return store;
@@ -88,12 +103,33 @@ function backgroundElement(): HTMLElement {
 }
 
 describe('OperationsScreen', () => {
-  it('renders the accessible Screen name, Credits Panel, Mission Point, and background (Base AC-007)', () => {
+  it('renders the accessible Screen name, Credits Panel, and three Mission Points (Base AC-007, Epic §6.1, V02-AC-001)', () => {
     renderScreen(BACKGROUND_READY);
     expect(screen.getByRole('main', { name: 'Operations' })).toBeDefined();
     expect(screen.queryByRole('heading', { name: 'Operations' })).toBeNull();
     expect(screen.getByText('Credits: 12')).toBeDefined();
-    expect(screen.getByRole('button', { name: 'Interception' })).toBeDefined();
+    // A New Game shows exactly the three visible points: 01 available, 02 and
+    // 03 locked (V02-AC-001).
+    expect(
+      screen.getByRole('button', { name: 'Interception 01' }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole('button', { name: 'Interception 02 (Locked)' }),
+    ).toBeDefined();
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Interception 02 (Locked)',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Interception 03 (Locked)',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
     expect(backgroundElement().style.backgroundImage).toContain(
       '/backgrounds/operations-background.webp',
     );
@@ -119,16 +155,60 @@ describe('OperationsScreen', () => {
     expect(backgroundElement().style.backgroundImage).toBe('');
   });
 
-  it('opens Mission Details Overlay from the Mission Point and leaves Operations current (Base AC-009)', () => {
+  it('opens Mission Details for an available mission and leaves Operations current (Base AC-009, V02-WI-03)', () => {
     renderScreen([]);
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Interception' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Interception 01' }));
     });
     expect(screen.getByRole('dialog')).toBeDefined();
+    expect(
+      screen.getByRole('heading', { name: 'Interception 01' }),
+    ).toBeDefined();
     expect(screen.getByRole('main', { name: 'Operations' })).toBeDefined();
   });
 
-  it('while a Mission Result is pending the Mission Point cannot open the Start Mission flow (S12-WI01)', () => {
+  it('a locked Mission Point is structurally non-launchable and cannot open Mission Details (Epic §6.1)', () => {
+    renderScreen([]);
+    const locked = screen.getByRole('button', {
+      name: 'Interception 02 (Locked)',
+    });
+    expect((locked as HTMLButtonElement).disabled).toBe(true);
+    // A programmatic activation of the disabled marker cannot open the flow.
+    fireEvent.click(locked);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Start Mission' })).toBeNull();
+  });
+
+  it('a completed mission remains launchable for replay (Epic §6.2, V02-AC-002)', () => {
+    const store = createInitializedSessionStore();
+    const session = store.getState();
+    if (session === null) {
+      throw new Error('Expected an initialized session.');
+    }
+    store.dispatch({
+      type: 'session/new-game',
+      session: {
+        ...session,
+        unlockedMissionIds: ['interception-01', 'interception-02'],
+        completedMissionIds: ['interception-01'],
+      },
+    });
+    renderScreenWithStore([], store);
+    const completed = screen.getByRole('button', {
+      name: 'Interception 01 (Completed)',
+    });
+    expect((completed as HTMLButtonElement).disabled).toBe(false);
+    act(() => {
+      fireEvent.click(completed);
+    });
+    expect(screen.getByRole('dialog')).toBeDefined();
+    // The replay mission is the same validated definition with its own reward.
+    expect(
+      screen.getByRole('heading', { name: 'Interception 01' }),
+    ).toBeDefined();
+  });
+
+  it('while a Mission Result is pending the Mission Points cannot open the Start Mission flow (S12-WI01)', () => {
     const store = storeWithPendingResult();
     renderScreenWithStore([], store);
     expect(store.getState()!.missionResult).toMatchObject({
@@ -138,7 +218,9 @@ describe('OperationsScreen', () => {
     // A programmatic Mission Point activation must not open Mission Details /
     // the Start Mission flow beneath the only continuation point.
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Interception' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Interception 01 (Completed)' }),
+      );
     });
     expect(screen.queryByRole('button', { name: 'Start Mission' })).toBeNull();
     // The pending result is untouched.
@@ -146,5 +228,59 @@ describe('OperationsScreen', () => {
       kind: 'success',
       missionInstanceOrdinal: 0,
     });
+  });
+
+  it('renders only missions present in the injected catalogue and never substitutes global content (V02-WI-03 correction)', () => {
+    // The injected catalogue omits Interception 02 (still present in the
+    // global MISSIONS registry). Operations must render only the injected
+    // missions and must not display the global substituted mission.
+    const injected = contentCatalogueWith({
+      missions: [INTERCEPTION_01, INTERCEPTION_03],
+    });
+    renderScreenWithContent([], createInitializedSessionStore(), injected);
+    expect(
+      screen.getByRole('button', { name: 'Interception 01' }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole('button', { name: 'Interception 03 (Locked)' }),
+    ).toBeDefined();
+    expect(
+      screen.queryByRole('button', { name: 'Interception 02' }),
+    ).toBeNull();
+  });
+
+  it('a failed start for a mission absent from the injected catalogue opens no substituted Mission Details (V02-WI-03 correction)', () => {
+    const store = createInitializedSessionStore();
+    const session = store.getState();
+    if (session === null) {
+      throw new Error('Expected an initialized session.');
+    }
+    store.dispatch({
+      type: 'mission/start',
+      snapshot: {
+        missionId: 'interception-01',
+        missionInstanceOrdinal: 0,
+        missionAttemptId: 0,
+        combatMissionSeed: 0,
+        aircraftId: session.aircraftId,
+        hullIntegrity: session.hullIntegrity,
+        equippedWeapon: session.equippedWeapon,
+        pilot: session.pilot,
+        mouseMovementEnabled: session.mouseMovementEnabled,
+      },
+    });
+    store.dispatch({
+      type: 'mission/start-failed',
+      missionId: 'interception-02',
+    });
+    const injected = contentCatalogueWith({
+      missions: [INTERCEPTION_01, INTERCEPTION_03],
+    });
+    renderScreenWithContent([], store, injected);
+    // The failed mission is not in the injected catalogue, so resolving the
+    // selected mission must yield nothing — no substituted dialog can open.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Start Mission' })).toBeNull();
+    expect(store.getState()?.missionStartFailedMissionId).toBeNull();
   });
 });

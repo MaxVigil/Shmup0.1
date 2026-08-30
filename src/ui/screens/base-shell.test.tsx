@@ -41,6 +41,7 @@ function storeWithPendingResult(): SessionStore {
   store.dispatch({
     type: 'mission/start',
     snapshot: {
+      missionId: 'interception-01',
       missionInstanceOrdinal: 0,
       missionAttemptId: 0,
       combatMissionSeed: 0,
@@ -58,6 +59,9 @@ function storeWithPendingResult(): SessionStore {
       missionInstanceOrdinal: 0,
       creditsAfter: 13,
       hullIntegrityAfter: 80,
+      unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+      completedMissionIdsAfter: ['interception-01'],
+      creditsEarned: 8,
     },
   });
   return store;

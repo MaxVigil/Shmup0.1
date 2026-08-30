@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASIC_DRONE, INTERCEPTION } from '@content/index';
+import { BASIC_DRONE, MVP_ENEMY_GROUP_SCHEDULE } from '@content/index';
 import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import {
@@ -28,7 +28,7 @@ function createRuntime(): CombatSimulationRuntime {
     projectile: PLAYER_PROJECTILE,
     missionSeed: 1234,
     enemy: BASIC_DRONE,
-    schedule: INTERCEPTION.schedule,
+    schedule: MVP_ENEMY_GROUP_SCHEDULE,
     playerHullIntegrity: 100,
     playerMaximumHullIntegrity: aircraft.maximumHullIntegrity,
   });
@@ -152,7 +152,7 @@ describe('S13 escaped-enemy observability count (Combat §7.5)', () => {
       projectile: PLAYER_PROJECTILE,
       missionSeed: 1234,
       enemy: BASIC_DRONE,
-      schedule: INTERCEPTION.schedule,
+      schedule: MVP_ENEMY_GROUP_SCHEDULE,
       playerHullIntegrity: 100,
       playerMaximumHullIntegrity: aircraft.maximumHullIntegrity,
     });

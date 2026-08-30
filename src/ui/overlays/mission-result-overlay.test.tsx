@@ -27,6 +27,7 @@ function storeWithResult(result: 'success' | 'defeat'): SessionStore {
   store.dispatch({
     type: 'mission/start',
     snapshot: {
+      missionId: 'interception-01',
       missionInstanceOrdinal: 0,
       missionAttemptId: 0,
       combatMissionSeed: 0,
@@ -46,6 +47,9 @@ function storeWithResult(result: 'success' | 'defeat'): SessionStore {
             missionInstanceOrdinal: 0,
             creditsAfter: 13,
             hullIntegrityAfter: 80,
+            unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+            completedMissionIdsAfter: ['interception-01'],
+            creditsEarned: 8,
           }
         : {
             kind: 'defeat',
@@ -72,14 +76,14 @@ function renderOverlay(store: SessionStore): void {
 }
 
 describe('MissionResultOverlay (Base §9.5, S12)', () => {
-  it('shows Mission Complete / Reward: 1 Credit with focused Continue on Success', () => {
+  it('shows Mission Complete / the earned completion reward with focused Continue on Success', () => {
     const store = storeWithResult('success');
     renderOverlay(store);
     expect(
       screen.getByRole('heading', { name: 'Mission Complete' }),
     ).toBeDefined();
     expect(screen.getByText('Reward')).toBeDefined();
-    expect(screen.getByText('1 Credit')).toBeDefined();
+    expect(screen.getByText('8 Credits')).toBeDefined();
     const continueButton = screen.getByRole('button', { name: 'Continue' });
     expect(continueButton).toBeDefined();
     expect(document.activeElement).toBe(continueButton);

@@ -1,4 +1,4 @@
-import { HULL_INTEGRITY_MAX, isHullIntegrity } from '../model';
+import { HULL_INTEGRITY_MAX, isHullIntegrity, isMissionId } from '../model';
 import type { MissionId } from '../model';
 import {
   LEGACY_DEFEAT_RECOVERY_HULL,
@@ -64,26 +64,39 @@ function exactMarkerMatch(
 }
 
 /**
- * Temporary v0.1 single-mission Success through the compatibility seam: grants
- * the approved completion reward and retains the Combat Hull, clearing the
- * active-mission marker in the same coherent transition — only for the exact
- * campaign attempt id that started the mission (V02-WI-02 correction C03), so
- * a stale Success callback from an older application instance or attempt is
- * inert before any reward or Hull change. The reward value is supplied by the
- * current single-mission flow (content `reward`), not a second economy
- * authority; V02-WI-04 replaces this with the pending combat economy.
+ * v0.2 Success transition (Epic §6.2, §12.2, V02-AC-002, V02-AC-020): the
+ * authoritative atomic Success commitment through the campaign transaction —
+ * grants the authored mission completion reward, marks the mission completed,
+ * unlocks exactly the one defined next mission when the mission was not already
+ * completed, retains the Combat Hull, and clears the active-mission marker — all
+ * in one coherent before/after state, only for the exact campaign attempt that
+ * started the mission.
+ *
+ * Idempotency: the transition requires the persisted marker to belong to the
+ * exact `attemptId` AND the exact `missionId` that started it. Repeated,
+ * stale, or racing Success callbacks after the first commitment find no marker
+ * (`no-mission-in-progress`) or a non-matching attempt (`attempt-does-not-match`)
+ * and are rejected BEFORE any reward, unlock, Hull change, or marker clear, so
+ * an unlock/completion can never duplicate (V02-AC-002, V02-AC-020). The
+ * completion/unlock set is supplied by the application from the validated
+ * mission registry — Domain never locates content globally.
  */
-export function applySeamSuccess(
+export function applyMissionSuccess(
   campaign: CampaignStateV1,
   attemptId: number,
+  missionId: MissionId,
   combatHullIntegrity: number,
   completionReward: number,
+  unlockMissionId: MissionId | null,
 ): CampaignTransitionResult {
   if (campaign.missionInProgress === null) {
     return { kind: 'rejected', reason: 'no-mission-in-progress' };
   }
   if (!exactMarkerMatch(campaign, attemptId)) {
     return { kind: 'rejected', reason: 'attempt-does-not-match' };
+  }
+  if (campaign.missionInProgress.missionId !== missionId) {
+    return { kind: 'rejected', reason: 'marker-mission-mismatch' };
   }
   if (
     !isHullIntegrity(combatHullIntegrity) ||
@@ -92,12 +105,25 @@ export function applySeamSuccess(
   ) {
     return { kind: 'rejected', reason: 'invalid-success-result-values' };
   }
+  if (unlockMissionId !== null && !isMissionId(unlockMissionId)) {
+    return { kind: 'rejected', reason: 'invalid-unlock-target' };
+  }
+  const completedMissionIds = campaign.completedMissionIds.includes(missionId)
+    ? campaign.completedMissionIds
+    : [...campaign.completedMissionIds, missionId];
+  const unlockedMissionIds =
+    unlockMissionId !== null &&
+    !campaign.unlockedMissionIds.includes(unlockMissionId)
+      ? [...campaign.unlockedMissionIds, unlockMissionId]
+      : campaign.unlockedMissionIds;
   return {
     kind: 'applied',
     campaign: {
       ...campaign,
       credits: campaign.credits + completionReward,
       hullIntegrity: combatHullIntegrity,
+      unlockedMissionIds,
+      completedMissionIds,
       missionInProgress: null,
     },
   };

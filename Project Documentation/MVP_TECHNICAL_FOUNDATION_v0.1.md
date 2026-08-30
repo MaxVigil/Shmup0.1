@@ -186,10 +186,11 @@ shmup-mvp:rng-v1|<session-seed>|<stream-name>|<ordinal>
 
 The `<session-seed>` placeholder is an unsigned 32-bit integer serialized as base-10 decimal ASCII without sign, prefix, separators, whitespace, or leading zeroes. Examples: `0` → `"0"`, `1` → `"1"`, `3735928559` → `"3735928559"`. Hexadecimal (`0xDEADBEEF`), zero-padded (`03735928559`), signed (`+3735928559`), and separator (`3_735_928_559`) forms are prohibited.
 
-The initial stream names and ordinals are:
+The stream names and ordinals are:
 
 - `pilot-selection`, ordinal `0`;
-- `combat-mission`, using the zero-based Mission Instance ordinal.
+- `combat-mission`, using the zero-based Mission Instance ordinal;
+- `mission-data`, ordinal `0` (added by V02-WI-03), derived from the already-derived `combat-mission` seed of one Mission Instance. It resolves the approved seeded entry variants (e.g. Hunter `upper-left`/`upper-right`, Epic §8) for the deterministic encounter-data contract and never reads current Hull, loadout, Aircraft position, score, or performance (V02-AC-003–004). Deriving it from the mission seed with its own stream name keeps every draw here independent of the authoritative Combat spawn stream sequence.
 
 The Mission Instance ordinal increments exactly once when an accepted `Start Mission` command creates a Mission Snapshot, regardless of the later Success, Defeat, or Aborted result.
 

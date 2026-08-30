@@ -1,4 +1,4 @@
-import type { WeaponType } from '@domain/index';
+import type { MissionId, WeaponType } from '@domain/index';
 import { isCredits, isHullIntegrity } from '@domain/index';
 import {
   IDLE_COMBAT_LIFECYCLE,
@@ -31,7 +31,7 @@ export type SessionAction =
   | { readonly type: 'session/repair' }
   | { readonly type: 'session/equip-weapon'; readonly weapon: WeaponType }
   | { readonly type: 'mission/start'; readonly snapshot: MissionSnapshot }
-  | { readonly type: 'mission/start-failed' }
+  | { readonly type: 'mission/start-failed'; readonly missionId: MissionId }
   | { readonly type: 'mission/start-failure-consumed' }
   | { readonly type: 'mission/result'; readonly result: MissionResult }
   | {
@@ -116,14 +116,16 @@ export function sessionReducer(
         activeMission: action.snapshot,
         missionInstanceCount: state.missionInstanceCount + 1,
         missionStartFailed: false,
+        missionStartFailedMissionId: null,
         // S13: one accepted mission start enters Combat running with no
         // Overlay and no browser-safety latch.
         combatLifecycle: RUNNING_COMBAT_LIFECYCLE,
       };
     case 'mission/start-failed':
       // Combat initialization failure (Base AC-014): no active mission
-      // remains and Base state is unchanged; the failure is signalled so the
-      // Mission Details Overlay can reopen with the approved message.
+      // remains and Base state is unchanged; the failure is signalled with the
+      // originating mission so Operations can reopen its Mission Details with
+      // the approved message (V02-WI-03).
       if (state === null || state.activeMission === 'none') {
         return state;
       }
@@ -131,6 +133,7 @@ export function sessionReducer(
         ...state,
         activeMission: 'none',
         missionStartFailed: true,
+        missionStartFailedMissionId: action.missionId,
         combatLifecycle: IDLE_COMBAT_LIFECYCLE,
       };
     case 'mission/start-failure-consumed':
@@ -139,7 +142,11 @@ export function sessionReducer(
       if (state === null || !state.missionStartFailed) {
         return state;
       }
-      return { ...state, missionStartFailed: false };
+      return {
+        ...state,
+        missionStartFailed: false,
+        missionStartFailedMissionId: null,
+      };
     case 'mission/result':
       // S12 single typed, idempotent commitment path bound to the originating
       // Mission Instance (Base §9.5, AC-032/033/034; Epic §13, V02-AC-020).
@@ -176,6 +183,7 @@ export function sessionReducer(
           missionResult: {
             kind: 'defeat',
             missionInstanceOrdinal: action.result.missionInstanceOrdinal,
+            creditsEarned: 0,
           },
           // S13: any open Combat Overlay/lifecycle closes with the mission;
           // the Mission Result Overlay becomes the only continuation point.
@@ -188,9 +196,15 @@ export function sessionReducer(
           activeMission: 'none',
           credits: action.result.creditsAfter,
           hullIntegrity: action.result.hullIntegrityAfter,
+          // V02-WI-03: the session mirrors the durable progression applied by
+          // the atomic campaign transaction (unlock + completion exactly once,
+          // Epic §6.2, V02-AC-002); the reducer never infers unlocks itself.
+          unlockedMissionIds: [...action.result.unlockedMissionIdsAfter],
+          completedMissionIds: [...action.result.completedMissionIdsAfter],
           missionResult: {
             kind: 'success',
             missionInstanceOrdinal: action.result.missionInstanceOrdinal,
+            creditsEarned: action.result.creditsEarned,
           },
           combatLifecycle: IDLE_COMBAT_LIFECYCLE,
         };

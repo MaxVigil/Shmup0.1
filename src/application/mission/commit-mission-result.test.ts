@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONTENT_CATALOGUE } from '@content/index';
+import { CONTENT_CATALOGUE, INTERCEPTION_01 } from '@content/index';
 import { V02_STARTING_CREDITS } from '@domain/index';
 import { createInitializedTestApplication } from '@test-support/persistence';
 import type { InitializedTestApplication } from '@test-support/persistence';
@@ -10,11 +10,14 @@ import { startMission } from './start-mission';
 import type { CampaignStorePort } from '../persistence';
 
 async function startMissionIn(app: InitializedTestApplication): Promise<void> {
-  const result = await startMission({
-    store: app.store,
-    campaignStore: app.campaignStore,
-    content: CONTENT_CATALOGUE,
-  });
+  const result = await startMission(
+    {
+      store: app.store,
+      campaignStore: app.campaignStore,
+      content: CONTENT_CATALOGUE,
+    },
+    SEAM_MISSION_ID,
+  );
   if (result.kind !== 'accepted') {
     throw new Error('Expected an accepted persisted start.');
   }
@@ -49,18 +52,36 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
       0,
     );
     expect(outcome).toBe('committed');
-    // Durable before/after: marker cleared, reward applied exactly once.
+    // Durable before/after: marker cleared, completion reward applied exactly
+    // once, mission completed, and only Interception 02 unlocked (V02-AC-002).
     expect(app.campaignStore.current?.missionInProgress).toBeNull();
-    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS + 1);
+    expect(app.campaignStore.current?.credits).toBe(
+      V02_STARTING_CREDITS + INTERCEPTION_01.completionReward,
+    );
     expect(app.campaignStore.current?.hullIntegrity).toBe(80);
+    expect(app.campaignStore.current?.completedMissionIds).toEqual([
+      'interception-01',
+    ]);
+    expect(app.campaignStore.current?.unlockedMissionIds).toEqual([
+      'interception-01',
+      'interception-02',
+    ]);
     // Session mirrors the durable state (persist-then-session ordering).
     const session = app.store.getState();
-    expect(session?.credits).toBe(V02_STARTING_CREDITS + 1);
+    expect(session?.credits).toBe(
+      V02_STARTING_CREDITS + INTERCEPTION_01.completionReward,
+    );
     expect(session?.hullIntegrity).toBe(80);
     expect(session?.activeMission).toBe('none');
+    expect(session?.completedMissionIds).toEqual(['interception-01']);
+    expect(session?.unlockedMissionIds).toEqual([
+      'interception-01',
+      'interception-02',
+    ]);
     expect(session?.missionResult).toEqual({
       kind: 'success',
       missionInstanceOrdinal: 0,
+      creditsEarned: INTERCEPTION_01.completionReward,
     });
   });
 
@@ -117,6 +138,7 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
     expect(app.store.getState()?.missionResult).toEqual({
       kind: 'defeat',
       missionInstanceOrdinal: 0,
+      creditsEarned: 0,
     });
   });
 

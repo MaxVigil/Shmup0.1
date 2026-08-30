@@ -41,6 +41,7 @@ function startMissionIn(store: SessionStore): void {
     throw new Error('Expected an initialized session.');
   }
   const snapshot: MissionSnapshot = {
+    missionId: 'interception-01',
     missionInstanceOrdinal: 0,
     missionAttemptId: 0,
     combatMissionSeed: 1234,
@@ -94,7 +95,10 @@ describe('SessionRouter', () => {
     // A mission result/abort later returns to Base (S12/S13); here the failure
     // path demonstrates the same switch.
     act(() => {
-      store.dispatch({ type: 'mission/start-failed' });
+      store.dispatch({
+        type: 'mission/start-failed',
+        missionId: 'interception-01',
+      });
     });
     expect(screen.getByTestId('operations-screen')).toBeDefined();
     expect(screen.queryByTestId('combat-screen')).toBeNull();

@@ -1,5 +1,10 @@
 import type { PilotRecord } from '@content/index';
-import type { AircraftId, CampaignRunStatus, WeaponType } from '@domain/index';
+import type {
+  AircraftId,
+  CampaignRunStatus,
+  MissionId,
+  WeaponType,
+} from '@domain/index';
 import type { CombatLifecycleState } from '../combat/lifecycle';
 import type { MissionSnapshot } from '../mission/snapshot';
 
@@ -23,6 +28,8 @@ export type BaseScreenId = 'operations' | 'hangar';
 export interface PresentedMissionResult {
   readonly kind: 'success' | 'defeat';
   readonly missionInstanceOrdinal: number;
+  /** Credits earned by the presented Success (temporary seam overlay value). */
+  readonly creditsEarned: number;
 }
 
 /**
@@ -39,7 +46,13 @@ export interface SessionState {
   readonly equippedWeapon: WeaponType;
   readonly mouseMovementEnabled: boolean;
   readonly runStatus: CampaignRunStatus;
-  readonly missionAvailable: boolean;
+  /** Authored mission ids unlocked by the persisted campaign (Epic §6.1,
+   *  V02-AC-001). Replaces the v0.1 single `missionAvailable` boolean; a mission
+   *  is launchable only when present here (V02-WI-03). */
+  readonly unlockedMissionIds: readonly MissionId[];
+  /** Authored mission ids completed by a first-or-later Success (Epic §6.2,
+   *  V02-AC-002); completed missions remain replayable. */
+  readonly completedMissionIds: readonly MissionId[];
   readonly activeMission: 'none' | MissionSnapshot;
   /** Session RNG seed (Technical Foundation §8), retained for stream derivation. */
   readonly sessionSeed: number;
@@ -47,6 +60,11 @@ export interface SessionState {
   readonly missionInstanceCount: number;
   /** Set when a Combat initialization failure returns to Base (Base AC-014). */
   readonly missionStartFailed: boolean;
+  /** The mission whose Combat initialization failed (Base AC-014, V02-WI-03);
+   *  `null` when no failure is signalled. Lets Operations reopen the correct
+   *  Mission Details with `Unable to start mission.` after the persisted
+   *  marker is rolled back. */
+  readonly missionStartFailedMissionId: MissionId | null;
   /** Committed terminal mission outcome presented by the Result Overlay
    *  (Success/Defeat); `null` when no result is pending (S12). */
   readonly missionResult: PresentedMissionResult | null;

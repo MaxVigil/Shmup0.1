@@ -13,8 +13,20 @@ export type {
   FailMissionStartDeps,
   FailMissionStartOutcome,
 } from './fail-mission-start';
+export { SEAM_MISSION_ID } from './compatibility-seam';
+export { resolveMissionEncounters } from './encounter-resolution';
+export type {
+  MissionEncounterPlan,
+  ResolvedEncounter,
+} from './encounter-resolution';
 export {
-  SEAM_MISSION_ID,
-  resolveSeamMissionReward,
-} from './compatibility-seam';
+  missionPointView,
+  missionPointViews,
+  missionState,
+} from './mission-progression';
+export type {
+  MissionPointState,
+  MissionPointView,
+  MissionProgression,
+} from './mission-progression';
 export type { CombatTerminalResult, MissionResult } from './mission-result';

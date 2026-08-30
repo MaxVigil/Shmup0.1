@@ -6,9 +6,12 @@ import {
 } from '@test-support/domain/rng';
 import {
   COMBAT_MISSION_STREAM,
+  MISSION_DATA_ORDINAL,
+  MISSION_DATA_STREAM,
   PILOT_SELECTION_ORDINAL,
   PILOT_SELECTION_STREAM,
   createCombatMissionStream,
+  createMissionDataStream,
   createPilotSelectionStream,
   createStream,
   deriveStreamSeed,
@@ -49,7 +52,31 @@ describe('stream derivation', () => {
   it('exposes the approved stream names and ordinals', () => {
     expect(PILOT_SELECTION_STREAM).toBe('pilot-selection');
     expect(COMBAT_MISSION_STREAM).toBe('combat-mission');
+    expect(MISSION_DATA_STREAM).toBe('mission-data');
     expect(PILOT_SELECTION_ORDINAL).toBe(0);
+    expect(MISSION_DATA_ORDINAL).toBe(0);
+  });
+
+  it('derives the approved fixed mission-data stream seed and sequence (V02-WI-03)', () => {
+    expect(deriveStreamSeed(TEST_SESSION_SEED, MISSION_DATA_STREAM, 0)).toBe(
+      3589906066,
+    );
+    const stream = createMissionDataStream(TEST_SESSION_SEED);
+    expect(stream.nextUint32()).toBe(2560335256);
+    expect(stream.nextUint32()).toBe(3477332877);
+  });
+
+  it('keeps mission-data independent of the combat-mission stream sequence', () => {
+    const missionData = createMissionDataStream(TEST_SESSION_SEED);
+    const combat = testCombatMissionStream(0);
+    const missionDataValues = [
+      missionData.nextUint32(),
+      missionData.nextUint32(),
+    ];
+    const combatValues = [combat.nextUint32(), combat.nextUint32()];
+    expect(missionDataValues).toEqual([2560335256, 3477332877]);
+    expect(combatValues).toEqual([1437069935, 1763999852]);
+    expect(missionDataValues).not.toEqual(combatValues);
   });
 
   it('keeps pilot-selection and combat-mission streams independent', () => {

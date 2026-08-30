@@ -12,6 +12,7 @@ function snapshotFor(
     throw new Error('Expected an initialized session.');
   }
   return {
+    missionId: 'interception-01',
     missionInstanceOrdinal: 0,
     missionAttemptId: 0,
     combatMissionSeed: 1234,
@@ -253,9 +254,15 @@ describe('createSessionStore', () => {
   it('clears the active mission and signals the failure on Combat initialization failure (Base AC-014)', () => {
     const store = initializedStore();
     store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
-    store.dispatch({ type: 'mission/start-failed' });
+    store.dispatch({
+      type: 'mission/start-failed',
+      missionId: 'interception-01',
+    });
     expect(store.getState()?.activeMission).toBe('none');
     expect(store.getState()?.missionStartFailed).toBe(true);
+    expect(store.getState()?.missionStartFailedMissionId).toBe(
+      'interception-01',
+    );
     // Base state (Credits, Hull, weapon, Pilot, Settings) is unchanged.
     expect(store.getState()?.credits).toBe(12);
     expect(store.getState()?.hullIntegrity).toBe(100);
@@ -264,9 +271,13 @@ describe('createSessionStore', () => {
   it('clears the failure signal once Base has reopened Mission Details', () => {
     const store = initializedStore();
     store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
-    store.dispatch({ type: 'mission/start-failed' });
+    store.dispatch({
+      type: 'mission/start-failed',
+      missionId: 'interception-01',
+    });
     store.dispatch({ type: 'mission/start-failure-consumed' });
     expect(store.getState()?.missionStartFailed).toBe(false);
+    expect(store.getState()?.missionStartFailedMissionId).toBeNull();
     expect(store.getState()?.activeMission).toBe('none');
   });
 
@@ -404,6 +415,9 @@ describe('createSessionStore', () => {
         missionInstanceOrdinal: 0,
         creditsAfter: 13,
         hullIntegrityAfter: 80,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     store.dispatch({

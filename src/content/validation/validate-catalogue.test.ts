@@ -5,12 +5,14 @@ import {
   CANNON,
   CONTENT_CATALOGUE,
   GERMAN_FIGHTER,
-  INTERCEPTION,
+  INTERCEPTION_01,
+  INTERCEPTION_02,
+  INTERCEPTION_03,
   MACHINE_GUN,
   PILOTS,
   PLAYER_PROJECTILE,
 } from '../index';
-import type { EnemyGroupSchedule } from '../missions';
+import type { MissionDefinition } from '../missions';
 import type { WeaponDefinition } from '../weapons';
 import { isContentCatalogue, validateCatalogue } from './validate-catalogue';
 
@@ -71,47 +73,313 @@ describe('validateCatalogue', () => {
     ).toBe(true);
   });
 
-  it('rejects an invalid regular group schedule', () => {
-    const invalidSchedule: EnemyGroupSchedule = {
-      regular: {
-        startTimeSeconds: 0,
-        intervalSeconds: -10,
-        groupCount: 11,
-        dronesPerGroup: 3,
-      },
-      final: { timeSeconds: 110, dronesPerGroup: 5 },
+  /** The canonical three-mission registry with one mission replaced by `mission`
+   *  at the same registry position, so mutation tests exercise the full
+   *  canonical path (V02-WI-03 correction hardening). */
+  function registryWith(replaced: MissionDefinition): {
+    missions: readonly MissionDefinition[];
+  } {
+    return { missions: [replaced, INTERCEPTION_02, INTERCEPTION_03] };
+  }
+
+  it('rejects encounters not strictly ordered by Mission Clock time', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 1 ? { ...encounter, timeSeconds: 10 } : encounter,
+      ),
     };
     const issues = validateCatalogue(
-      contentCatalogueWith({
-        missions: [{ ...INTERCEPTION, schedule: invalidSchedule }],
-      }),
+      contentCatalogueWith(registryWith(invalidMission)),
     );
     expect(
       issues.some(
-        (issue) =>
-          issue.path === 'missions[0].schedule.regular.intervalSeconds',
+        (issue) => issue.path === 'missions[0].encounters[1].timeSeconds',
       ),
     ).toBe(true);
   });
 
-  it('rejects a final group scheduled before the last regular group', () => {
-    const invalidSchedule: EnemyGroupSchedule = {
-      regular: {
-        startTimeSeconds: 0,
-        intervalSeconds: 10,
-        groupCount: 11,
-        dronesPerGroup: 3,
-      },
-      final: { timeSeconds: 50, dronesPerGroup: 5 },
+  it('rejects authored totals that do not equal the composition totals', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      totals: { ...INTERCEPTION_01.totals, basic: 13 },
     };
     const issues = validateCatalogue(
-      contentCatalogueWith({
-        missions: [{ ...INTERCEPTION, schedule: invalidSchedule }],
-      }),
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(issues.some((issue) => issue.path === 'missions[0].totals')).toBe(
+      true,
+    );
+  });
+
+  it('rejects an unlock target that is not present in the registry', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      unlocksMissionId:
+        'interception-99' as MissionDefinition['unlocksMissionId'],
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some((issue) => issue.path === 'missions[0].unlocksMissionId'),
+    ).toBe(true);
+  });
+
+  it('rejects a mission that unlocks itself', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      unlocksMissionId: 'interception-01',
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some((issue) => issue.path === 'missions[0].unlocksMissionId'),
+    ).toBe(true);
+  });
+
+  it('rejects a composition with a duplicate enemy role', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 0
+          ? {
+              ...encounter,
+              composition: [
+                ...encounter.composition,
+                { type: 'basic-drone', count: 1 },
+              ],
+            }
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
     );
     expect(
       issues.some(
-        (issue) => issue.path === 'missions[0].schedule.final.timeSeconds',
+        (issue) =>
+          issue.path === 'missions[0].encounters[0].composition[1].type',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a maximum Success payout inconsistent with its parts', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      maximumSuccessPayout: 31,
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some((issue) => issue.path === 'missions[0].maximumSuccessPayout'),
+    ).toBe(true);
+  });
+
+  it('rejects a duplicated mission in the registry', () => {
+    const issues = validateCatalogue(
+      contentCatalogueWith({
+        missions: [INTERCEPTION_01, INTERCEPTION_02, INTERCEPTION_01],
+      }),
+    );
+    expect(issues.some((issue) => issue.path === 'missions[2].id')).toBe(true);
+  });
+
+  it('rejects an incomplete registry missing one of the three missions', () => {
+    const issues = validateCatalogue(
+      contentCatalogueWith({
+        missions: [INTERCEPTION_01, INTERCEPTION_02],
+      }),
+    );
+    expect(issues.some((issue) => issue.path === 'missions')).toBe(true);
+  });
+
+  it('rejects a reordered registry (missions not in canonical authored order)', () => {
+    const issues = validateCatalogue(
+      contentCatalogueWith({
+        missions: [INTERCEPTION_01, INTERCEPTION_03, INTERCEPTION_02],
+      }),
+    );
+    expect(issues.some((issue) => issue.path === 'missions[1].id')).toBe(true);
+  });
+
+  it('rejects an encounter id that does not belong to its mission/ordinal', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 1 ? { ...encounter, id: 'interception-01-e9' } : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some((issue) => issue.path === 'missions[0].encounters[1].id'),
+    ).toBe(true);
+  });
+
+  it('rejects a disconnected unlock mapping (skip to Interception 03)', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      unlocksMissionId: 'interception-03',
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some((issue) => issue.path === 'missions[0].unlocksMissionId'),
+    ).toBe(true);
+  });
+
+  it('rejects an alternate unlock traversal 01 → 03 → 02 → null even though it visits every mission once (C02)', () => {
+    const alternate: readonly MissionDefinition[] = [
+      { ...INTERCEPTION_01, unlocksMissionId: 'interception-03' },
+      { ...INTERCEPTION_02, unlocksMissionId: null },
+      { ...INTERCEPTION_03, unlocksMissionId: 'interception-02' },
+    ];
+    const issues = validateCatalogue(
+      contentCatalogueWith({ missions: alternate }),
+    );
+    expect(
+      issues.some(
+        (issue) =>
+          issue.path === 'missions[0].unlocksMissionId' ||
+          issue.path === 'missions[1].unlocksMissionId' ||
+          issue.path === 'missions[2].unlocksMissionId',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects an unapproved fixed entry region', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 0
+          ? {
+              ...encounter,
+              entry: { kind: 'fixed', region: 'bottom' } as never,
+            }
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some(
+        (issue) => issue.path === 'missions[0].encounters[0].entry.region',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects an unapproved formation identifier', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 0 ? { ...encounter, formation: 'blob' as never } : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some(
+        (issue) => issue.path === 'missions[0].encounters[0].formation',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a seeded variant set with fewer than two distinct approved regions', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 2
+          ? {
+              ...encounter,
+              entry: { kind: 'seeded', variants: ['upper-left'] } as never,
+            }
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some(
+        (issue) => issue.path === 'missions[0].encounters[2].entry.variants',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a non-positive role-level delay', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 1
+          ? {
+              ...encounter,
+              roleDelays: [{ type: 'ranged-drone', delaySeconds: 0 }],
+            }
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some(
+        (issue) =>
+          issue.path === 'missions[0].encounters[1].roleDelays[0].delaySeconds',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a role delay for a role absent from the encounter composition (C02)', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 1
+          ? {
+              ...encounter,
+              roleDelays: [{ type: 'hunter-drone', delaySeconds: 2 }],
+            }
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some(
+        (issue) =>
+          issue.path === 'missions[0].encounters[1].roleDelays[0].type',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a reversed seeded variant pair (C02)', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 2
+          ? {
+              ...encounter,
+              entry: {
+                kind: 'seeded',
+                variants: ['upper-right', 'upper-left'],
+              } as never,
+            }
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some(
+        (issue) => issue.path === 'missions[0].encounters[2].entry.variants',
       ),
     ).toBe(true);
   });

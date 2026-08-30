@@ -370,8 +370,12 @@
   gap: var(--space-2);
 }
 
-/* --- Mission Point (DS §8.10): centred at 50% × 50% of the foreground
- * --- content area (the viewport safe area right of Base Navigation). --- */
+/* --- Mission Point (DS §8.10; v0.2 §21 supersession): three visible points
+ * --- placed on the vertical axis of the foreground content area (the viewport
+ * --- safe area right of Base Navigation). Positions are authored layout
+ * --- geometry (not Design Tokens; the v0.2 spec supersedes the single 50% ×
+ * --- 50% MVP point). State is communicated structurally (disabled marker) and
+ * --- in copy, never by colour alone. --- */
 .ds-mission-point {
   position: absolute;
   top: 50%;
@@ -381,6 +385,18 @@
   align-items: center;
   gap: var(--space-2);
   transform: translate(-50%, -50%);
+}
+
+.ds-mission-point[data-position='0'] {
+  top: 34%;
+}
+
+.ds-mission-point[data-position='1'] {
+  top: 50%;
+}
+
+.ds-mission-point[data-position='2'] {
+  top: 66%;
 }
 
 /* --- Mission Details Overlay (DS §8.17) --- */

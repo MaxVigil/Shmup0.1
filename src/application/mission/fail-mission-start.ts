@@ -47,6 +47,9 @@ export async function failMissionStart(
   if (session === null || session.activeMission === 'none') {
     return 'inert';
   }
+  // The originating mission for the failure signal (V02-WI-03): Operations
+  // reopens the correct Mission Details with `Unable to start mission.`.
+  const missionId = session.activeMission.missionId;
   let outcome;
   try {
     outcome = await deps.campaignStore.update((current) =>
@@ -67,7 +70,7 @@ export async function failMissionStart(
   if (outcome.kind === 'missing') {
     // No record, therefore no durable marker: reconciling the in-memory
     // failure cannot create a paid Defeat on reload.
-    deps.store.dispatch({ type: 'mission/start-failed' });
+    deps.store.dispatch({ type: 'mission/start-failed', missionId });
     return 'failed';
   }
   if (outcome.kind === 'no-change') {
@@ -76,9 +79,9 @@ export async function failMissionStart(
       return 'inert';
     }
     // Stale duplicate of an already-cleared rollback: reconcile once more.
-    deps.store.dispatch({ type: 'mission/start-failed' });
+    deps.store.dispatch({ type: 'mission/start-failed', missionId });
     return 'inert';
   }
-  deps.store.dispatch({ type: 'mission/start-failed' });
+  deps.store.dispatch({ type: 'mission/start-failed', missionId });
   return 'cleared';
 }

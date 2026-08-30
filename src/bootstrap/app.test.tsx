@@ -45,7 +45,9 @@ describe('App', () => {
     renderReadyApp();
     expect(screen.getByRole('main', { name: 'Operations' })).toBeDefined();
     expect(screen.queryByRole('heading', { name: 'Operations' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Interception' })).toBeDefined();
+    expect(
+      screen.getByRole('button', { name: 'Interception 01' }),
+    ).toBeDefined();
     expect(
       screen.getByRole('navigation', { name: 'Base Navigation' }),
     ).toBeDefined();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASIC_DRONE, INTERCEPTION } from '@content/index';
+import { BASIC_DRONE, MVP_ENEMY_GROUP_SCHEDULE } from '@content/index';
 import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import type { WeaponDefinition } from '@content/weapons';
 import {
@@ -35,7 +35,7 @@ function createState(
     projectile: PLAYER_PROJECTILE,
     missionSeed: MISSION_SEED,
     enemy: BASIC_DRONE,
-    schedule: INTERCEPTION.schedule,
+    schedule: MVP_ENEMY_GROUP_SCHEDULE,
     playerHullIntegrity: 100,
     playerMaximumHullIntegrity: 100,
   });
@@ -452,7 +452,7 @@ describe('mode exclusivity (AC-006)', () => {
         projectile: PLAYER_PROJECTILE,
         missionSeed: MISSION_SEED,
         enemy: BASIC_DRONE,
-        schedule: INTERCEPTION.schedule,
+        schedule: MVP_ENEMY_GROUP_SCHEDULE,
         playerHullIntegrity: 100,
         playerMaximumHullIntegrity: 100,
       });
@@ -599,7 +599,7 @@ describe('fixed-step/runtime boundary hardening (S08-WI01)', () => {
           projectile: PLAYER_PROJECTILE,
           missionSeed: MISSION_SEED,
           enemy: BASIC_DRONE,
-          schedule: INTERCEPTION.schedule,
+          schedule: MVP_ENEMY_GROUP_SCHEDULE,
           playerHullIntegrity: 100,
           playerMaximumHullIntegrity: 100,
         }),
@@ -620,7 +620,7 @@ describe('fixed-step accumulator reset on accepted resize (S08-WI01)', () => {
       projectile: PLAYER_PROJECTILE,
       missionSeed: MISSION_SEED,
       enemy: BASIC_DRONE,
-      schedule: INTERCEPTION.schedule,
+      schedule: MVP_ENEMY_GROUP_SCHEDULE,
       playerHullIntegrity: 100,
       playerMaximumHullIntegrity: 100,
     });

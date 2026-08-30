@@ -113,7 +113,7 @@ export function CombatScreen(): ReactElement | null {
     let owner: CombatSession | null = null;
     const weapon = resolveEquippedWeapon(content, snapshot.equippedWeapon);
     const enemy = resolveBasicDrone(content);
-    const schedule = resolveMissionSchedule(content);
+    const schedule = resolveMissionSchedule();
     const aircraft = resolveGermanFighter(content);
     // Defer the lazy load one microtask: React StrictMode in development
     // mounts, cleans up, and remounts the effect synchronously, so the first

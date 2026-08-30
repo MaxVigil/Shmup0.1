@@ -33,7 +33,8 @@ describe('hydrateSessionFromCampaign (Epic §14.1, WI-02 delta)', () => {
     expect(session.equippedWeapon).toBe('cannon');
     expect(session.mouseMovementEnabled).toBe(false);
     expect(session.runStatus).toBe('active');
-    expect(session.missionAvailable).toBe(true);
+    expect(session.unlockedMissionIds).toEqual(['interception-01']);
+    expect(session.completedMissionIds).toEqual([]);
     expect(session.activeMission).toBe('none');
     expect(session.missionInstanceCount).toBe(0);
     expect(session.missionResult).toBeNull();
@@ -64,7 +65,9 @@ describe('hydrateSessionFromCampaign (Epic §14.1, WI-02 delta)', () => {
       content: CONTENT_CATALOGUE,
     });
     expect(session.runStatus).toBe('game-over');
-    expect(session.missionAvailable).toBe(false);
+    expect(session.unlockedMissionIds).toEqual(['interception-01']);
+    // A game-over run cannot launch any mission from Base.
+    expect(session.completedMissionIds).toEqual([]);
   });
 
   it('throws when the campaign references unknown content (defensive)', () => {

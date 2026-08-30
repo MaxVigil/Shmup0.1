@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASIC_DRONE, INTERCEPTION } from '@content/index';
+import { BASIC_DRONE, MVP_ENEMY_GROUP_SCHEDULE } from '@content/index';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import {
   advanceSimulationFrames,
@@ -37,7 +37,7 @@ function createState(
     projectile: PLAYER_PROJECTILE,
     missionSeed,
     enemy: BASIC_DRONE,
-    schedule: INTERCEPTION.schedule,
+    schedule: MVP_ENEMY_GROUP_SCHEDULE,
     playerHullIntegrity: 100,
     playerMaximumHullIntegrity: 100,
   });
@@ -414,13 +414,13 @@ describe('S10 resize, seams, and hardening', () => {
         projectile: PLAYER_PROJECTILE,
         missionSeed: SEED,
         enemy: badEnemy,
-        schedule: INTERCEPTION.schedule,
+        schedule: MVP_ENEMY_GROUP_SCHEDULE,
         playerHullIntegrity: 100,
         playerMaximumHullIntegrity: 100,
       }),
     ).toThrow(/enemy/);
     const badSchedule = {
-      ...INTERCEPTION.schedule,
+      ...MVP_ENEMY_GROUP_SCHEDULE,
       final: { timeSeconds: -5, dronesPerGroup: 5 },
     };
     expect(() =>
@@ -465,7 +465,7 @@ describe('S10 resize, seams, and hardening', () => {
       projectile: PLAYER_PROJECTILE,
       missionSeed: SEED,
       enemy: BASIC_DRONE,
-      schedule: INTERCEPTION.schedule,
+      schedule: MVP_ENEMY_GROUP_SCHEDULE,
       playerHullIntegrity: 100,
       playerMaximumHullIntegrity: 100,
     });
@@ -479,10 +479,8 @@ describe('S10 resize, seams, and hardening', () => {
 });
 
 describe('S10 content seam resolvers', () => {
-  it('resolves the Basic Drone and Interception schedule from the catalogue', () => {
+  it('resolves the Basic Drone and the temporary seam schedule', () => {
     expect(resolveBasicDrone(CONTENT_CATALOGUE)).toBe(BASIC_DRONE);
-    expect(resolveMissionSchedule(CONTENT_CATALOGUE)).toBe(
-      INTERCEPTION.schedule,
-    );
+    expect(resolveMissionSchedule()).toBe(MVP_ENEMY_GROUP_SCHEDULE);
   });
 });

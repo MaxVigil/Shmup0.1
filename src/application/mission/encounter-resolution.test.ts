@@ -1,0 +1,194 @@
+import { describe, expect, it } from 'vitest';
+import { INTERCEPTION_01, INTERCEPTION_03, MISSIONS } from '@content/index';
+import { resolveMissionEncounters } from './encounter-resolution';
+
+const FIXED_STEP_SECONDS = 1 / 60;
+const SEED = 0xdeadbeef;
+
+/**
+ * V02-AC-003 / V02-AC-004 determinism evidence: the encounter-data resolution
+ * contract takes ONLY the authored mission definition, the already-derived
+ * mission seed, and the fixed step — never Hull, loadout, Aircraft position,
+ * score, or performance — so identical explicit inputs always produce
+ * identical encounter identities, timestamps, compositions, ordering, and
+ * approved seeded entry variants.
+ */
+describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
+  it('resolves the exact authored timestamps, identities, and compositions in order', () => {
+    const plan = resolveMissionEncounters(
+      INTERCEPTION_01,
+      SEED,
+      FIXED_STEP_SECONDS,
+    );
+    expect(plan.missionId).toBe('interception-01');
+    expect(plan.encounters.map((e) => e.encounterId)).toEqual([
+      'interception-01-e1',
+      'interception-01-e2',
+      'interception-01-e3',
+      'interception-01-e4',
+      'interception-01-e5',
+    ]);
+    expect(plan.encounters.map((e) => e.timeSeconds)).toEqual([
+      10, 55, 100, 140, 190,
+    ]);
+    expect(plan.finalArrivalTimeSeconds).toBe(190);
+    expect(plan.finalArrivalStepIndex).toBe(
+      Math.round(190 / FIXED_STEP_SECONDS),
+    );
+    // Compositions are the authored data, unchanged by the seed.
+    expect(plan.encounters[0]?.composition).toEqual([
+      { type: 'basic-drone', count: 4 },
+    ]);
+    expect(plan.encounters[4]?.composition).toEqual([
+      { type: 'basic-drone', count: 3 },
+      { type: 'ranged-drone', count: 1 },
+      { type: 'hunter-drone', count: 1 },
+    ]);
+    // Typed entry/formation/delay data passes through unchanged: role-level
+    // delays carry the delayed role, and entry regions are explicitly absent
+    // where Epic §8 names none.
+    expect(plan.encounters[0]).toMatchObject({
+      entryRegion: 'top',
+      entryVariants: null,
+      formation: 'wide-top',
+      roleDelays: [],
+    });
+    expect(plan.encounters[1]).toMatchObject({
+      entryRegion: null,
+      formation: 'centred-behind-basics',
+      roleDelays: [{ type: 'ranged-drone', delaySeconds: 2 }],
+    });
+    expect(plan.encounters[3]).toMatchObject({
+      entryRegion: null,
+      formation: null,
+      roleDelays: [{ type: 'hunter-drone', delaySeconds: 3 }],
+    });
+    // Fixed encounters carry no seeded variant set.
+    expect(plan.encounters[0]?.entryVariants).toBeNull();
+  });
+
+  it('preserves the delayed-role association for the V02-WI-04 consumer (C02)', () => {
+    const plan = resolveMissionEncounters(
+      INTERCEPTION_01,
+      SEED,
+      FIXED_STEP_SECONDS,
+    );
+    // Ranged +2 s belongs to the Ranged role of M01 e2, never the encounter as
+    // a whole; Hunter +3 s belongs to the Hunter role of M01 e4.
+    expect(plan.encounters[1]?.roleDelays).toEqual([
+      { type: 'ranged-drone', delaySeconds: 2 },
+    ]);
+    expect(plan.encounters[3]?.roleDelays).toEqual([
+      { type: 'hunter-drone', delaySeconds: 3 },
+    ]);
+    expect(plan.encounters[0]?.roleDelays).toEqual([]);
+  });
+
+  it('is identical for identical explicit inputs (V02-AC-003)', () => {
+    const first = resolveMissionEncounters(
+      INTERCEPTION_01,
+      SEED,
+      FIXED_STEP_SECONDS,
+    );
+    const second = resolveMissionEncounters(
+      INTERCEPTION_01,
+      SEED,
+      FIXED_STEP_SECONDS,
+    );
+    expect(second).toEqual(first);
+  });
+
+  it('resolves approved seeded entry regions only for seeded encounters', () => {
+    for (const mission of MISSIONS) {
+      const plan = resolveMissionEncounters(mission, SEED, FIXED_STEP_SECONDS);
+      for (const encounter of plan.encounters) {
+        const authored = mission.encounters.find(
+          (candidate) => candidate.id === encounter.encounterId,
+        );
+        if (authored?.entry.kind === 'seeded') {
+          expect(authored.entry.variants).toContain(encounter.entryRegion);
+          expect(encounter.entryVariants).toEqual(authored.entry.variants);
+        } else if (authored?.entry.kind === 'fixed') {
+          expect(encounter.entryVariants).toBeNull();
+          expect(encounter.entryRegion).toBe(authored.entry.region);
+        } else {
+          // Epic §8 row names no entry region: the resolved contract exposes
+          // that absence explicitly instead of inventing a default region.
+          expect(encounter.entryVariants).toBeNull();
+          expect(encounter.entryRegion).toBeNull();
+        }
+      }
+    }
+    // The two authored `upper-left or upper-right` encounters are seeded.
+    const m01 = resolveMissionEncounters(
+      INTERCEPTION_01,
+      SEED,
+      FIXED_STEP_SECONDS,
+    );
+    expect(['upper-left', 'upper-right']).toContain(
+      m01.encounters[2]?.entryRegion,
+    );
+    expect(m01.encounters[2]?.entryVariants).toEqual([
+      'upper-left',
+      'upper-right',
+    ]);
+    const m03 = resolveMissionEncounters(
+      INTERCEPTION_03,
+      SEED,
+      FIXED_STEP_SECONDS,
+    );
+    expect(['upper-left', 'upper-right']).toContain(
+      m03.encounters[6]?.entryRegion,
+    );
+  });
+
+  it('different seeds can change only the seeded entry regions, never timestamps, compositions, or ordering (V02-AC-004)', () => {
+    const planA = resolveMissionEncounters(
+      INTERCEPTION_01,
+      0x11111111,
+      FIXED_STEP_SECONDS,
+    );
+    const planB = resolveMissionEncounters(
+      INTERCEPTION_01,
+      0x22222222,
+      FIXED_STEP_SECONDS,
+    );
+    expect(planA.encounters.map((e) => e.encounterId)).toEqual(
+      planB.encounters.map((e) => e.encounterId),
+    );
+    expect(planA.encounters.map((e) => e.timeSeconds)).toEqual(
+      planB.encounters.map((e) => e.timeSeconds),
+    );
+    expect(planA.encounters.map((e) => e.composition)).toEqual(
+      planB.encounters.map((e) => e.composition),
+    );
+    // Only seeded encounters may differ; every fixed encounter keeps its region
+    // across seeds.
+    for (let index = 0; index < planA.encounters.length; index += 1) {
+      const authored = INTERCEPTION_01.encounters[index];
+      if (authored?.entry.kind === 'fixed') {
+        expect(planA.encounters[index]?.entryRegion).toEqual(
+          planB.encounters[index]?.entryRegion,
+        );
+      }
+    }
+  });
+
+  it('the resolution contract has no Aircraft-position/performance input (V02-AC-004)', () => {
+    // The contract is a pure function of (mission, seed, step). Two calls with
+    // the same explicit inputs — regardless of any hypothetical external state
+    // — produce byte-identical plans, proving spawn data cannot react to the
+    // player.
+    const a = resolveMissionEncounters(
+      INTERCEPTION_03,
+      12345,
+      FIXED_STEP_SECONDS,
+    );
+    const b = resolveMissionEncounters(
+      INTERCEPTION_03,
+      12345,
+      FIXED_STEP_SECONDS,
+    );
+    expect(b).toEqual(a);
+  });
+});

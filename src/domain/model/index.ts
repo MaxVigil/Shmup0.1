@@ -52,8 +52,18 @@ export function isWeaponType(value: unknown): value is WeaponType {
   return WEAPON_TYPES.some((type) => type === value);
 }
 
-// --- Enemy type discriminant (Combat §7.2) ---
-export const ENEMY_TYPES = ['basic-drone'] as const;
+// --- Enemy type discriminant (Combat §7.2, Epic §4) ---
+// The four approved v0.2 enemy roles are the closed canonical set. The mission
+// registry (V02-WI-03) references these roles in authored compositions; the
+// enemy behaviour/definition consumers for Ranged/Hunter/Elite arrive with
+// V02-WI-04 and V02-WI-06, while the temporary Combat seam keeps spawning only
+// Basic Drones until then.
+export const ENEMY_TYPES = [
+  'basic-drone',
+  'ranged-drone',
+  'hunter-drone',
+  'elite-drone',
+] as const;
 export type EnemyType = (typeof ENEMY_TYPES)[number];
 
 export function isEnemyType(value: unknown): value is EnemyType {

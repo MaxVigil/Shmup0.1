@@ -12,6 +12,7 @@ function snapshotFor(store: SessionStore): MissionSnapshot {
     throw new Error('Expected an initialized session.');
   }
   return {
+    missionId: 'interception-01',
     missionInstanceOrdinal: session.missionInstanceCount,
     missionAttemptId: session.missionInstanceCount,
     combatMissionSeed: 1234,
@@ -47,6 +48,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 80,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     const session = store.getState()!;
@@ -67,6 +71,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 80,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     expect(store.getState()!.credits).toBe(V02_STARTING_CREDITS + 1);
@@ -116,6 +123,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: -1,
         hullIntegrityAfter: 80,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     expect(store.getState()).toBe(before);
@@ -131,6 +141,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 80,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     expect(store.getState()).toBe(before);
@@ -207,6 +220,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     expect(store.getState()!.credits).toBe(V02_STARTING_CREDITS + 1);
@@ -239,6 +255,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     store.dispatch({
@@ -256,6 +275,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 99,
         hullIntegrityAfter: 99,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     const after = store.getState()!;
@@ -279,6 +301,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     store.dispatch({
@@ -317,6 +342,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     store.dispatch({
@@ -331,6 +359,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 1,
         creditsAfter: V02_STARTING_CREDITS + 2,
         hullIntegrityAfter: 60,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
 
@@ -364,6 +395,9 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
+        unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
+        completedMissionIdsAfter: ['interception-01'],
+        creditsEarned: 8,
       },
     });
     // Raw action is a strict no-op too: no active mission and no ordinal advance.

@@ -11,7 +11,6 @@ import {
   applyDefeatRecoveryOrGameOver,
   applySeamAbort,
   applySeamDefeat,
-  applySeamSuccess,
   beginMission,
   clearMissionInProgress,
 } from './campaign-transitions';
@@ -174,16 +173,6 @@ describe('clearMissionInProgress (Base AC-014 correction, V02-WI-02 C02)', () =>
 describe('seam terminal transitions (temporary v0.1 single-mission flow)', () => {
   const inProgress = () => withMarker(newGame(), 'interception-01');
 
-  it('Success grants the completion reward, retains Combat Hull, and clears the marker for the exact attempt', () => {
-    const result = applySeamSuccess(inProgress(), 0, 80, 1);
-    expect(result.kind).toBe('applied');
-    if (result.kind === 'applied') {
-      expect(result.campaign.credits).toBe(V02_STARTING_CREDITS + 1);
-      expect(result.campaign.hullIntegrity).toBe(80);
-      expect(result.campaign.missionInProgress).toBeNull();
-    }
-  });
-
   it('Defeat grants zero reward and the legacy 25-Hull emergency recovery for the exact attempt', () => {
     const result = applySeamDefeat(inProgress(), 0);
     expect(result.kind).toBe('applied');
@@ -206,10 +195,6 @@ describe('seam terminal transitions (temporary v0.1 single-mission flow)', () =>
 
   it('a stale terminal for a different campaign attempt is a strict attempt-does-not-match rejection before any reward or Hull change', () => {
     const newerMarker = withMarker(newGame(), 'interception-01', 1);
-    expect(applySeamSuccess(newerMarker, 0, 80, 1)).toEqual({
-      kind: 'rejected',
-      reason: 'attempt-does-not-match',
-    });
     expect(applySeamDefeat(newerMarker, 0)).toEqual({
       kind: 'rejected',
       reason: 'attempt-does-not-match',
@@ -222,10 +207,6 @@ describe('seam terminal transitions (temporary v0.1 single-mission flow)', () =>
 
   it('a stale terminal transition after the marker cleared is a strict rejection', () => {
     const cleared = { ...inProgress(), missionInProgress: null };
-    expect(applySeamSuccess(cleared, 0, 80, 1)).toEqual({
-      kind: 'rejected',
-      reason: 'no-mission-in-progress',
-    });
     expect(applySeamDefeat(cleared, 0)).toEqual({
       kind: 'rejected',
       reason: 'no-mission-in-progress',

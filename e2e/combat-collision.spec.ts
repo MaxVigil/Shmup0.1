@@ -37,7 +37,7 @@ async function startCombatWithSeed(
     };
   }, sessionSeed);
   await page.goto('/');
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {

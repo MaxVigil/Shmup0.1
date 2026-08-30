@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
  *  disposes its first Game, so the assertions target the final single canvas). */
 async function startMission(page: Page): Promise<void> {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
@@ -199,7 +199,7 @@ test('Combat uses the prepared aircraft asset without repeated application reque
   // baseline, so Combat entry itself can be compared.
   await page.waitForLoadState('networkidle');
   const baseline = requested.length;
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await page.waitForLoadState('networkidle');

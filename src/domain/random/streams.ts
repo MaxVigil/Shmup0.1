@@ -14,6 +14,13 @@ export const RNG_INPUT_VERSION = 'rng-v1';
 export const PILOT_SELECTION_STREAM = 'pilot-selection';
 export const COMBAT_MISSION_STREAM = 'combat-mission';
 export const PILOT_SELECTION_ORDINAL = 0;
+/** Mission-content data stream (V02-WI-03): resolves approved seeded entry
+ *  variants (e.g. Hunter `upper-left`/`upper-right`) for the deterministic
+ *  encounter-data contract (Epic §7.2, V02-AC-003–004). Derives from the
+ *  already-derived mission seed with its own ordinal so a draw here never
+ *  changes the authoritative Combat spawn stream sequence. */
+export const MISSION_DATA_STREAM = 'mission-data';
+export const MISSION_DATA_ORDINAL = 0;
 
 export function deriveStreamSeed(
   sessionSeed: number,
@@ -66,4 +73,12 @@ export function createCombatMissionStream(
     COMBAT_MISSION_STREAM,
     missionInstanceOrdinal,
   );
+}
+
+/** Deterministic mission-data stream for approved seeded entry variants
+ *  (V02-WI-03): derives a dedicated stream from an already-derived mission seed
+ *  so encounter-data draws are reproducible for identical explicit inputs and
+ *  never read current Combat state (Epic §7.2, V02-AC-004). */
+export function createMissionDataStream(missionSeed: number): Mulberry32 {
+  return createStream(missionSeed, MISSION_DATA_STREAM, MISSION_DATA_ORDINAL);
 }

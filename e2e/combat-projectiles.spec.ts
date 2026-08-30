@@ -118,7 +118,7 @@ async function readProjectilePixels(page: Page): Promise<number> {
 
 async function startCombat(page: Page): Promise<void> {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
@@ -211,7 +211,7 @@ test('the Hangar-selected Cannon profile reaches Combat and creates a projectile
   // Back to Operations and into Combat with the equipped Cannon.
   await page.getByRole('button', { name: 'Operations' }).click();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {

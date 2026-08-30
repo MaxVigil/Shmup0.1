@@ -217,7 +217,7 @@ test('a C03-shaped version-1 database upgrades, removes the obsolete counter, pr
 
   // The first version-2 mission allocates attempt id 5 — strictly above the
   // legacy high-water mark (counter next value 5 means ids 0..4 were issued).
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
@@ -308,7 +308,7 @@ test('a C03-shaped version-1 database with a mission in progress upgrades, resol
 
   // The next mission allocates attempt id 3 — strictly above the legacy
   // high-water mark 2 — proving the migration seeded the generator correctly.
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
   await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
@@ -348,7 +348,7 @@ test('reload during an active mission resolves exactly once as Defeat with paid 
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await expect(page.getByText('Credits: 12')).toBeVisible();
   // Start Combat: the missionInProgress marker is persisted before Combat.
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
 
@@ -392,7 +392,7 @@ test('a Combat initialization failure clears the persisted marker, allows retry,
   await page.route('**/src/combat-presentation/entry.ts', (route) =>
     route.abort(),
   );
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
 
   // The start persisted missionInProgress, then initialization rejected; the
@@ -408,7 +408,7 @@ test('a Combat initialization failure clears the persisted marker, allows retry,
   await expect(page.getByText('Credits: 12')).toBeVisible();
 
   // A retry in the same session succeeds now that the lazy boundary is back.
-  await page.getByRole('button', { name: 'Interception' }).click();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
 });
@@ -776,4 +776,53 @@ test('a version-1 row missing its required C03 counter stays a Save Data Error a
   await expect(
     page.getByRole('checkbox', { name: 'Mouse Movement Enabled' }),
   ).not.toBeChecked();
+});
+
+test('mission progression persists across reload: completed stays replayable, the unlocked next mission is available, and replay launches (Epic §6.2, V02-AC-001–002)', async ({
+  page,
+}) => {
+  // Seed a persisted campaign after the first Success on Interception 01:
+  // Interception 01 completed, Interception 02 unlocked, 03 locked.
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await writeCampaignRecord(page, {
+    schemaVersion: 1,
+    runStatus: 'active',
+    credits: 20,
+    aircraftId: 'german-fighter',
+    hullIntegrity: 80,
+    equippedWeapon: 'machine-gun',
+    unlockedMissionIds: ['interception-01', 'interception-02'],
+    completedMissionIds: ['interception-01'],
+    missionInProgress: null,
+    pilotId: 'pilot-shevchenko',
+  });
+  await page.reload();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+
+  // Completed Interception 01 stays visible as Completed (replayable).
+  const completed = page.getByRole('button', {
+    name: 'Interception 01 (Completed)',
+  });
+  await expect(completed).toBeVisible();
+  await expect(completed).toBeEnabled();
+  // The unlocked next mission is available; 03 remains locked.
+  await expect(
+    page.getByRole('button', { name: 'Interception 02' }),
+  ).toBeVisible();
+  const locked = page.getByRole('button', {
+    name: 'Interception 03 (Locked)',
+  });
+  await expect(locked).toBeVisible();
+  await expect(locked).toBeDisabled();
+
+  // Replay of the completed mission opens its Mission Details and can start.
+  await completed.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Interception 01' }),
+  ).toBeVisible();
+  await expect(page.getByText('8 Credits')).toBeVisible();
+  await page.getByRole('button', { name: 'Start Mission' }).click();
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
 });
