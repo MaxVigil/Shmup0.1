@@ -24,8 +24,8 @@
 | `Base Navigation` | Persistent navigation between Operations and Hangar | main menu, sidebar menu |
 | `Overlay` | Blocking UI layer above the current Screen | popup, modal, dialog unless naming a technical primitive |
 | `Settings Overlay` | Global Overlay containing Mouse Movement Enabled and Close | options menu |
-| `Pause Overlay` | Combat Overlay containing Resume and Return to Base | pause screen |
-| `Mission Result Overlay` | Result Overlay after Success or Defeat | end screen, game-over screen |
+| `Pause Overlay` | Blocking Combat Overlay; v0.1 contains Resume and Return to Base, while the final v0.2 composition follows the Tactical Combat Foundation and Design System v0.2 override | pause screen |
+| `Mission Result Overlay` | Result Overlay for a committed non-Game-Over mission outcome; exact v0.2 fields vary by Success, Evacuation, or affordable Defeat | end screen, game-over screen |
 | `Debug Overlay` | Development-only Combat observability and control Overlay | cheat menu |
 
 ## 3. Mission lifecycle
@@ -130,5 +130,9 @@ The entries above remain correct for the accepted v0.1 baseline. For work govern
 | `Vulnerable` | Elite phase in which the exposed Core receives normal player-weapon damage | colour-only weak state |
 | `enemy projectile` | Single-hit Ranged or Elite attack entity governed by the v0.2 projectile lifecycle | implemented-v0.1 concept |
 | `contact-damage cooldown` | Per Aircraft/Basic-or-Ranged pair cooldown of `0.75 s`; it grants no immunity from other damage | v0.1 global/player-only `0.5 s` wording |
+| `Arrival Group` | Ordered enemies created on one fixed simulation step at an authored non-negative offset from their Encounter time | hidden per-role spawn timing |
+| `Spawn Placement` | Typed authored placement of one Arrival Group member: normalized Top Placement or Seeded Side Placement | raw pixel coordinate or renderer-owned placement |
+| `horizontal engagement band` | Current Aircraft-centre X range permitted by Movement Bounds; normalized Top Placement fractions are projected inside this range | raw viewport-width percentage for Top Entry |
+| `mission-member ordinal` | Stable zero-based position of an enemy member in ordered Mission Arrival Groups; used for deterministic per-enemy stream derivation | runtime array index after removal |
 
 Progression, persistence, enemy fire, and Game Over remain absent from the v0.1 baseline but are approved scope for this bounded v0.2 Epic.

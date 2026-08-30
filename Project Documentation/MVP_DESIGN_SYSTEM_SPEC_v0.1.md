@@ -551,6 +551,10 @@ radius: radius-control
 - The Bar has no gradient, segmentation, or animation.
 - Fill colour does not change at arbitrary Hull thresholds.
 - Combat and Hangar use the same primitive; Combat omits the numeric value.
+- For v0.2 Combat only, the approved Tactical Combat Foundation override in
+  §8.26 changes the fill from `accent` to `danger` strictly below `25` Hull.
+  This is one named semantic threshold, not permission for Screen-authored
+  thresholds or a new Bar component.
 
 ### 8.13 Aircraft Configuration Panel
 
@@ -753,6 +757,48 @@ Close
 - Clicking outside does not close it.
 - Pause Overlay and Settings Overlay cannot be open simultaneously.
 - If Combat is paused or any blocking Overlay is open, the command to open Settings is ignored.
+
+### 8.26 v0.2 Combat composition overrides
+
+This subsection is the Design System presentation owner for v0.2 Combat. The
+Tactical Combat Foundation Specification remains the behaviour and copy owner.
+Where this subsection conflicts with the v0.1-only compositions in §§8.12,
+8.22, or 8.23, this subsection supersedes them for v0.2.
+
+#### Combat Countdown and Critical Hull
+
+- `Combat Countdown` uses the canonical text styles and is horizontally centred
+  at `space-4` from the top viewport edge.
+- `CRITICAL HULL` uses danger-tone Text and is positioned directly below the
+  Countdown with the canonical `space-2` gap. Its exact visibility contract is
+  owned by Tactical Combat Foundation §15.3.
+- The Combat Hull Integrity Bar retains the §8.12 primitive and non-numeric
+  presentation. Its fill is `danger` strictly below `25` Hull and `accent` at
+  `25` or above.
+
+#### v0.2 Mission Result Overlay
+
+- The Overlay retains the §8.23 width, title, focus, non-dismissible, and
+  fill-width primary `Continue` rules.
+- Result breakdown values use ordered `Field Row` composition. Optional rows,
+  including a newly unlocked mission, are omitted when not applicable rather
+  than shown empty.
+- Success uses the exact fields and copy from Tactical Combat Foundation §15.4.
+- Evacuation, affordable Defeat, and Game Over use the exact fields, copy, and
+  destination from Tactical Combat Foundation §§13.4–13.6 and 15.4.
+- The v0.1 literal `Reward: 1 Credit` and free-Defeat presentation in §8.23 do
+  not apply to v0.2.
+
+#### Staged delivery boundary
+
+- `V02-WI-04` delivers the v0.2 Success result composition and may retain the
+  accepted v0.1 Defeat/Return-to-Base compatibility paths internally while
+  alternative outcomes are not yet in scope.
+- Those compatibility paths are not approved final v0.2 product behaviour and
+  must not be presented as completed v0.2 acceptance evidence.
+- `V02-WI-05` replaces them with Evacuation, paid Defeat/Repair, Game Over, and
+  the final v0.2 Pause/Evacuation affordances. No compatibility path may remain
+  after `V02-WI-05` acceptance.
 
 ## 9. Interaction states
 

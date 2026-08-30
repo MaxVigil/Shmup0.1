@@ -124,17 +124,25 @@ Acceptance evidence:
 **Outcome:** Interception 01 is fully playable and resolvable with Basic, Ranged, and Hunter behaviours, deterministic authored encounters, Countdown, projectiles/collisions, Success economy, minimal HUD, and result UX.
 
 - **Depends on:** accepted `V02-WI-03` revision.
-- **Owned AC:** `V02-AC-005–008`, `V02-AC-011–013`, `V02-AC-022–023` for Success.
-- **Primary sources:** Epic §§8.1, 9.1–9.3, 10–13.3, 15, 17–20.
+- **Owned AC:** `V02-AC-003–004` runtime consumption, `V02-AC-005–008`, `V02-AC-011–013`, `V02-AC-022–023` for Success.
+- **Primary sources:** Epic §§7.1–8.1.1, 9.1–9.3, 10–13.3, 15, 17–20, 22–24.
 
 IN scope:
 
 - typed regular-enemy state and renderer mapping;
-- Ranged authoritative activation, deterministic firing, and fixed projectile trajectories;
+- Ranged full-bounds activation; fixed `180`-step first shot; independent
+  ordinal-derived `ranged-fire` cadence; central lower-muzzle, horizontal
+  full-AABB projectile; and fixed trajectories;
 - Hunter direct approach, exact commitment, locked run, contact/miss outcomes;
 - single-hit player/enemy projectile lifecycle and per-pair regular contact cooldown;
-- exact Mission 01 authored schedule, Countdown, Success conditions/economy/transaction;
-- minimal Combat HUD, critical-Hull presentation, Success exit/result, and required Debug commands for owned behaviour.
+- exact Mission 01 typed Arrival Groups, normalized Spawn Placements, authored schedule, Countdown, Success conditions/economy/transaction;
+- role-specific complete rendered-bounds AABBs and deterministic resize projection;
+- top-centred `MM:SS` Countdown, strict-below-25 danger Hull fill, one-shot
+  two-second Critical Hull warning, deterministic two-phase Success exit, v0.2
+  Success result composition, and required Debug commands for owned behaviour;
+- explicit temporary integration compatibility with the accepted v0.1
+  Defeat/Return-to-Base paths until `V02-WI-05`; these paths are not WI-04
+  v0.2 acceptance evidence and must not be expanded.
 
 OUT scope:
 
@@ -143,7 +151,10 @@ OUT scope:
 
 Acceptance evidence:
 
-- deterministic unit tests for RNG draw order, activation, cadence, geometry, resolution, economy, and idempotency;
+- deterministic unit tests for Arrival Group/member order, exact placement fractions, RNG draw order, resize projection, authoritative bounds, activation, cadence, geometry, resolution, economy, and idempotency;
+- fixed-step boundary tests for the first and subsequent Ranged shots, stream
+  independence, projectile spawn/removal, Countdown rounding, Critical Hull
+  one-shot latch, and both Success-exit phases including resize;
 - Mission 01 browser playthrough, failure-path asset fallback, hidden-tab/pause regression, and real-scale visual review;
 - proportional production performance record for the regular workload;
 - `npm run verify:all` and R2 player-facing checkpoint.
@@ -153,6 +164,7 @@ Acceptance evidence:
 **Outcome:** Interception 02 is fully playable and validates sustained mixed pressure plus Evacuation, Defeat, paid Repair, Game Over, New Game, and all corresponding atomic result UX.
 
 - **Depends on:** accepted `V02-WI-04` revision.
+- **Readiness precondition:** Product Owner approval and canonical recording of exact Mission 02 Arrival Groups and Spawn Placements; qualitative Epic §8.2 formation language must not be converted into runtime geometry by the implementation agent.
 - **Owned AC:** `V02-AC-014–016`; `V02-AC-022–023` for Evacuated/Defeat/Game Over.
 - **Primary sources:** Epic §§8.2, 12–15, 17–20.
 
@@ -162,12 +174,17 @@ IN scope:
 - Evacuation confirmation with exact prior-pause restoration;
 - irreversible five-second countdown with normal Combat continuing;
 - Defeat priority, retained-Hull Evacuation transaction, paid full Repair, and Game Over;
-- result overlays, exit/fade sequences, New Game confirmation, and exactly-once persistence.
+- result overlays, exit/fade sequences, New Game confirmation, and exactly-once persistence;
+- removal of every temporary v0.1 Defeat/Return-to-Base compatibility path
+  retained by `V02-WI-04`, replacing it with the final v0.2 outcome and
+  Pause/Evacuation behaviour.
 
 OUT scope:
 
 - Elite/Mission 03, retry button, free abort, partial Repair, anti-farming, resumable mid-Combat save;
-- cancelling confirmed Evacuation or converting remaining enemies to penalties after successful Evacuation.
+- cancelling confirmed Evacuation or converting remaining enemies to penalties after successful Evacuation;
+- retaining a free-Defeat repair path or direct Return-to-Base abort after this
+  Work Item is accepted.
 
 Acceptance evidence:
 
@@ -180,6 +197,7 @@ Acceptance evidence:
 **Outcome:** Interception 03 is fully playable and completable with the exact Elite entry, anchor, phase cycle, attacks, visuals, economy, and final mission progression.
 
 - **Depends on:** accepted `V02-WI-05` revision.
+- **Readiness precondition:** Product Owner approval and canonical recording of exact Mission 03 regular-enemy Arrival Groups and Spawn Placements; qualitative Epic §8.3 formation language must not be converted into runtime geometry by the implementation agent. The Elite's already-approved entry and anchor remain authoritative.
 - **Owned AC:** `V02-AC-009–010` plus regression of all Mission 03-relevant preceding AC.
 - **Primary sources:** Epic §§8.3, 9.4, 10–13, 15–20.
 

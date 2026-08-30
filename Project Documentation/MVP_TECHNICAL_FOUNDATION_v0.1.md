@@ -190,7 +190,13 @@ The stream names and ordinals are:
 
 - `pilot-selection`, ordinal `0`;
 - `combat-mission`, using the zero-based Mission Instance ordinal;
-- `mission-data`, ordinal `0` (added by V02-WI-03), derived from the already-derived `combat-mission` seed of one Mission Instance. It resolves the approved seeded entry variants (e.g. Hunter `upper-left`/`upper-right`, Epic §8) for the deterministic encounter-data contract and never reads current Hull, loadout, Aircraft position, score, or performance (V02-AC-003–004). Deriving it from the mission seed with its own stream name keeps every draw here independent of the authoritative Combat spawn stream sequence.
+- `mission-data`, ordinal `0` (added by V02-WI-03), derived from the already-derived `combat-mission` seed of one Mission Instance. It resolves approved seeded Spawn Placements for the deterministic encounter-data contract and never reads current Hull, loadout, Aircraft position, score, or performance (V02-AC-003–004). For Mission 01 it consumes exactly three `nextInt(2)` draws in stable Encounter/member order (`e3`, `e4`, `e5`), with `0 → upper-left` and `1 → upper-right`; Top Placements consume no draws. Deriving it from the mission seed with its own stream name keeps every draw here independent of authoritative Combat-behaviour RNG.
+- `ranged-fire`, using the stable zero-based mission-member ordinal of one
+  Ranged Drone (added by the Mission 01 staging decision). It is derived from
+  the already-derived `combat-mission` seed. After the fixed first-shot delay,
+  that Ranged alone consumes `nextInt(121)` to schedule each subsequent interval
+  as `60–180` fixed steps inclusive. No other Ranged or spawn-data consumer can
+  shift its sequence.
 
 The Mission Instance ordinal increments exactly once when an accepted `Start Mission` command creates a Mission Snapshot, regardless of the later Success, Defeat, or Aborted result.
 

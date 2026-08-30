@@ -5,8 +5,9 @@
 **Document type:** canonical post-MVP Epic product specification
 **Decision owner:** Product Owner
 **Prepared:** 2026-08-25
+**Mission 01 staging decision:** 2026-08-31
 **Repository baseline audited:** `2812fc0cc3acebd8f5be3d98d8c7ddf798772b6f`
-**Status:** **APPROVED — READY FOR BOUNDED WORK ITEM HANDOFFS**
+**Status:** **APPROVED — V02-WI-04 READY FOR BOUNDED HANDOFF; LATER MISSION STAGING BOUNDED AS NOT READY**
 
 ## 1. Purpose and authority
 
@@ -167,6 +168,29 @@ Do not use `Abort` or `Return to Base` as a separate active-mission result in v0
 - Composition, overlap, positioning, and timing create difficulty; filler enemies do not.
 - Entry side, formation, delays, and timestamps are authored content.
 
+**DECISION V02-DEC-022:** Runtime-ready encounters use the smallest explicit
+typed `Arrival Group` contract required by their approved staging. An Arrival
+Group contains a non-negative fixed-step-aligned offset from the Encounter time
+and one or more ordered enemy members. Each member owns its Enemy Type and one
+typed `Spawn Placement`:
+
+- `Top Placement` stores a normalized horizontal fraction in `[0, 1]` inside
+  the current Aircraft horizontal engagement band;
+- `Seeded Side Placement` stores the exact ordered side pair
+  `upper-left, upper-right` and a normalized viewport-height fraction.
+
+The Encounter composition and per-role totals are derived from its Arrival
+Groups; they are not duplicated as a second runtime authority. Stable Encounter,
+Arrival Group, and member order define deterministic creation order when several
+members share one fixed step. Content contains data only: it does not contain
+spawn callbacks, Phaser objects, or hidden formation algorithms.
+
+This contract is introduced only for the Mission 01 staging approved in §8.1.
+The qualitative Mission 02 and Mission 03 rows remain non-runtime product input
+until their owning Work Items receive separately approved numeric staging. The
+implementation must not generalize a formation DSL or invent those later values
+while implementing Mission 01.
+
 ### 7.2 No Reactive Spawn Cheating
 
 **DECISION V02-DEC-003:** Enemy spawns do not react to the current Aircraft position.
@@ -209,6 +233,42 @@ Times are Mission Clock times. `+Ns` means an authored delay from the encounter'
 **Totals:** 12 Basic, 2 Ranged, 3 Hunter.
 **Maximum combat reward:** 22 Credits.
 **Maximum Success payout:** 30 Credits.
+
+#### 8.1.1 Exact Arrival Groups and Spawn Placements
+
+**DECISION V02-DEC-021:** Mission 01 uses the following exact runtime staging.
+Every Top fraction is measured inside the current Aircraft horizontal engagement
+band. Every Hunter Side Placement uses viewport `Y = 20% VH`. `+N s` is an
+Arrival Group offset from the Encounter time.
+
+| Encounter | Offset | Ordered members and Spawn Placements |
+|---|---:|---|
+| `interception-01-e1` | `+0 s` | Basic Top `0.20`; Basic Top `0.40`; Basic Top `0.60`; Basic Top `0.80` |
+| `interception-01-e2` | `+0 s` | Basic Top `0.40`; Basic Top `0.60` |
+| `interception-01-e2` | `+2 s` | Ranged Top `0.50` |
+| `interception-01-e3` | `+0 s` | Hunter Seeded Side `upper-left, upper-right`, `Y = 0.20 VH` |
+| `interception-01-e4` | `+0 s` | Basic Top `0.25`; Basic Top `0.50`; Basic Top `0.75` |
+| `interception-01-e4` | `+3 s` | Hunter Seeded Side `upper-left, upper-right`, `Y = 0.20 VH` |
+| `interception-01-e5` | `+0 s` | Basic Top `0.20`; Ranged Top `0.40`; Basic Top `0.60`; Basic Top `0.80`; Hunter Seeded Side `upper-left, upper-right`, `Y = 0.20 VH` |
+
+The `03:10` Encounter is a simultaneous creation step with four separate Top
+lanes plus one Side Entry. Its stagger is spatial, not a positive time offset:
+the final scheduled enemy is created at exactly `03:10`, so the approved final
+arrival and Combat Countdown remain unchanged.
+
+For each seeded Hunter member, the Mission 01 plan consumes exactly one
+`mission-data` `nextInt(2)` draw in Encounter/member order. Draw `0` maps to
+`upper-left`; draw `1` maps to `upper-right`. The three Mission 01 draws therefore
+belong, in order, to `e3`, `e4`, and `e5`. Every Top Placement consumes zero RNG
+draws. Selection is resolved from authored mission data and the Mission seed
+before active Combat and never reads current Aircraft or performance state.
+
+**DECISION V02-DEC-018:** Top fractions are normalized inside the Aircraft
+engagement band rather than the raw viewport. Effective resize preserves each
+normalized Top fraction and each Side Placement's normalized `Y`; it does not
+reroll entry data. Every enemy starts fully outside its selected boundary with
+the nearest edge of its complete authoritative bounds touching that boundary and
+with no additional hidden offset.
 
 ### 8.2 Interception 02 — Pressure
 
@@ -266,18 +326,40 @@ All speed units are viewport-relative and evaluated in simulation seconds. `VH/s
 - Movement: authored Top/Side Entry followed by regular downward travel under existing deterministic geometry rules.
 - Attack: none.
 - Counterplay: align fire, choose safe space, and avoid contact.
+- Its authoritative AABB equals its complete configured rectangular rendered
+  bounds. Spawn placement, first visibility, collision, and escape use those
+  same bounds rather than the superseded v0.1 square or an alpha-pixel mask.
 
 ### 9.2 Ranged Drone
 
 - Role: ranged pressure and area denial.
 - The Ranged becomes authoritative and its first-shot timer begins when its complete simulation-owned visual bounds first enter the visible viewport. Renderer completion, texture availability, and fallback selection do not affect this time.
-- First shot occurs after `3.0 s`.
-- Later shot intervals are uniformly selected in `[1.0 s, 3.0 s]` through the dedicated deterministic Combat RNG stream.
+- First shot occurs after exactly `180` running fixed steps (`3.0 s`).
+- After each actual shot, the next interval is selected uniformly as an integer
+  count of `60–180` fixed steps inclusive through
+  `60 + rangedFireStream.nextInt(121)`. A Ranged destroyed before its next shot
+  consumes no further attack draw.
+- Each Ranged owns an independent `ranged-fire` stream derived from the Mission
+  seed with its stable zero-based mission-member ordinal. One Ranged's lifetime,
+  firing, or destruction therefore cannot shift another Ranged's cadence.
 - Aim uses Aircraft position at the authoritative firing instant.
 - After launch, trajectory is fixed. The projectile does not home.
 - Projectile speed is `24% VH/s`.
 - Projectile damage is `12`.
+- Each shot creates one projectile from the central lower muzzle: the
+  projectile's horizontal centre matches the Ranged centre and its top edge
+  touches the Ranged's bottom edge. It is immediately visible and
+  collision-active.
+- The Ranged projectile is a solid horizontal `danger` rectangle whose complete
+  bounds are `1.2% × 0.6%` of viewport short side. Its AABB equals those complete
+  rendered bounds. The horizontal silhouette distinguishes it from the vertical
+  player projectile without relying on colour alone.
+- It has no artificial lifetime. It is removed on its first valid Aircraft hit
+  or after its complete bounds leave the viewport.
 - Counterplay: recognise weapon structures, prioritise the platform, and move out of the projected firing line.
+- Its authoritative AABB equals its complete configured rectangular rendered
+  bounds. Spawn placement, activation, collision, and escape use those same
+  bounds rather than an alpha-pixel mask.
 
 ### 9.3 Hunter Drone
 
@@ -293,6 +375,15 @@ All speed units are viewport-relative and evaluated in simulation seconds. `VH/s
 - A Hunter destroyed through kamikaze contact grants `0 Credits`.
 - A missed Hunter continues downwards and may become `Escaped`, applying `-2 Credits`.
 - Counterplay: provoke commitment, displace, or destroy before contact.
+- Its authoritative AABB equals its complete configured rectangular rendered
+  bounds. Spawn placement, activation, collision, and escape use those same
+  bounds rather than an alpha-pixel mask.
+- For the approved Mission 01 Seeded Side Placement, the Hunter's complete
+  bounds start outside the selected left/right boundary at `20% VH`, with the
+  nearest edge touching the boundary. It travels horizontally inward at
+  `18% VH/s` until its complete bounds are inside the viewport. Only that
+  authoritative step begins `Approach`, targeting, and the `2.0 s` commitment
+  timer. Partial visibility does not begin those timers.
 
 ### 9.4 Elite Drone
 
@@ -349,6 +440,9 @@ Unaffected MVP rules remain: one equipped Primary Weapon, automatic straight-up 
 - Machine Gun, Cannon, Ranged, Elite cannon, and Elite homing-core projectiles can damage at most one valid target.
 - A projectile is destroyed immediately after its first valid hit, including a blocked hit on an Armoured Elite.
 - A projectile is destroyed when completely outside the approved viewport boundary or when its explicit lifetime ends.
+- Ranged projectiles have no explicit lifetime; Elite homing Cores retain their
+  approved `6.0 s` lifetime. Absence of a Ranged lifetime must not be replaced
+  by the player-projectile `2.0 s` value.
 - Projectiles do not pierce, ricochet, chain, splash, penetrate, or deal area damage.
 
 ## 11. Collision rules
@@ -465,11 +559,18 @@ When Success conditions are met:
 
 1. input, automatic fire, damage, collision, projectiles, and further simulation results stop;
 2. the result is committed atomically;
-3. Aircraft moves automatically to horizontal centre and flies upwards;
-4. after it leaves the upper viewport boundary, `Mission Result Overlay` opens;
-5. `Continue` returns to Operations.
+3. over exactly `0.5 s` of deterministic exit-sequence time, Aircraft centre X
+   moves linearly from its resolved position to `50% VW` while centre Y remains
+   fixed;
+4. Aircraft then flies straight upwards at `60% VH/s` with no player control;
+5. after its complete rendered bounds leave the upper viewport boundary,
+   `Mission Result Overlay` opens;
+6. `Continue` returns to Operations.
 
 No special enemy fade is required because all enemies are already resolved.
+The committed result cannot be altered during this sequence. Resize reprojects
+the current exit geometry without restarting either phase; input, automatic
+fire, damage, collision, projectiles, spawning, and RNG remain disabled.
 
 ### 13.4 Evacuation
 
@@ -592,6 +693,12 @@ The Combat Screen shows only:
 
 ### 15.2 Combat Countdown
 
+- The Countdown is horizontally centred at the top of the viewport with the
+  canonical `space-4` top offset.
+- Its displayed whole seconds are
+  `ceil(max(0, finalArrivalTimeSeconds - missionTimeSeconds))`, formatted as
+  `MM:SS`. It therefore never displays `00:00` before the exact final Arrival
+  Group step.
 - It displays time until the final scheduled enemy arrival.
 - It reaches `00:00` at `03:10`, `04:20`, and `05:20` for Missions 01–03 respectively.
 - At `00:00`, it remains visible at `00:00` until a terminal result resolves or Evacuation replaces it. It must not imply Success while enemies remain.
@@ -599,8 +706,15 @@ The Combat Screen shows only:
 
 ### 15.3 Critical Hull
 
-- When Hull first crosses below `25%`, the Hull Bar enters its existing danger presentation and `CRITICAL HULL` appears once near the HUD for approximately `2 s`.
-- The message does not repeat continuously while Hull remains below the threshold.
+- While Hull is below `25`, the Hull Bar fill uses the canonical `danger`
+  presentation; at `25` it does not.
+- `CRITICAL HULL` appears directly below the Combat Countdown for exactly
+  `2.0 s` once per Mission Instance. It appears immediately on Combat entry when
+  starting Hull is below `25`, otherwise on the first transition from `≥25` to
+  `<25`.
+- The message does not repeat while Hull remains below the threshold, after
+  later healing, or after a resize. A new Mission Instance owns a new one-time
+  latch.
 - No full-screen flash, persistent vignette, siren, audio, or numeric Hull is added.
 
 ### 15.4 Mission Result Overlay
@@ -761,23 +875,23 @@ v0.2 must not:
 
 ### V02-AC-003 — Authored timeline determinism
 
-**Given** the same mission, seed, viewport, and command sequence, **when** Combat reaches the final authored time, **then** Encounter IDs, timestamps, compositions, entry variants, and RNG-dependent behaviour are identical.
+**Given** the same mission, seed, viewport, and command sequence, **when** Combat reaches the final authored time, **then** Encounter IDs, Arrival Group offsets, ordered members, normalized Spawn Placements, entry variants, and RNG-dependent behaviour are identical; for Mission 01 the three Hunter side draws occur exactly in `e3 → e4 → e5` order and Top Placements consume no draw.
 
 ### V02-AC-004 — No Reactive Spawn Cheating
 
-**Given** two runs with different Aircraft positions but the same mission seed, **when** each authored Encounter spawns, **then** its time, composition, and spawn selection are unchanged by the Aircraft position.
+**Given** two runs with different Aircraft positions but the same mission seed, **when** each authored Arrival Group spawns, **then** its time, ordered members, normalized placement values, and seeded side selections are unchanged by Aircraft position, Hull, loadout, score, or performance; the current engagement-band dimensions may only project the already-authored normalized Top fraction.
 
 ### V02-AC-005 — Countdown semantics
 
-**Given** active enemies remain after the final scheduled arrival, **when** Combat Countdown reaches `00:00`, **then** it remains visible at `00:00`, no further Encounter spawns, and Combat continues without granting Success until all required enemies resolve or Evacuation replaces the Countdown.
+**Given** active enemies remain after the final scheduled arrival, **when** Combat Countdown reaches `00:00` using the §15.2 ceiling formula, **then** it does so on the exact final Arrival Group step, remains visible at `00:00`, no further Encounter spawns, and Combat continues without granting Success until all required enemies resolve or Evacuation replaces the Countdown.
 
 ### V02-AC-006 — Ranged attack
 
-**Given** a Ranged Drone's complete authoritative visual bounds first enter the viewport, **when** 3 seconds of running simulation elapse, **then** it fires at the Aircraft's current position; renderer/texture completion does not affect activation, later deterministic intervals remain within 1–3 seconds, and launched projectiles do not home.
+**Given** a Ranged Drone's complete authoritative visual bounds first enter the viewport, **when** `180` running fixed steps elapse, **then** it fires one §9.2 projectile from the central lower muzzle at the Aircraft's current position; renderer/texture completion does not affect activation, each later interval is exactly `60 + nextInt(121)` steps from that Ranged's independent stream, another Ranged cannot shift its cadence, and launched projectiles do not home or inherit the player-projectile lifetime.
 
 ### V02-AC-007 — Hunter commitment
 
-**Given** a Hunter's complete authoritative visual bounds have entered the viewport, **when** it approaches, **then** it steers directly towards the Aircraft's current centre without predictive lead; **when** either commit condition first occurs, **then** direction locks, speed becomes 26% VH/s, and later Aircraft movement does not bend the attack run.
+**Given** a Mission 01 Hunter is created at its seeded Side Placement, **when** it enters, **then** it moves horizontally inward at `18% VH/s` and neither targets nor advances its commitment timer until its complete authoritative bounds are inside the viewport; **when** `Approach` begins, it steers directly towards the Aircraft's current centre without predictive lead; **when** either commit condition first occurs, direction locks, speed becomes `26% VH/s`, and later Aircraft movement does not bend the attack run.
 
 ### V02-AC-008 — Hunter outcomes
 
@@ -837,11 +951,16 @@ v0.2 must not:
 
 ### V02-AC-022 — Minimal Combat UI
 
-**Given** active Combat, **when** no context-specific state applies, **then** only the Hull Bar, Combat Countdown, utility controls, and Evacuate action are visible; no prohibited counters or metrics are shown.
+**Given** active Combat, **when** no context-specific state applies, **then** only the Hull Bar, Combat Countdown, utility controls, and Evacuate action are visible; when Hull begins below `25` or first crosses below it, the exact one-time Critical Hull behaviour in §15.3 applies; no prohibited counters or metrics are shown.
 
 ### V02-AC-023 — Result UX
 
-**Given** Success, Evacuation, or affordable-Repair Defeat, **when** committed result UI opens, **then** it shows only the applicable values in §15.4 and cannot mutate them a second time.
+**Given** Success commits, **when** its exit begins, **then** gameplay and result
+mutation remain disabled through the exact centre-and-up sequence in §13.3,
+including resize, and the result UI opens only after the Aircraft's complete
+bounds leave the viewport; **given** Success, Evacuation, or affordable-Repair
+Defeat, **when** committed result UI opens, **then** it shows only the applicable
+values in §15.4 and cannot mutate them a second time.
 
 ### V02-AC-024 — Enemy visual vocabulary
 
@@ -934,12 +1053,20 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-015 | Approved | preload five enemy sprites through bounded Boot      | one established `5 s` lifecycle; no second Combat loader |
 | V02-DEC-016 | Approved | role-specific procedural enemy fallbacks             | failed images remain readable without invented gameplay  |
 | V02-DEC-017 | Approved | split AC-025 implementation and traversal evidence   | WI-01 owns asset contract; WI-07 owns final traversal     |
+| V02-DEC-018 | Approved | normalized authored placement and resize projection | no raw-pixel staging or resize rerolls                    |
+| V02-DEC-019 | Approved | regular-enemy AABB equals complete rendered bounds  | one authoritative rectangle for entry/collision/escape   |
+| V02-DEC-020 | Approved | Hunter enters horizontally before Approach          | targeting and commit timer begin only fully in viewport   |
+| V02-DEC-021 | Approved | exact five-Encounter Mission 01 staging              | final arrival remains exactly `03:10`                     |
+| V02-DEC-022 | Approved | minimal typed Arrival Groups and Spawn Placements    | no hidden formation logic or generic formation DSL        |
+| V02-DEC-023 | Approved | exact Ranged projectile and per-enemy cadence stream | readable geometry and no cross-enemy RNG coupling          |
+| V02-DEC-024 | Approved | exact Countdown and Critical Hull presentation       | deterministic display and one warning per Mission Instance |
+| V02-DEC-025 | Approved | two-phase deterministic Success exit                 | committed result appears after a bounded readable exit     |
 
 ## 23. Consistency and Definition of Ready audit
 
 ### 23.1 Passed areas
 
-The audit found no unresolved S0–S2 product gap in:
+The audit found no unresolved S0–S2 product gap for `V02-WI-04` in:
 
 - problem/outcome and player context;
 - IN/OUT scope;
@@ -951,10 +1078,19 @@ The audit found no unresolved S0–S2 product gap in:
 - mission unlock/replay;
 - Dexie ownership, atomic persistence, refresh/close, corrupted data, and hidden-tab behaviour;
 - HUD, result UX, negative requirements, Debug, and observability;
+- Design System v0.2 presentation overrides and the bounded WI-04→WI-05
+  compatibility-seam removal owner;
 - architecture and repository ownership;
 - acceptance coverage and required verification types.
 - source-qualified v0.2 traceability and bounded Work Item ownership;
 - representative regular, Elite, and legacy-proxy performance workloads.
+
+**BOUNDED FUTURE GAP:** Mission 02 and Mission 03 retain qualitative entry and
+formation language without complete numeric Arrival Groups. This does not block
+Mission 01 or `V02-WI-04`; it makes the affected runtime portions of
+`V02-WI-05` and `V02-WI-06` NOT READY until their Product Owner staging decisions
+are recorded. Those Work Items must not infer geometry from Mission 01 or from
+implementation convenience.
 
 ### 23.2 Visual acceptance closure
 
@@ -966,6 +1102,12 @@ The audit found no unresolved S0–S2 product gap in:
 
 ## 24. Readiness verdict
 
-**APPROVED — READY FOR BOUNDED WORK ITEM HANDOFFS**
+**APPROVED — V02-WI-04 READY FOR BOUNDED HANDOFF**
 
-The product-definition, consistency, asset-budget, traceability, and Definition of Ready audits have no unresolved S0–S2 blocker. Implementation may begin only through one separately authorized Work Item handoff at a time, following `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` and repository governance. This document does not itself start implementation or authorize the whole Epic as one unbounded assignment.
+The Mission 01 product-definition, consistency, asset-budget, traceability, and
+Definition of Ready audits have no unresolved S0–S2 blocker. Implementation may
+begin only through one separately authorized Work Item handoff at a time,
+following `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` and repository governance. This
+document does not itself start implementation or authorize the whole Epic as one
+unbounded assignment. Mission 02 and Mission 03 runtime staging remain subject
+to the bounded future gap in §23.1.
