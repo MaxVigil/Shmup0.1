@@ -6,8 +6,9 @@
 **Decision owner:** Product Owner
 **Prepared:** 2026-08-25
 **Mission 01 staging decision:** 2026-08-31
-**Repository baseline audited:** `2812fc0cc3acebd8f5be3d98d8c7ddf798772b6f`
-**Status:** **APPROVED — V02-WI-04 READY FOR BOUNDED HANDOFF; LATER MISSION STAGING BOUNDED AS NOT READY**
+**Mission 02 staging and alternative-outcome decisions:** 2026-09-02
+**Repository baseline audited:** `91f2aa29f2783c90af584d95720453a1eabc8c3e`
+**Status:** **APPROVED — V02-WI-05 READY FOR BOUNDED HANDOFF; MISSION 03 STAGING BOUNDED AS NOT READY**
 
 ## 1. Purpose and authority
 
@@ -185,11 +186,12 @@ Arrival Group, and member order define deterministic creation order when several
 members share one fixed step. Content contains data only: it does not contain
 spawn callbacks, Phaser objects, or hidden formation algorithms.
 
-This contract is introduced only for the Mission 01 staging approved in §8.1.
-The qualitative Mission 02 and Mission 03 rows remain non-runtime product input
-until their owning Work Items receive separately approved numeric staging. The
-implementation must not generalize a formation DSL or invent those later values
-while implementing Mission 01.
+This contract is introduced by the Mission 01 staging approved in §8.1.1 and
+reused without a new placement type or formation DSL by the Mission 02 staging
+approved in §8.2.1. The qualitative Mission 03 rows remain non-runtime product
+input until their owning Work Item receives separately approved numeric staging.
+The implementation must not invent Mission 03 values or generalize a formation
+DSL while implementing Mission 02.
 
 ### 7.2 No Reactive Spawn Cheating
 
@@ -287,6 +289,39 @@ with no additional hidden offset.
 **Totals:** 15 Basic, 4 Ranged, 2 Hunter.
 **Maximum combat reward:** 27 Credits.
 **Maximum Success payout:** 39 Credits.
+
+#### 8.2.1 Exact Arrival Groups and Spawn Placements
+
+**DECISION V02-DEC-026 (2026-09-02):** Mission 02 reuses the bounded
+`Arrival Group` and `Spawn Placement` contract from §7.1 without adding fixed
+side placements, a formation DSL, or hidden runtime geometry. Every Top fraction
+is measured inside the current Aircraft horizontal engagement band. A Seeded
+Side member resolves from the exact ordered pair `upper-left, upper-right` at
+the authored viewport-height fraction.
+
+| Encounter | Offset | Ordered members and Spawn Placements |
+|---|---:|---|
+| `interception-02-e1` | `+0 s` | Basic Top `0.15`; Basic Top `0.45`; Basic Top `0.75` |
+| `interception-02-e2` | `+0 s` | Basic Top `0.25`; Basic Top `0.50`; Basic Top `0.75` |
+| `interception-02-e2` | `+2 s` | Ranged Top `0.50` |
+| `interception-02-e3` | `+0 s` | Basic Top `0.20`; Ranged Top `0.30`; Ranged Top `0.70`; Basic Top `0.80` |
+| `interception-02-e4` | `+0 s` | Basic Top `0.25`; Basic Top `0.50`; Basic Top `0.75` |
+| `interception-02-e4` | `+2 s` | Basic Seeded Side `upper-left, upper-right`, `Y = 0.25 VH` |
+| `interception-02-e5` | `+0 s` | Basic Top `0.25` |
+| `interception-02-e5` | `+1 s` | Ranged Top `0.55` |
+| `interception-02-e5` | `+2 s` | Hunter Seeded Side `upper-left, upper-right`, `Y = 0.20 VH` |
+| `interception-02-e6` | `+0 s` | Basic Top `0.35`; Basic Top `0.65`; Hunter Seeded Side `upper-left, upper-right`, `Y = 0.20 VH` |
+
+Mission 02 consumes exactly three `mission-data` `nextInt(2)` draws in
+Encounter/Arrival Group/member order: the delayed e4 Basic, the e5 Hunter, and
+the e6 Hunter. Draw `0` maps to `upper-left`; draw `1` maps to `upper-right`.
+Every Top Placement consumes zero RNG draws. Selection is resolved from authored
+mission data and the Mission seed before active Combat and never reads Aircraft,
+Hull, weapon, score, or performance state.
+
+Every e6 member is created on the single `04:20` fixed step. Mission 02 has no
+positive Arrival Group offset after that step; its Combat Countdown therefore
+reaches `00:00` exactly when the complete final group is created.
 
 ### 8.3 Interception 03 — Breakthrough
 
@@ -579,16 +614,38 @@ fire, damage, collision, projectiles, spawning, and RNG remain disabled.
 1. Selecting `Evacuate` pauses Combat and opens `Evacuation Confirmation`.
 2. The Overlay states that 50% of net earned combat rewards are retained and completion reward/unlock is lost.
 3. `Cancel` closes the Overlay and restores the exact prior pause state. An Evacuation Confirmation opened from active Combat resumes only when no browser-safety or other blocking pause remains; one opened from Pause returns to Pause.
-4. Confirming resumes Combat and begins an irreversible `5.0 s` Evacuation Countdown.
-5. The normal Combat Countdown is replaced by `EVACUATION 00:05` and counts down.
+4. Confirming resumes Combat and begins an irreversible `5.0 s` / `300`-step Evacuation Countdown.
+5. The normal Combat Countdown is replaced by `EVACUATION 00:05`. Displayed seconds equal `ceil(max(0, remainingSteps) / 60)`, and completion occurs on the exact zero step.
 6. During countdown, normal controls, automatic fire, damage, enemy behaviour, projectiles, and scheduled encounters continue.
 7. If Hull reaches `0` before completion, result is `Defeat`.
 8. If Aircraft remains operational at `00:00`, result becomes `Evacuated` immediately.
 9. After resolution, input, fire, damage, collisions, and spawns are disabled.
-10. Active enemies and enemy projectiles become gameplay-inactive immediately and fade out over `0.5–1.0 s`.
-11. Aircraft centres and flies upwards. After it leaves the viewport, the Evacuation result opens.
+10. Active enemies and enemy projectiles become gameplay-inactive immediately and fade out over exactly `0.5 s`.
+11. Over the same exact `0.5 s`, Aircraft centre X moves linearly to `50% VW` while centre Y remains fixed.
+12. Aircraft then flies straight upwards at `60% VH/s` with no player control. After its complete rendered bounds leave the upper viewport boundary, the Evacuation result opens.
 
 Evacuation cannot be cancelled after confirmation. `Return to Base` does not exist as an instant-abort path. A Pause action that exposes `Evacuate` must invoke the same confirmation and five-second flow.
+
+**DECISION V02-DEC-027 (2026-09-02):** Confirmation changes the eligible
+terminal set. From the confirmation step onward, ordinary Success is suppressed
+even if every enemy resolves during the five-second commitment. Only Defeat can
+resolve before countdown completion; an operational Aircraft resolves as
+Evacuated on the zero step. Scheduled encounters, enemy behaviour, controls,
+automatic fire, damage, projectiles, and economy observation continue normally
+until one of those two results resolves. This makes the confirmation statement
+that completion reward and unlock are lost truthful and irreversible.
+
+Pause, Settings, hidden-tab, and focus-loss safety remain available during the
+commitment and stop the Countdown together with all authoritative Combat time.
+Returning focus never resumes automatically. After confirmation, `Evacuate` is
+not offered again and no Cancel or `Return to Base` action can bypass the
+commitment.
+
+**DECISION V02-DEC-028 (2026-09-02):** Successful Evacuation freezes one
+immutable result, disables gameplay, starts the enemy/projectile fade and
+Aircraft centring concurrently, and then uses the same bounded upward speed as
+Success. Resize reprojects the current fade/centring/upward phase without
+restarting it. The committed result cannot change during the exit.
 
 ### 13.5 Defeat
 
@@ -616,6 +673,46 @@ The current operation is over.
 - Confirming deletes/replaces campaign state through an atomic operation, creates a new Pilot, restores Starting Credits and Hull, selects the default weapon, unlocks only Interception 01, and opens Operations.
 - New Game does not reset persisted user Settings.
 - Game Over does not silently delete campaign data.
+
+### 13.7 Terminal commitment and save recovery
+
+**DECISION V02-DEC-029 (2026-09-02):** Success, Evacuated, Defeat, and Game
+Over use one terminal commitment boundary. The Mission Snapshot's exact durable
+attempt identity and one frozen immutable result/economy payload flow through an
+exactly-once atomic campaign transaction. Result presentation, Evacuation or
+Success exit, affordable-Repair failure result, and Game Over navigation may
+continue only after that transaction reports `committed`.
+
+If the terminal write fails or rejects, Combat remains terminal and frozen and
+the blocking Overlay is exactly:
+
+```text
+Save Error
+
+Mission result could not be saved. Combat remains paused.
+
+[Retry Save]
+```
+
+`Retry Save` is single-flight and retries the same frozen payload. It must not
+resume gameplay, recalculate economy, create another result, or start an exit.
+Repeated failure remains Save Error. If retry becomes inert because durable
+campaign authority changed, the blocking Overlay becomes exactly:
+
+```text
+Save Conflict
+
+Campaign data changed in another session. Reload to continue.
+
+[Reload]
+```
+
+Reload is browser navigation only. Neither Overlay closes through Esc or Scrim.
+If a commit completes while a browser-safety manual-resume latch is set, the
+only continuation is explicit `Resume`; Return to Base, Settings, Debug, Retry,
+or another result action is not exposed. Defeat retains priority over Success
+and Evacuation completion on the same authoritative step, and no callback can
+commit a second terminal result.
 
 ## 14. Persistence and browser lifecycle
 
@@ -875,7 +972,7 @@ v0.2 must not:
 
 ### V02-AC-003 — Authored timeline determinism
 
-**Given** the same mission, seed, viewport, and command sequence, **when** Combat reaches the final authored time, **then** Encounter IDs, Arrival Group offsets, ordered members, normalized Spawn Placements, entry variants, and RNG-dependent behaviour are identical; for Mission 01 the three Hunter side draws occur exactly in `e3 → e4 → e5` order and Top Placements consume no draw.
+**Given** the same mission, seed, viewport, and command sequence, **when** Combat reaches the final authored time, **then** Encounter IDs, Arrival Group offsets, ordered members, normalized Spawn Placements, entry variants, and RNG-dependent behaviour are identical; Mission 01 consumes its three Hunter side draws exactly in `e3 → e4 → e5` order, Mission 02 consumes its three side draws exactly for `e4 delayed Basic → e5 Hunter → e6 Hunter`, and every Top Placement consumes no draw.
 
 ### V02-AC-004 — No Reactive Spawn Cheating
 
@@ -891,7 +988,7 @@ v0.2 must not:
 
 ### V02-AC-007 — Hunter commitment
 
-**Given** a Mission 01 Hunter is created at its seeded Side Placement, **when** it enters, **then** it moves horizontally inward at `18% VH/s` and neither targets nor advances its commitment timer until its complete authoritative bounds are inside the viewport; **when** `Approach` begins, it steers directly towards the Aircraft's current centre without predictive lead; **when** either commit condition first occurs, direction locks, speed becomes `26% VH/s`, and later Aircraft movement does not bend the attack run.
+**Given** an authored regular Hunter is created at its seeded Side Placement, **when** it enters, **then** it moves horizontally inward at `18% VH/s` and neither targets nor advances its commitment timer until its complete authoritative bounds are inside the viewport; **when** `Approach` begins, it steers directly towards the Aircraft's current centre without predictive lead; **when** either commit condition first occurs, direction locks, speed becomes `26% VH/s`, and later Aircraft movement does not bend the attack run.
 
 ### V02-AC-008 — Hunter outcomes
 
@@ -919,11 +1016,11 @@ v0.2 must not:
 
 ### V02-AC-014 — Evacuation commitment
 
-**Given** Evacuation Confirmation is cancelled, **when** it closes, **then** it restores the exact prior active/Pause state subject to browser-safety blocking; **given** Evacuation is confirmed, **when** its five-second countdown runs, **then** normal Combat and scheduled encounters continue, the action cannot be cancelled, and Hull zero resolves Defeat before Evacuation.
+**Given** Evacuation Confirmation is cancelled, **when** it closes, **then** it restores the exact prior active/Pause state subject to browser-safety blocking; **given** Evacuation is confirmed, **when** its exact `300`-step countdown runs, **then** normal Combat and scheduled encounters continue, Success is suppressed, the action cannot be cancelled or selected again, Pause/Settings/browser-safety stop all authoritative time, and Hull zero resolves Defeat before Evacuation.
 
 ### V02-AC-015 — Evacuation result
 
-**Given** Aircraft remains operational at Evacuation `00:00`, **when** the result freezes, **then** payout equals `floor(max(0, rewards - penalties) × 0.5)`, current Hull is retained, no completion/unlock occurs, remaining enemies add no penalties, gameplay stops, entities fade, and Aircraft exits upward before the result appears.
+**Given** Aircraft remains operational at Evacuation `00:00`, **when** the result freezes, **then** payout equals `floor(max(0, rewards - penalties) × 0.5)`, current Hull is retained, no completion/unlock occurs, remaining enemies add no penalties, gameplay stops, enemies/projectiles fade over exactly `0.5 s` while Aircraft centres over exactly `0.5 s`, Aircraft then exits upward at `60% VH/s`, and the committed result appears only after its complete bounds leave the viewport.
 
 ### V02-AC-016 — Defeat and Game Over
 
@@ -958,7 +1055,10 @@ v0.2 must not:
 **Given** Success commits, **when** its exit begins, **then** gameplay and result
 mutation remain disabled through the exact centre-and-up sequence in §13.3,
 including resize, and the result UI opens only after the Aircraft's complete
-bounds leave the viewport; **given** Success, Evacuation, or affordable-Repair
+bounds leave the viewport; **given** Evacuation commits, **when** its exit
+begins, **then** the exact concurrent fade/centring and subsequent upward phase
+in §13.4 run without result mutation and the result UI opens only after the
+Aircraft's complete bounds leave the viewport; **given** Success, Evacuation, or affordable-Repair
 Defeat, **when** committed result UI opens, **then** it shows only the applicable
 values in §15.4 and cannot mutate them a second time.
 
@@ -1061,12 +1161,16 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-023 | Approved | exact Ranged projectile and per-enemy cadence stream | readable geometry and no cross-enemy RNG coupling          |
 | V02-DEC-024 | Approved | exact Countdown and Critical Hull presentation       | deterministic display and one warning per Mission Instance |
 | V02-DEC-025 | Approved | two-phase deterministic Success exit                 | committed result appears after a bounded readable exit     |
+| V02-DEC-026 | Approved | exact six-Encounter Mission 02 staging               | runtime geometry is explicit and final arrival remains `04:20` |
+| V02-DEC-027 | Approved | confirmed Evacuation suppresses Success              | the irreversible commitment has only Defeat/Evacuated outcomes |
+| V02-DEC-028 | Approved | exact deterministic Evacuation exit                  | fade, centring, upward flight, and resize are unambiguous   |
+| V02-DEC-029 | Approved | shared terminal commitment and recovery contract     | all outcomes save exactly once before presentation or exit  |
 
 ## 23. Consistency and Definition of Ready audit
 
 ### 23.1 Passed areas
 
-The audit found no unresolved S0–S2 product gap for `V02-WI-04` in:
+The audit found no unresolved S0–S2 product gap for `V02-WI-05` in:
 
 - problem/outcome and player context;
 - IN/OUT scope;
@@ -1085,12 +1189,17 @@ The audit found no unresolved S0–S2 product gap for `V02-WI-04` in:
 - source-qualified v0.2 traceability and bounded Work Item ownership;
 - representative regular, Elite, and legacy-proxy performance workloads.
 
-**BOUNDED FUTURE GAP:** Mission 02 and Mission 03 retain qualitative entry and
-formation language without complete numeric Arrival Groups. This does not block
-Mission 01 or `V02-WI-04`; it makes the affected runtime portions of
-`V02-WI-05` and `V02-WI-06` NOT READY until their Product Owner staging decisions
-are recorded. Those Work Items must not infer geometry from Mission 01 or from
-implementation convenience.
+Mission 02 exact Arrival Groups, Spawn Placements, RNG ownership, final arrival,
+Evacuation terminal set, countdown, exit geometry, and terminal-save recovery
+are now explicit. The WI-04 temporary Defeat/Return-to-Base compatibility seam
+has one removal owner in WI-05 and is not an alternate accepted v0.2 path.
+
+**BOUNDED FUTURE GAP:** Mission 03 retains qualitative entry and formation
+language without complete numeric regular-enemy Arrival Groups. This does not
+block Mission 02 or `V02-WI-05`; it makes the affected runtime portion of
+`V02-WI-06` NOT READY until its Product Owner staging decision is recorded.
+WI-06 must not infer geometry from Mission 01, Mission 02, or implementation
+convenience.
 
 ### 23.2 Visual acceptance closure
 
@@ -1102,12 +1211,12 @@ implementation convenience.
 
 ## 24. Readiness verdict
 
-**APPROVED — V02-WI-04 READY FOR BOUNDED HANDOFF**
+**APPROVED — V02-WI-05 READY FOR BOUNDED HANDOFF**
 
-The Mission 01 product-definition, consistency, asset-budget, traceability, and
-Definition of Ready audits have no unresolved S0–S2 blocker. Implementation may
+The Mission 02 and alternative-outcome product-definition, consistency,
+traceability, and Definition of Ready audits have no unresolved S0–S2 blocker. Implementation may
 begin only through one separately authorized Work Item handoff at a time,
 following `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` and repository governance. This
 document does not itself start implementation or authorize the whole Epic as one
-unbounded assignment. Mission 02 and Mission 03 runtime staging remain subject
-to the bounded future gap in §23.1.
+unbounded assignment. Mission 03 runtime staging remains subject to the bounded
+future gap in §23.1.

@@ -164,17 +164,21 @@ Acceptance evidence:
 **Outcome:** Interception 02 is fully playable and validates sustained mixed pressure plus Evacuation, Defeat, paid Repair, Game Over, New Game, and all corresponding atomic result UX.
 
 - **Depends on:** accepted `V02-WI-04` revision.
-- **Readiness precondition:** Product Owner approval and canonical recording of exact Mission 02 Arrival Groups and Spawn Placements; qualitative Epic §8.2 formation language must not be converted into runtime geometry by the implementation agent.
-- **Owned AC:** `V02-AC-014–016`; `V02-AC-022–023` for Evacuated/Defeat/Game Over.
+- **Readiness precondition:** satisfied by Product Owner approval and canonical `V02-DEC-026` recording of exact Mission 02 Arrival Groups, Spawn Placements, RNG order, and final arrival. The implementation agent must consume that staging exactly and must not convert any residual prose into additional geometry.
+- **Owned AC:** `V02-AC-003–008` and `V02-AC-011–013` for Mission 02 runtime integration/regression; `V02-AC-014–016`; `V02-AC-022–023` for Evacuated/Defeat/Game Over.
 - **Primary sources:** Epic §§8.2, 12–15, 17–20.
 
 IN scope:
 
-- exact Mission 02 schedule and completion integration;
+- exact Mission 02 Arrival Groups, Spawn Placements, RNG draw order, final
+  arrival, schedule, and completion integration from Epic §8.2.1;
 - Evacuation confirmation with exact prior-pause restoration;
-- irreversible five-second countdown with normal Combat continuing;
+- irreversible `300`-step countdown with normal Combat continuing, Success
+  suppressed after confirmation, and exact fade/centring/upward exit geometry;
 - Defeat priority, retained-Hull Evacuation transaction, paid full Repair, and Game Over;
-- result overlays, exit/fade sequences, New Game confirmation, and exactly-once persistence;
+- result overlays, exit/fade sequences, New Game confirmation, exactly-once
+  persistence, and the accepted Save Error/Save Conflict recovery contract for
+  every terminal outcome;
 - removal of every temporary v0.1 Defeat/Return-to-Base compatibility path
   retained by `V02-WI-04`, replacing it with the final v0.2 outcome and
   Pause/Evacuation behaviour.
@@ -188,8 +192,14 @@ OUT scope:
 
 Acceptance evidence:
 
-- boundary tests at simultaneous Success/Defeat/Evacuation, exactly `00:00`, 7/8 Credits, repeated callbacks, and refresh boundaries;
-- browser playthroughs for Success, Evacuation, affordable Defeat, Game Over, New Game, Pause-origin cancellation, and focus loss;
+- exact-content and deterministic-RNG tests for all six Mission 02 Encounters,
+  Arrival Groups, ordered members, offsets, placements, and final arrival;
+- boundary tests at simultaneous Success/Defeat/Evacuation, confirmed-
+  Evacuation Success suppression, all `300` Countdown boundaries, exactly
+  `00:00`, 7/8 Credits, repeated callbacks, save failure/conflict, and refresh
+  boundaries;
+- browser playthroughs for Success, Evacuation, affordable Defeat, Game Over,
+  New Game, Pause-origin cancellation, Save Error/Conflict, and focus loss;
 - `npm run verify:all` and R2 player-facing checkpoint.
 
 ## 7. V02-WI-06 — Mission 03 Elite vertical
@@ -252,14 +262,15 @@ Acceptance evidence:
 
 ## 9. Handoff readiness
 
-`V02-WI-01` through `V02-WI-03` have accepted implementation revisions.
-`V02-WI-04` has bounded scope, product behaviour, AC ownership, negative
-requirements, dependency order, and verification expectations and is the next
-Work Item ready for one separately authorized handoff.
+`V02-WI-01` through `V02-WI-04` have accepted implementation revisions.
+`V02-WI-05` has bounded scope, exact Mission 02 staging, alternative-outcome
+behaviour, AC ownership, negative requirements, dependency order, and
+verification expectations and is the next Work Item ready for one separately
+authorized handoff.
 
-`V02-WI-05` and `V02-WI-06` remain NOT READY for their runtime mission staging
-until the Product Owner approves and canonical documentation records the exact
-Arrival Groups and Spawn Placements required by their readiness preconditions.
+`V02-WI-06` remains NOT READY for its regular-enemy runtime staging until the
+Product Owner approves and canonical documentation records the exact Mission 03
+Arrival Groups and Spawn Placements required by its readiness precondition.
 `V02-WI-07` remains dependency-blocked until `V02-WI-06` is accepted. Starting
 any later Work Item, combining Work Items, or sending the whole Epic as one
 DeepSeek task violates this plan.

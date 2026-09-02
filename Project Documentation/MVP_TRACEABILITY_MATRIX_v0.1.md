@@ -121,15 +121,15 @@ The authoritative source is `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION
 | v0.2 requirement domain | Source sections | Acceptance coverage | Work Item owner | Status |
 |---|---|---|---|---|
 | Initial progression, unlock, and replay | §§5, 7, 13, 14 | V02-AC-001–002 | V02-WI-03 | Covered |
-| Authored timelines, Arrival Groups, Spawn Placements, and no reactive spawn cheating | §§6–8.1.1 | V02-AC-003–004 | V02-WI-03 data foundation; V02-WI-04 Mission 01 runtime consumption | Covered; staged runtime ownership explicit |
+| Authored timelines, Arrival Groups, Spawn Placements, and no reactive spawn cheating | §§6–8.2.1 | V02-AC-003–004 | V02-WI-03 data foundation; V02-WI-04 Mission 01 runtime consumption; V02-WI-05 Mission 02 runtime consumption | Covered; staged runtime ownership explicit |
 | Combat Countdown and Critical Hull | §§8, 13, 15; Design System §8.26 | V02-AC-005, V02-AC-022 | V02-WI-04 | Covered |
-| Ranged activation, cadence stream, projectile geometry, and attack | §§9.2, 10; Technical Foundation §8 | V02-AC-006, V02-AC-011 | V02-WI-04 | Covered |
-| Hunter approach, commitment, and outcomes | §§9.3, 11.2, 12 | V02-AC-007–008 | V02-WI-04 | Covered |
+| Ranged activation, cadence stream, projectile geometry, and attack | §§9.2, 10; Technical Foundation §8 | V02-AC-006, V02-AC-011 | V02-WI-04 implementation; V02-WI-05 Mission 02 integration/regression | Covered |
+| Hunter approach, commitment, and outcomes | §§9.3, 11.2, 12 | V02-AC-007–008 | V02-WI-04 implementation; V02-WI-05 Mission 02 integration/regression | Covered |
 | Elite entry, phases, and bounded attacks | §§8.3, 9.4, 10 | V02-AC-009–010 | V02-WI-06 | Covered |
-| Projectile and regular-contact lifecycle | §§10–11 | V02-AC-011–012 | V02-WI-04 | Covered |
+| Projectile and regular-contact lifecycle | §§10–11 | V02-AC-011–012 | V02-WI-04 implementation; V02-WI-05 Mission 02 integration/regression | Covered |
 | Success economy, result commitment, exit, and result composition | §§12.1–12.2, 13.3, 15.4; Design System §8.26 | V02-AC-013, V02-AC-023 | V02-WI-04 | Covered |
-| Evacuation commitment and result | §§12.3, 13.4, 15 | V02-AC-014–015 | V02-WI-05 | Covered |
-| Defeat, paid Repair, and Game Over | §§12.4, 13.5–13.6 | V02-AC-016 | V02-WI-05 | Covered |
+| Evacuation commitment and result | §§12.3, 13.4, 13.7, 15 | V02-AC-014–015 | V02-WI-05 | Covered; terminal set, exact countdown/exit, and save recovery explicit |
+| Defeat, paid Repair, Game Over, and terminal-save recovery | §§12.4, 13.5–13.7 | V02-AC-016, V02-AC-020 | V02-WI-05 alternate-outcome consumption of the accepted persistence boundary | Covered |
 | New Game and Settings separation | §§13.6, 14.1 | V02-AC-017 | V02-WI-02 | Covered |
 | Active-mission recovery and hidden-tab pause | §§14.3–14.4 | V02-AC-018–019 | V02-WI-02 | Covered |
 | Atomic persistence and corrupted-save recovery | §§13.2, 14.1–14.2 | V02-AC-020–021 | V02-WI-02 | Covered |
