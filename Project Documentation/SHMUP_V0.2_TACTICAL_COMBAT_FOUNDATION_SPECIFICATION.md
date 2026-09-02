@@ -588,6 +588,36 @@ Before Combat becomes active:
 
 If this write fails, Combat does not start and the existing mission-initialization failure UX applies. No reward or progression changes.
 
+If the write succeeded but Combat initialization then fails, the application
+must atomically clear only that Mission Snapshot's exact durable attempt marker
+before reconciling the session back to Mission Details. A committed clear, an
+already-absent matching marker, or a missing campaign record returns to Mission
+Details with `Unable to start mission.` and leaves economy, Hull, progression,
+and loadout unchanged.
+
+**DECISION V02-DEC-031 (2026-09-02):** If that cleanup write rejects, fails, or
+finds an unreadable campaign record, the application remains in a frozen,
+non-interactive Combat shell and opens this blocking Overlay exactly:
+
+```text
+Mission Start Recovery Error
+
+Combat could not start, and the active mission could not be cleared safely.
+Retry cleanup to return to Mission Details.
+
+[Retry Cleanup]
+```
+
+`Retry Cleanup` is single-flight and retries the same immutable attempt id. A
+repeated failure remains on this Overlay. Esc and Scrim do not close it, and
+Pause, Settings, Evacuate, Debug, gameplay, terminal resolution, reward,
+Repair, and progression are unavailable. If a retry finds that durable
+authority belongs to another attempt, the Overlay becomes the exact
+`Save Conflict` / `Reload` state in §13.7; reload is browser navigation only.
+No `Return to Base`, `Aborted`, Defeat, or Evacuation path may substitute for a
+successful cleanup. This recovery contract supersedes the temporary WI-02
+reliance on `Pause → Return to Base`.
+
 ### 13.3 Success
 
 When Success conditions are met:
@@ -1075,7 +1105,7 @@ v0.2 must not:
 
 ### V02-AC-020 — Atomic persistence
 
-**Given** repeated browser callbacks or UI activation, **when** mission start or a terminal result is processed, **then** campaign state contains one coherent before/after version with no duplicate reward, cost, unlock, or Pilot.
+**Given** repeated browser callbacks or UI activation, **when** mission start or a terminal result is processed, **then** campaign state contains one coherent before/after version with no duplicate reward, cost, unlock, or Pilot. **Given** persisted mission start succeeded but Combat initialization failed, **when** exact-attempt cleanup cannot be committed, **then** the blocking Mission Start Recovery Error retries only that attempt; a durable authority mismatch becomes Save Conflict, and no gameplay, free abort, paid Defeat, or false cleanup occurs.
 
 ### V02-AC-021 — Corrupted save
 
@@ -1201,6 +1231,7 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-028 | Approved | exact deterministic Evacuation exit                  | fade, centring, upward flight, and resize are unambiguous   |
 | V02-DEC-029 | Approved | shared terminal commitment and recovery contract     | all outcomes save exactly once before presentation or exit  |
 | V02-DEC-030 | Approved | exact Evacuation affordance and confirmation UX      | irreversible exit has safe focus, truthful copy, and one entry path |
+| V02-DEC-031 | Approved | exact mission-start cleanup recovery                 | failed Combat initialization cannot become a free abort, paid Defeat, or trapped shell |
 
 ## 23. Consistency and Definition of Ready audit
 
@@ -1229,8 +1260,10 @@ Mission 02 exact Arrival Groups, Spawn Placements, RNG ownership, final arrival,
 Evacuation terminal set, countdown, exit geometry, and terminal-save recovery
 are now explicit. The exact active/Pause affordances, confirmation copy, safe
 initial focus, cancellation return, and post-confirmation action set are also
-explicit. The WI-04 temporary Defeat/Return-to-Base compatibility seam has one
-removal owner in WI-05 and is not an alternate accepted v0.2 path.
+explicit. Failed Combat initialization also has an exact-attempt cleanup retry
+and conflict path that does not depend on the removed free abort. The WI-04
+temporary Defeat/Return-to-Base compatibility seam has one removal owner in
+WI-05 and is not an alternate accepted v0.2 path.
 
 **BOUNDED FUTURE GAP:** Mission 03 retains qualitative entry and formation
 language without complete numeric regular-enemy Arrival Groups. This does not

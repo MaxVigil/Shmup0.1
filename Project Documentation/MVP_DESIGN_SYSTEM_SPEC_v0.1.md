@@ -821,6 +821,21 @@ Where this subsection conflicts with the v0.1-only compositions in §§8.12,
   the final v0.2 Pause/Evacuation affordances. No compatibility path may remain
   after `V02-WI-05` acceptance.
 
+#### v0.2 Mission Start Recovery Error
+
+- This blocking Overlay appears only when Combat initialization failed after
+  mission-start persistence and the exact-attempt cleanup could not be safely
+  committed. It is not Pause, Save Error, Save Conflict, or a terminal result.
+- The title is `Mission Start Recovery Error`. The body and sole action are
+  exactly those owned by Tactical Combat Foundation §13.2.
+- `Retry Cleanup` is the only action, uses the primary fill-width action
+  treatment, and owns initial focus. Repeated activation is single-flight.
+- Focus is trapped. Esc and Scrim are inert. Combat utility actions, Debug, and
+  gameplay are not exposed behind or alongside the Overlay.
+- A durable attempt-authority mismatch replaces it with the canonical
+  `Save Conflict` Overlay. Successful cleanup returns to Mission Details and
+  its existing `Unable to start mission.` state; it does not open a result.
+
 ## 9. Interaction states
 
 Every interactive primitive must implement every state applicable to its product behaviour:

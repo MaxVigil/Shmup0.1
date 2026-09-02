@@ -164,8 +164,8 @@ Acceptance evidence:
 **Outcome:** Interception 02 is fully playable and validates sustained mixed pressure plus Evacuation, Defeat, paid Repair, Game Over, New Game, and all corresponding atomic result UX.
 
 - **Depends on:** accepted `V02-WI-04` revision.
-- **Readiness precondition:** satisfied by Product Owner approval and canonical `V02-DEC-026` recording of exact Mission 02 Arrival Groups, Spawn Placements, RNG order, and final arrival. The implementation agent must consume that staging exactly and must not convert any residual prose into additional geometry.
-- **Owned AC:** `V02-AC-003–008` and `V02-AC-011–013` for Mission 02 runtime integration/regression; `V02-AC-014–016`; `V02-AC-022–023` for Evacuated/Defeat/Game Over.
+- **Readiness precondition:** satisfied by Product Owner approval and canonical `V02-DEC-026–031` recording of exact Mission 02 staging, Evacuation, terminal persistence, final affordances, and failed-initialization cleanup recovery. The implementation agent must consume those contracts exactly and must not convert any residual prose into additional geometry or reuse the removed free-abort seam.
+- **Owned AC:** `V02-AC-003–008` and `V02-AC-011–013` for Mission 02 runtime integration/regression; `V02-AC-014–017`; `V02-AC-020`; `V02-AC-022–023` for Evacuated/Defeat/Game Over, New Game, and failed-initialization/terminal persistence.
 - **Primary sources:** Epic §§8.2, 12–15, 17–20.
 
 IN scope:
@@ -179,6 +179,9 @@ IN scope:
 - result overlays, exit/fade sequences, New Game confirmation, exactly-once
   persistence, and the accepted Save Error/Save Conflict recovery contract for
   every terminal outcome;
+- exact-attempt Mission Start Recovery Error, single-flight cleanup retry, and
+  Save Conflict transition when failed Combat initialization cannot be safely
+  reconciled; this path must not resolve a result or expose Combat controls;
 - removal of every temporary v0.1 Defeat/Return-to-Base compatibility path
   retained by `V02-WI-04`, replacing it with the final v0.2 outcome and
   Pause/Evacuation behaviour.
@@ -198,6 +201,10 @@ Acceptance evidence:
   Evacuation Success suppression, all `300` Countdown boundaries, exactly
   `00:00`, 7/8 Credits, repeated callbacks, save failure/conflict, and refresh
   boundaries;
+- initialization-after-persist failure tests for committed, already-cleared,
+  missing-record, rejected, invalid-record, repeated-retry, and
+  attempt-authority-conflict cleanup outcomes, including exact blocking copy,
+  focus, and absence of every removed abort/control path;
 - browser playthroughs for Success, Evacuation, affordable Defeat, Game Over,
   New Game, Pause-origin cancellation, Save Error/Conflict, and focus loss;
 - `npm run verify:all` and R2 player-facing checkpoint.
