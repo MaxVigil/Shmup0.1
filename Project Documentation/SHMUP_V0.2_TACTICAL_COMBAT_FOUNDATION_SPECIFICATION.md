@@ -845,6 +845,41 @@ Defeat after affordable Repair shows:
 
 The result does not show duration, score, DPS, wave number, enemy HP, or speculative statistics. Result presentation reads committed state and is not the mutation owner.
 
+### 15.5 Evacuation affordance and confirmation
+
+**DECISION V02-DEC-030 (2026-09-02):** While Evacuation remains eligible,
+active Combat presents one destructive text Button named `Evacuate` immediately
+before the Pause and Settings icon Buttons in the top-right utility cluster. The
+final v0.2 Pause Overlay replaces `Return to Base` with the same `Evacuate`
+action and otherwise retains its `Resume`, Esc, and `P` behaviour. Selecting
+either action opens the same blocking confirmation and records whether its prior
+state was active Combat or Pause.
+
+The exact confirmation is:
+
+```text
+Evacuate?
+
+Evacuation takes 5 seconds. Combat continues during the countdown.
+
+You will retain 50% of net combat rewards. The mission will not be completed and the next mission will not unlock.
+
+[Cancel] [Confirm Evacuation]
+```
+
+`Cancel` is the first action, uses the secondary variant, and owns initial
+focus. `Confirm Evacuation` is destructive. Esc is equivalent to Cancel; Scrim
+interaction is inert. Cancel restores the exact prior active/Pause state subject
+to any browser-safety latch. Confirm begins the §13.4 commitment exactly once.
+Retained focus, repeated activation, and concurrent callbacks cannot confirm it
+twice.
+
+After confirmation, `Evacuate` is absent from running Combat and Pause. Pause and
+Settings remain available under their normal precedence, but no action can
+cancel or restart the commitment. The persistent active-Combat Evacuate Button
+has the same `2.5rem` height as the adjacent utility controls, uses approved
+Button/token states, and is separated from the icon Buttons by `space-2`.
+
 ## 16. Enemy visual and asset requirements
 
 ### 16.1 Shared production contract
@@ -1165,6 +1200,7 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-027 | Approved | confirmed Evacuation suppresses Success              | the irreversible commitment has only Defeat/Evacuated outcomes |
 | V02-DEC-028 | Approved | exact deterministic Evacuation exit                  | fade, centring, upward flight, and resize are unambiguous   |
 | V02-DEC-029 | Approved | shared terminal commitment and recovery contract     | all outcomes save exactly once before presentation or exit  |
+| V02-DEC-030 | Approved | exact Evacuation affordance and confirmation UX      | irreversible exit has safe focus, truthful copy, and one entry path |
 
 ## 23. Consistency and Definition of Ready audit
 
@@ -1191,8 +1227,10 @@ The audit found no unresolved S0–S2 product gap for `V02-WI-05` in:
 
 Mission 02 exact Arrival Groups, Spawn Placements, RNG ownership, final arrival,
 Evacuation terminal set, countdown, exit geometry, and terminal-save recovery
-are now explicit. The WI-04 temporary Defeat/Return-to-Base compatibility seam
-has one removal owner in WI-05 and is not an alternate accepted v0.2 path.
+are now explicit. The exact active/Pause affordances, confirmation copy, safe
+initial focus, cancellation return, and post-confirmation action set are also
+explicit. The WI-04 temporary Defeat/Return-to-Base compatibility seam has one
+removal owner in WI-05 and is not an alternate accepted v0.2 path.
 
 **BOUNDED FUTURE GAP:** Mission 03 retains qualitative entry and formation
 language without complete numeric regular-enemy Arrival Groups. This does not

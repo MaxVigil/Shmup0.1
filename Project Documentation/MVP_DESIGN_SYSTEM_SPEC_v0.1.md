@@ -789,6 +789,27 @@ Where this subsection conflicts with the v0.1-only compositions in §§8.12,
 - The v0.1 literal `Reward: 1 Credit` and free-Defeat presentation in §8.23 do
   not apply to v0.2.
 
+#### v0.2 Evacuation actions and confirmation
+
+- In active Combat, the exact top-right order is the destructive text Button
+  `Evacuate`, Pause icon Button, then Settings icon Button. `Evacuate` has the
+  same `2.5rem` height as the utility Buttons, uses content-driven width, and is
+  separated from the icon Buttons by `space-2`.
+- The final v0.2 Pause Overlay replaces the §8.22 `Return to Base` action with
+  destructive `Evacuate`: `Resume` remains primary on the left and `Evacuate`
+  is destructive on the right. Esc and `P` remain equivalent to `Resume`.
+- Active Combat and Pause open the same blocking `Evacuate?` confirmation owned
+  by Tactical Combat Foundation §15.5. It retains the canonical
+  `clamp(20rem, 30vw, 26rem)` Overlay width and exact approved copy.
+- `Cancel` is secondary, appears first, and owns initial focus. `Confirm
+  Evacuation` is destructive and appears second. Esc invokes Cancel; Scrim
+  interaction is inert. Sequential focus is trapped and returns according to
+  the exact prior-state rule when Cancel closes the Overlay.
+- After confirmation, no Evacuate action exists in active Combat or Pause.
+  Pause and Settings remain available under the existing single-Overlay and
+  browser-safety precedence. Retained focus or repeated activation cannot
+  confirm twice.
+
 #### Staged delivery boundary
 
 - `V02-WI-04` delivers the v0.2 Success result composition and may retain the
