@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { BASIC_DRONE, MVP_ENEMY_GROUP_SCHEDULE } from '@content/index';
+import {
+  BASIC_DRONE,
+  HUNTER_DRONE,
+  INTERCEPTION_01,
+  RANGED_DRONE,
+} from '@content/index';
 import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import { applyDebugCommand, createCombatSimulation } from './combat-simulation';
@@ -11,7 +16,6 @@ import { isEnemyFullyOutsideViewport } from './enemies';
 
 const AIRCRAFT_WIDTH = 48 * (1278 / 1231);
 const AIRCRAFT_HEIGHT = 48;
-const ENEMY_SIZE = 24;
 
 function createState(): CombatSimulationState {
   const aircraft = resolveGermanFighter(CONTENT_CATALOGUE);
@@ -24,8 +28,8 @@ function createState(): CombatSimulationState {
     weapon: MACHINE_GUN,
     projectile: PLAYER_PROJECTILE,
     missionSeed: 1234,
-    enemy: BASIC_DRONE,
-    schedule: MVP_ENEMY_GROUP_SCHEDULE,
+    mission: INTERCEPTION_01,
+    enemies: [BASIC_DRONE, RANGED_DRONE, HUNTER_DRONE],
     playerHullIntegrity: 100,
     playerMaximumHullIntegrity: aircraft.maximumHullIntegrity,
   });
@@ -105,47 +109,100 @@ describe('S13 Debug: spawn controls (Combat §11.5)', () => {
     }
     expect(enemy.entry).toBe('top');
     // Complete hitbox outside the viewport with its nearest (bottom) edge
-    // touching the top boundary (S13-WI01: the fixed position is exactly the
-    // viewport horizontal centre — no RNG is consumed, so scheduled-spawn
-    // randomness is untouched).
-    expect(enemy.centerY + ENEMY_SIZE / 2).toBe(0);
-    expect(isEnemyFullyOutsideViewport(enemy, 1280, 600, ENEMY_SIZE)).toBe(
-      true,
-    );
-    expect(enemy.centerX).toBe(640);
+    // touching the top boundary (S13-WI01: the fixed band-centre position is
+    // deterministic — no RNG is consumed, so authored-staging randomness is
+    // untouched).
+    expect(enemy.centerY + enemy.height / 2).toBe(0);
+    expect(isEnemyFullyOutsideViewport(enemy, 1280, 600)).toBe(true);
+    // The authored Top fraction (0.5) is projected to the engagement-band
+    // horizontal centre.
+    expect(enemy.centerX).toBe((state.bounds.minX + state.bounds.maxX) / 2);
     // Every spawn uses the same deterministic position: no RNG draw.
     const again = debug(spawned, {
       type: 'combat-debug/spawn-standard-enemy',
     });
-    expect(again.enemies[again.enemies.length - 1]?.centerX).toBe(640);
+    expect(again.enemies[again.enemies.length - 1]?.centerX).toBe(
+      (state.bounds.minX + state.bounds.maxX) / 2,
+    );
   });
 
-  it('Spawn Standard Enemy leaves mission time, the schedule, and final-group state unchanged', () => {
+  it('Spawn Standard Enemy leaves mission time, the authored plan, and arrival state unchanged', () => {
     const state = createState();
     const spawned = debug(state, {
       type: 'combat-debug/spawn-standard-enemy',
     });
     expect(spawned.missionStepCount).toBe(state.missionStepCount);
     expect(spawned.missionTimeSeconds).toBe(state.missionTimeSeconds);
-    expect(spawned.spawnPlan).toBe(state.spawnPlan);
-    expect(spawned.spawnPlanIndex).toBe(state.spawnPlanIndex);
-    expect(spawned.finalGroupSpawned).toBe(state.finalGroupSpawned);
+    expect(spawned.enemyPlan).toBe(state.enemyPlan);
+    expect(spawned.arrivalGroupIndex).toBe(state.arrivalGroupIndex);
   });
 
-  it('Spawn Final Group is additive, keeps existing enemies and mission time, and disables itself', () => {
+  it('Spawn Encounter is additive, keeps existing enemies and mission time, and is a strict no-op once spawned', () => {
     const state = createState();
     const forced = debug(state, {
-      type: 'combat-debug/spawn-final-group',
+      type: 'combat-debug/spawn-encounter',
+      encounterId: 'interception-01-e1',
     });
-    expect(forced.finalGroupSpawned).toBe(true);
-    expect(forced.spawnPlanIndex).toBe(forced.spawnPlan.length);
-    expect(forced.enemies.length).toBeGreaterThan(state.enemies.length);
+    // e1 (10 s) is the authored opening Encounter: 4 Basics at the authored
+    // placements, appended without advancing mission time or consuming the
+    // mission-data stream's Hunter draws. The spawned groups are consumed by
+    // removal from the plan (the cursor points at the first still-scheduled
+    // group).
+    expect(forced.enemies.length).toBe(state.enemies.length + 4);
     expect(forced.missionTimeSeconds).toBe(state.missionTimeSeconds);
-    // One-use: a repeated command is a strict no-op.
+    expect(forced.arrivalGroups).toHaveLength(state.arrivalGroups.length - 1);
+    expect(
+      forced.arrivalGroups.every(
+        (group) => group.encounterId !== 'interception-01-e1',
+      ),
+    ).toBe(true);
+    // One-use: a repeated command for the already-spawned Encounter is inert.
     const repeated = debug(forced, {
-      type: 'combat-debug/spawn-final-group',
+      type: 'combat-debug/spawn-encounter',
+      encounterId: 'interception-01-e1',
     });
     expect(repeated.enemies).toBe(forced.enemies);
+  });
+
+  it('Spawn Encounter materialises an OUT-OF-ORDER encounter (e5) exactly (V02-WI-04 C03)', () => {
+    const state = createState();
+    const forced = debug(state, {
+      type: 'combat-debug/spawn-encounter',
+      encounterId: 'interception-01-e5',
+    });
+    // e5 is the final (03:10) Encounter: 3 Basic + 1 Ranged + 1 Hunter. The
+    // previous implementation silently no-opped here (the cursor only walked
+    // the next scheduled encounter), which is why the C01 visual evidence was
+    // false-green.
+    expect(forced.enemies.length).toBe(state.enemies.length + 5);
+    const roles = forced.enemies
+      .slice(state.enemies.length)
+      .map((enemy) => enemy.type)
+      .sort();
+    expect(roles).toEqual([
+      'basic-drone',
+      'basic-drone',
+      'basic-drone',
+      'hunter-drone',
+      'ranged-drone',
+    ]);
+    expect(
+      forced.arrivalGroups.every(
+        (group) => group.encounterId !== 'interception-01-e5',
+      ),
+    ).toBe(true);
+    // The natural schedule never duplicates the authored group.
+    const repeated = debug(forced, {
+      type: 'combat-debug/spawn-encounter',
+      encounterId: 'interception-01-e5',
+    });
+    expect(repeated.enemies).toBe(forced.enemies);
+    // An unknown encounter id remains a strict no-op.
+    const unknown = debug(state, {
+      type: 'combat-debug/spawn-encounter',
+      encounterId: 'interception-01-missing',
+    });
+    expect(unknown.enemies).toBe(state.enemies);
   });
 });
 
@@ -157,8 +214,14 @@ describe('S13 Debug: forced results reuse the S12 terminal path (Combat §11.6)'
     };
     const won = debug(state, { type: 'combat-debug/win-mission' });
     expect(won.terminalResult).toEqual({ kind: 'success' });
-    expect(won.finalGroupSpawned).toBe(true);
-    expect(won.spawnPlanIndex).toBe(won.spawnPlan.length);
+    // V02-WI-04 C01: the Debug command must NOT complete the deterministic
+    // centre-and-up exit. The Debug pause is closed through the authoritative
+    // lifecycle so forced Success runs the same committed 0.5 s centre phase
+    // and 60% VH/s upward exit as natural Success before result presentation;
+    // the exit still waits for the campaign transaction (`authorizeSuccessExit`).
+    expect(won.successExitPhase).toBe('centre');
+    expect(won.successExitAuthorized).toBe(false);
+    expect(won.arrivalGroupIndex).toBe(won.arrivalGroups.length);
     expect(won.enemies).toHaveLength(0);
     // Terminal freeze: no further advancement or Debug mutation.
     expect(debug(won, { type: 'combat-debug/win-mission' })).toBe(won);

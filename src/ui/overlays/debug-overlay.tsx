@@ -56,11 +56,23 @@ export function DebugOverlay({
   }
 
   const godMode = observability?.godModeEnabled ?? false;
-  const finalGroupSpawned = observability?.finalGroupSpawned ?? false;
   const act = (command: CombatDebugCommand): void => {
     submitDebugAction(command);
     refresh();
   };
+
+  const activeText =
+    observability === null
+      ? '—'
+      : formatRoleCounts(observability.activeEnemiesByType);
+  const destroyedText =
+    observability === null
+      ? '—'
+      : formatRoleCounts(observability.destroyedEnemiesByType);
+  const escapedText =
+    observability === null
+      ? '—'
+      : formatRoleCounts(observability.escapedEnemiesByType);
 
   return (
     <Overlay
@@ -81,11 +93,31 @@ export function DebugOverlay({
     >
       <div className="ds-debug-overlay__section">
         <FieldRow
-          label="Mission Time"
+          label="Combat Seed"
+          value={
+            observability === null ? '—' : String(observability.combatSeed)
+          }
+        />
+        <FieldRow
+          label="Mission Clock"
           value={
             observability === null
               ? '—'
               : `${observability.missionTimeSeconds.toFixed(1)} s`
+          }
+        />
+        <FieldRow
+          label="Combat Countdown"
+          value={
+            observability === null ? '—' : `${observability.countdownSeconds} s`
+          }
+        />
+        <FieldRow
+          label="Current Encounter"
+          value={
+            observability === null
+              ? '—'
+              : (observability.currentEncounterId ?? '—')
           }
         />
         <FieldRow
@@ -96,34 +128,23 @@ export function DebugOverlay({
               : String(observability.playerHullIntegrity)
           }
         />
+        <FieldRow label="Active Enemies" value={activeText} />
+        <FieldRow label="Destroyed Enemies" value={destroyedText} />
+        <FieldRow label="Escaped Enemies" value={escapedText} />
         <FieldRow
-          label="Active Enemies"
-          value={
-            observability === null ? '—' : String(observability.activeEnemies)
-          }
-        />
-        <FieldRow
-          label="Destroyed Enemies"
+          label="Combat Rewards"
           value={
             observability === null
               ? '—'
-              : String(observability.destroyedEnemies)
+              : String(observability.pendingCombatRewards)
           }
         />
         <FieldRow
-          label="Escaped Enemies"
-          value={
-            observability === null ? '—' : String(observability.escapedEnemies)
-          }
-        />
-        <FieldRow
-          label="Final Group Spawned"
+          label="Escape Penalties"
           value={
             observability === null
               ? '—'
-              : observability.finalGroupSpawned
-                ? 'Yes'
-                : 'No'
+              : String(observability.pendingEscapePenalties)
           }
         />
       </div>
@@ -159,14 +180,29 @@ export function DebugOverlay({
           variant="secondary"
           onClick={() => act({ type: 'combat-debug/spawn-standard-enemy' })}
         >
-          Spawn Standard Enemy
+          Spawn Basic
         </Button>
         <Button
           variant="secondary"
-          disabled={finalGroupSpawned}
-          onClick={() => act({ type: 'combat-debug/spawn-final-group' })}
+          onClick={() =>
+            act({
+              type: 'combat-debug/spawn-encounter',
+              encounterId: 'interception-01-e1',
+            })
+          }
         >
-          Spawn Final Group
+          Spawn E1
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() =>
+            act({
+              type: 'combat-debug/spawn-encounter',
+              encounterId: 'interception-01-e5',
+            })
+          }
+        >
+          Spawn E5
         </Button>
       </div>
       <Divider />
@@ -186,4 +222,20 @@ export function DebugOverlay({
       </div>
     </Overlay>
   );
+}
+
+/** Formats a per-role count record as `Basic 3 · Ranged 1` (zero roles
+ *  omitted; an all-zero record shows `0`). */
+function formatRoleCounts(counts: Readonly<Record<string, number>>): string {
+  const parts: string[] = [];
+  if ((counts['basic-drone'] ?? 0) > 0) {
+    parts.push(`Basic ${counts['basic-drone']}`);
+  }
+  if ((counts['ranged-drone'] ?? 0) > 0) {
+    parts.push(`Ranged ${counts['ranged-drone']}`);
+  }
+  if ((counts['hunter-drone'] ?? 0) > 0) {
+    parts.push(`Hunter ${counts['hunter-drone']}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : '0';
 }

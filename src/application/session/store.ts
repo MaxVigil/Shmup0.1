@@ -205,6 +205,16 @@ export function sessionReducer(
             kind: 'success',
             missionInstanceOrdinal: action.result.missionInstanceOrdinal,
             creditsEarned: action.result.creditsEarned,
+            // V02-WI-04: presentation-only v0.2 Success run facts relayed from
+            // the authoritative simulation; the overlay reads committed values.
+            combatRewards: action.result.combatRewards,
+            escapePenalties: action.result.escapePenalties,
+            netCombatReward: action.result.netCombatReward,
+            completionReward: action.result.completionReward,
+            newlyUnlockedMissionId: action.result.newlyUnlockedMissionId,
+            destroyedCounts: action.result.destroyedCounts,
+            escapedCounts: action.result.escapedCounts,
+            unlockedMissionIdsAfter: [...action.result.unlockedMissionIdsAfter],
           },
           combatLifecycle: IDLE_COMBAT_LIFECYCLE,
         };
@@ -238,7 +248,10 @@ export function sessionReducer(
     case 'combat-lifecycle/close-settings':
     case 'combat-lifecycle/open-debug':
     case 'combat-lifecycle/close-debug':
-    case 'combat-lifecycle/browser-safety-event': {
+    case 'combat-lifecycle/browser-safety-event':
+    case 'combat-terminal/save-error':
+    case 'combat-terminal/save-conflict':
+    case 'combat-terminal/recover': {
       // S13 lifecycle commands are meaningful only during an Active Mission
       // and are inert before one starts, after it resolves, and while a
       // committed Mission Result is pending (Mission Result remains higher

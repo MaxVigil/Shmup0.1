@@ -1,486 +1,423 @@
 import { describe, expect, it } from 'vitest';
-import { BASIC_DRONE, MVP_ENEMY_GROUP_SCHEDULE } from '@content/index';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import {
-  advanceSimulationFrames,
+  AIRCRAFT_WIDTH,
+  AIRCRAFT_HEIGHT,
+  TEST_MISSION_SEED,
+} from '@test-support/domain';
+import {
   createCombatSimulation,
-  createCombatSimulationRuntime,
-  forceFinalGroupSpawn,
   stepCombatSimulation,
-  submitCombatCommand,
   FIXED_STEP_SECONDS,
 } from './combat-simulation';
 import type { CombatSimulationState } from './combat-simulation';
-import { resolveBasicDrone, resolveMissionSchedule } from './combat-session';
-import { aircraftCollisionAabb } from './collision-geometry';
-import { moveEnemy, spawnEnemy } from './enemies';
-import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
+import { spawnEnemyFromPlacement, stepEnemy } from './enemies';
+import type { CombatEnemy, EnemyStepInput } from './enemies';
 
-// 1280x600: short side 600 → aircraft 48 high; drone square 24; drone speed 72 px/s.
-const AIRCRAFT_WIDTH = 48 * (1278 / 1231);
-const AIRCRAFT_HEIGHT = 48;
+/**
+ * V02-WI-04 regular-enemy simulation evidence (Epic §9, V02-AC-006–008,
+ * V02-DEC-019/020): the authoritative Basic/Ranged/Hunter states carry their
+ * complete rendered bounds (the AABB used for spawn, activation, collision,
+ * and escape), the authored-staging spawn places the nearest edge exactly on
+ * the boundary, Ranged activates and counts its first shot from full-bounds
+ * entry, and the Hunter Side Entry → Approach → Commitment machine is exact.
+ */
+
 const VIEWPORT = { width: 1280, height: 600 };
-const SEED = 1234;
-const SPEED_PER_STEP = 72 * FIXED_STEP_SECONDS; // 1.2 px/step
 
-function createState(
-  missionSeed: number = SEED,
-  viewport: { width: number; height: number } = VIEWPORT,
-): CombatSimulationState {
+function createState(): CombatSimulationState {
+  const aircraft = CONTENT_CATALOGUE.aircraft[0]!;
   return createCombatSimulation({
     initialMode: 'mouse',
-    viewportWidth: viewport.width,
-    viewportHeight: viewport.height,
+    viewportWidth: VIEWPORT.width,
+    viewportHeight: VIEWPORT.height,
     aircraftWidth: AIRCRAFT_WIDTH,
     aircraftHeight: AIRCRAFT_HEIGHT,
-    weapon: MACHINE_GUN,
-    projectile: PLAYER_PROJECTILE,
-    missionSeed,
-    enemy: BASIC_DRONE,
-    schedule: MVP_ENEMY_GROUP_SCHEDULE,
+    weapon: CONTENT_CATALOGUE.weapons[0]!,
+    projectile: CONTENT_CATALOGUE.projectile,
+    missionSeed: TEST_MISSION_SEED,
+    mission: CONTENT_CATALOGUE.missions[0]!,
+    enemies: CONTENT_CATALOGUE.enemies,
     playerHullIntegrity: 100,
-    playerMaximumHullIntegrity: 100,
+    playerMaximumHullIntegrity: aircraft.maximumHullIntegrity,
   });
 }
 
-function stepCount(
+function step(
   state: CombatSimulationState,
-  count: number,
+  seconds: number,
 ): CombatSimulationState {
   let current = state;
-  for (let index = 0; index < count; index += 1) {
+  const steps = Math.round(seconds / FIXED_STEP_SECONDS);
+  for (let index = 0; index < steps; index += 1) {
     current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
   }
   return current;
 }
 
-function stepSeconds(
-  state: CombatSimulationState,
-  seconds: number,
-): CombatSimulationState {
-  return stepCount(state, Math.round(seconds / FIXED_STEP_SECONDS));
+function stepInput(overrides: Partial<EnemyStepInput> = {}): EnemyStepInput {
+  return {
+    movementSpeedPx: 600 * 0.12,
+    committedSpeedPx: 600 * 0.26,
+    viewportWidth: VIEWPORT.width,
+    viewportHeight: VIEWPORT.height,
+    stepSeconds: FIXED_STEP_SECONDS,
+    aircraftCenterX: 640,
+    aircraftCenterY: 480,
+    ...overrides,
+  };
 }
 
-function submit(
-  state: CombatSimulationState,
-  command: Parameters<typeof submitCombatCommand>[1],
-): CombatSimulationState {
-  return submitCombatCommand(state, command);
+function enemyDef(type: 'basic-drone' | 'ranged-drone' | 'hunter-drone') {
+  const definition = CONTENT_CATALOGUE.enemies.find(
+    (enemy) => enemy.type === type,
+  );
+  if (definition === undefined) {
+    throw new Error(`Missing definition for ${type}`);
+  }
+  return definition;
 }
 
-describe('S10 initialization and schedule', () => {
-  it('spawns the 0 s regular group as part of Combat initialization (AC-015, AC-074)', () => {
-    const state = createState();
-    expect(state.missionTimeSeconds).toBe(0);
-    expect(state.enemySize).toBe(24);
-    expect(state.enemySpeedPxPerSecond).toBeCloseTo(72, 6);
-    expect(state.enemyType).toBe('basic-drone');
-    expect(state.enemyHullIntegrity).toBe(3);
-    expect(state.enemies).toHaveLength(3);
-    expect(state.enemies.map((enemy) => enemy.id)).toEqual([0, 1, 2]);
-    for (const enemy of state.enemies) {
-      expect(enemy.hullIntegrity).toBe(3);
-      expect(enemy.hasEnteredVisibleArea).toBe(false);
-    }
-    expect(state.spawnPlanIndex).toBe(1);
-    expect(state.nextEnemyId).toBe(3);
-    expect(state.finalGroupSpawned).toBe(false);
-  });
-
-  it('keeps extreme Top Entry positions inside the reachable firing band (AC-083)', () => {
-    // These deterministic seeds put the first planned Top Entry respectively
-    // near the raw full-viewport left and right extremes. The same RNG draw is
-    // remapped into the aircraft's reachable centre range.
-    const left = createState(77379);
-    const right = createState(27233);
-    const leftTop = left.enemies[0]!;
-    const rightTop = right.enemies[0]!;
-    expect(leftTop.entry).toBe('top');
-    expect(rightTop.entry).toBe('top');
-    expect(leftTop.centerX).toBeGreaterThanOrEqual(left.bounds.minX);
-    expect(leftTop.centerX).toBeLessThanOrEqual(left.bounds.maxX);
-    expect(rightTop.centerX).toBeGreaterThanOrEqual(right.bounds.minX);
-    expect(rightTop.centerX).toBeLessThanOrEqual(right.bounds.maxX);
-    expect(leftTop.centerX).toBeCloseTo(left.bounds.minX, 1);
-    expect(rightTop.centerX).toBeCloseTo(right.bounds.maxX, 0);
-  });
-
-  it('advances mission time only through executed fixed steps', () => {
-    let state = createState();
-    state = stepCount(state, 1);
-    expect(state.missionTimeSeconds).toBeCloseTo(1 / 60, 12);
-    state = stepCount(state, 1);
-    expect(state.missionTimeSeconds).toBeCloseTo(2 / 60, 12);
-    // Input commands never advance mission time.
-    const moved = submit(state, {
-      type: 'combat/pointer-move',
-      x: 700,
-      y: 300,
+describe('authored-staging spawn (V02-DEC-018)', () => {
+  it('places a Top entry fully above with its bottom edge touching the top boundary', () => {
+    const def = enemyDef('basic-drone');
+    const bounds = createState().enemyBoundsByType['basic-drone'];
+    const enemy = spawnEnemyFromPlacement({
+      id: 0,
+      type: 'basic-drone',
+      hullIntegrity: def.maximumHullIntegrity,
+      width: bounds.width,
+      height: bounds.height,
+      placement: { kind: 'top', engagementBandFraction: 0.5 },
+      boundsMinX: 10,
+      boundsMaxX: 1270,
+      viewportWidth: VIEWPORT.width,
+      viewportHeight: VIEWPORT.height,
+      ordinal: 0,
     });
-    expect(moved.missionTimeSeconds).toBe(state.missionTimeSeconds);
+    expect(enemy.centerY + bounds.height / 2).toBeCloseTo(0, 6);
+    expect(enemy.centerX).toBeGreaterThan(10);
+    expect(enemy.centerX).toBeLessThan(1270);
+    expect(enemy.activated).toBe(false);
+    expect(enemy.hasEnteredVisibleArea).toBe(false);
   });
 
-  it('spawns each 10 s group at its exact mission-time instant with all members together (AC-015, AC-074)', () => {
-    const before = stepCount(createState(), 599); // mission time 9.98333… s
-    expect(before.nextEnemyId).toBe(3);
-    const atTen = stepCount(before, 1); // mission time reaches exactly 10 s
-    expect(atTen.missionTimeSeconds).toBeCloseTo(10, 10);
-    expect(atTen.nextEnemyId).toBe(6); // exactly one group of 3 in one step
-    expect(atTen.enemies.length).toBe(before.enemies.length + 3);
-  });
-
-  it('spawns all 33 regular drones by 100 s and the 5 final drones at 110 s (AC-016, AC-028)', () => {
-    const atHundred = stepSeconds(createState(), 100);
-    expect(atHundred.nextEnemyId).toBe(33);
-    expect(atHundred.finalGroupSpawned).toBe(false);
-    const atFinal = stepSeconds(createState(), 110);
-    expect(atFinal.nextEnemyId).toBe(38);
-    expect(atFinal.finalGroupSpawned).toBe(true);
-    // No later schedule remains.
-    const later = stepSeconds(atFinal, 10);
-    expect(later.nextEnemyId).toBe(38);
-    expect(later.spawnPlanIndex).toBe(later.spawnPlan.length);
-  });
-
-  it('continues beyond 120 s while active enemies remain (AC-030)', () => {
-    const state = stepSeconds(createState(), 120);
-    expect(state.finalGroupSpawned).toBe(true);
-    expect(state.spawnPlanIndex).toBe(state.spawnPlan.length);
-    expect(state.enemies.length).toBeGreaterThan(0);
-    const moved = stepSeconds(state, 1);
-    // Remaining active enemies keep moving deterministically.
-    expect(moved.enemies.length).toBeGreaterThan(0);
-    expect(moved.enemies[0]!.centerY).toBeGreaterThan(
-      state.enemies[0]!.centerY,
-    );
-  });
-
-  it('keeps the active enemy collection bounded across the whole schedule (performance)', () => {
-    // The per-frame enemy collection and stable-ID visual map are linear in
-    // the active count; drones live ~9-13 s so at most a few groups overlap.
-    let state = createState();
-    let peak = 0;
-    for (let index = 0; index <= 6600; index += 60) {
-      state = stepCount(state, 60);
-      peak = Math.max(peak, state.enemies.length);
+  it('places a seeded upper-left Hunter outside the left boundary at 20% VH', () => {
+    const def = enemyDef('hunter-drone');
+    const bounds = createState().enemyBoundsByType['hunter-drone'];
+    const enemy = spawnEnemyFromPlacement({
+      id: 0,
+      type: 'hunter-drone',
+      hullIntegrity: def.maximumHullIntegrity,
+      width: bounds.width,
+      height: bounds.height,
+      placement: { kind: 'side', side: 'upper-left', yViewportFraction: 0.2 },
+      viewportWidth: VIEWPORT.width,
+      viewportHeight: VIEWPORT.height,
+      ordinal: 0,
+    });
+    expect(enemy.centerX + bounds.width / 2).toBeCloseTo(0, 6);
+    expect(enemy.centerY).toBeCloseTo(0.2 * VIEWPORT.height, 6);
+    if (enemy.kind !== 'hunter') {
+      throw new Error('Expected a Hunter enemy from the Hunter placement.');
     }
-    expect(peak).toBeGreaterThan(3);
-    expect(peak).toBeLessThanOrEqual(20);
-  });
-
-  it('never bursts groups on a long frame (fixed-step cap, AC-015)', () => {
-    // mission time 9.98333… s: the 10 s group is the only one due in 4 steps.
-    const state = stepCount(createState(), 599);
-    const result = advanceSimulationFrames(state, 2, 0);
-    expect(result.accumulatorSeconds).toBe(0);
-    expect(result.state.nextEnemyId).toBe(6); // exactly one group, no burst
+    expect(enemy.phase).toBe('entering');
   });
 });
 
-describe('S10 drone movement, entry, and escape', () => {
-  it('flips the permanent entered latch when any hitbox portion becomes visible (AC-075)', () => {
-    const created = createState();
-    // Fully outside at creation: no portion visible.
-    expect(created.enemies.every((enemy) => !enemy.hasEnteredVisibleArea)).toBe(
-      true,
-    );
-    const entered = stepCount(created, 1);
-    expect(entered.enemies.every((enemy) => enemy.hasEnteredVisibleArea)).toBe(
-      true,
-    );
-  });
-
-  it('moves top entries straight down at constant speed with a fixed x (AC-009)', () => {
-    let state = stepCount(createState(), 1);
-    const top = state.enemies.find((enemy) => enemy.entry === 'top')!;
-    const startX = top.centerX;
-    const startY = top.centerY;
-    state = stepCount(state, 1);
-    const movedTop = state.enemies.find((enemy) => enemy.id === top.id)!;
-    expect(movedTop.centerX).toBe(startX);
-    expect(movedTop.centerY - startY).toBeCloseTo(SPEED_PER_STEP, 12);
-  });
-
-  it('resolves the side waypoint without overshoot or oscillation, then descends (AC-017)', () => {
-    const state = stepCount(createState(), 1);
-    const side = state.enemies.find((enemy) => enemy.entry === 'upper-right')!;
-    const waypointX = side.waypointX!;
-    const waypointY = side.waypointY!;
-    const distance = Math.hypot(
-      waypointX - side.centerX,
-      waypointY - side.centerY,
-    );
-    const arrivalSteps = Math.ceil(distance / SPEED_PER_STEP);
-    const beforeArrival = stepCount(state, arrivalSteps - 1);
-    const before = beforeArrival.enemies.find((enemy) => enemy.id === side.id)!;
-    expect(before.waypointReached).toBe(false);
-    // The drone never overshoots or oscillates: it stays on the entry axis
-    // side until the arrival step, then descends straight down.
-    const atArrival = stepCount(beforeArrival, 1);
-    const arrived = atArrival.enemies.find((enemy) => enemy.id === side.id)!;
-    expect(arrived.waypointReached).toBe(true);
-    expect(arrived.centerX).toBeCloseTo(waypointX, 6);
-    const distanceToWaypoint = Math.hypot(
-      waypointX - before.centerX,
-      waypointY - before.centerY,
-    );
-    const remainingTravel = SPEED_PER_STEP - distanceToWaypoint;
-    expect(remainingTravel).toBeGreaterThanOrEqual(0);
-    expect(arrived.centerY).toBeCloseTo(waypointY + remainingTravel, 6);
-    const descending = stepCount(atArrival, 5);
-    const descended = descending.enemies.find((enemy) => enemy.id === side.id)!;
-    expect(descended.centerX).toBeCloseTo(waypointX, 6);
-    expect(descended.centerY).toBeCloseTo(
-      arrived.centerY + 5 * SPEED_PER_STEP,
-      6,
-    );
-  });
-
-  it('removes a drone as Escaped once its full bounds exit the bottom (AC-018, AC-029)', () => {
-    const partiallyInside = stepCount(createState(), 519);
-    expect(partiallyInside.enemies.some((enemy) => enemy.id === 0)).toBe(true);
-    const escaped = stepCount(createState(), 520);
-    expect(escaped.enemies.some((enemy) => enemy.id === 0)).toBe(false);
-  });
-
-  it('never lets a drone escape during initial entry', () => {
-    const state = stepCount(createState(), 20);
-    expect(state.enemies).toHaveLength(3); // no 0s-group member removed early
-  });
-
-  it('removes an entered drone after complete exit through any viewport boundary', () => {
-    const base = {
-      ...spawnEnemy(
-        100,
-        'basic-drone',
-        3,
-        'top',
-        0.5,
-        null,
-        null,
-        1280,
-        600,
-        24,
-      ),
-      waypointReached: true,
-      hasEnteredVisibleArea: true,
-    };
-    const fullyOutside = [
-      { ...base, centerX: -12, centerY: 300 },
-      { ...base, centerX: 1292, centerY: 300 },
-      { ...base, centerX: 640, centerY: -13.2 },
-      { ...base, centerX: 640, centerY: 612 },
-    ];
-    for (const enemy of fullyOutside) {
-      expect(
-        moveEnemy(enemy, 72, FIXED_STEP_SECONDS, 1280, 600, 24),
-      ).toBeNull();
-    }
-  });
-
-  it('lets overlapping drones coexist without separation or trajectory change (AC-051)', () => {
-    const one = spawnEnemy(
-      0,
-      'basic-drone',
-      3,
-      'top',
-      0.5,
-      null,
-      null,
-      1280,
-      600,
-      24,
-    );
-    const two = spawnEnemy(
-      1,
-      'basic-drone',
-      3,
-      'top',
-      0.5,
-      null,
-      null,
-      1280,
-      600,
-      24,
-    );
-    const movedOne = moveEnemy(one, 72, FIXED_STEP_SECONDS, 1280, 600, 24)!;
-    const movedTwo = moveEnemy(two, 72, FIXED_STEP_SECONDS, 1280, 600, 24)!;
-    expect(movedTwo.centerX).toBe(movedOne.centerX);
-    expect(movedTwo.centerY).toBe(movedOne.centerY);
-  });
-});
-
-describe('S10 resize, seams, and hardening', () => {
-  it('proportionally reprojects active drones and waypoints and recalculates geometry/speed on resize', () => {
-    const before = stepCount(createState(), 200);
-    const resized = submit(before, {
-      type: 'combat/viewport-resize',
-      width: 800,
-      height: 400,
-      aircraftWidth: 32 * (1278 / 1231),
-      aircraftHeight: 32,
+describe('Basic Drone (Epic §9.1)', () => {
+  it('travels straight down at 12% VH/s and escapes only after entering', () => {
+    let enemy = spawnEnemyFromPlacement({
+      id: 0,
+      type: 'basic-drone',
+      hullIntegrity: 3,
+      width: 24,
+      height: 24,
+      placement: { kind: 'top', engagementBandFraction: 0.5 },
+      boundsMinX: 10,
+      boundsMaxX: 1270,
+      viewportWidth: VIEWPORT.width,
+      viewportHeight: VIEWPORT.height,
+      ordinal: 0,
     });
-    expect(resized.enemySize).toBeCloseTo(16, 6);
-    expect(resized.enemySpeedPxPerSecond).toBeCloseTo(48, 6);
-    expect(resized.enemies).toHaveLength(before.enemies.length);
-    for (let index = 0; index < before.enemies.length; index += 1) {
-      const oldEnemy = before.enemies[index];
-      const newEnemy = resized.enemies[index];
-      expect(newEnemy!.id).toBe(oldEnemy!.id);
-      if (oldEnemy!.entry === 'top') {
-        const oldFraction =
-          (oldEnemy!.centerX - before.bounds.minX) /
-          (before.bounds.maxX - before.bounds.minX);
-        const newFraction =
-          (newEnemy!.centerX - resized.bounds.minX) /
-          (resized.bounds.maxX - resized.bounds.minX);
-        expect(newFraction).toBeCloseTo(oldFraction, 6);
-        expect(newEnemy!.centerX).toBeGreaterThanOrEqual(resized.bounds.minX);
-        expect(newEnemy!.centerX).toBeLessThanOrEqual(resized.bounds.maxX);
-      } else {
-        expect(newEnemy!.centerX).toBeCloseTo(oldEnemy!.centerX * 0.625, 6);
+    const input = stepInput();
+    const moved = stepEnemy(enemy, input);
+    enemy = moved.enemy as CombatEnemy;
+    expect(enemy.centerY).toBeCloseTo(-12 + 72 / 60, 1);
+    expect(enemy.hasEnteredVisibleArea).toBe(false);
+    let escaped = false;
+    for (let index = 0; index < 600; index += 1) {
+      const result = stepEnemy(enemy, input);
+      if (result.enemy === null) {
+        escaped = true;
+        break;
       }
-      expect(newEnemy!.centerY).toBeCloseTo(oldEnemy!.centerY * (2 / 3), 6);
-      expect(newEnemy!.waypointX).toBe(
-        oldEnemy!.waypointX === null ? null : oldEnemy!.waypointX * 0.625,
-      );
+      enemy = result.enemy;
     }
-  });
-
-  it('keeps a left-edge Top Entry reachable after an aspect-ratio resize (AC-083)', () => {
-    const before = createState(77379);
-    const topBefore = before.enemies[0]!;
-    expect(topBefore.entry).toBe('top');
-
-    const resized = submit(before, {
-      type: 'combat/viewport-resize',
-      width: 1500,
-      height: 800,
-      aircraftWidth: 64 * (1278 / 1231),
-      aircraftHeight: 64,
-    });
-    const topAfter = resized.enemies.find(
-      (enemy) => enemy.id === topBefore.id,
-    )!;
-
-    // A plain width ratio would put this enemy left of the new aircraft bound.
-    expect(topBefore.centerX * (1500 / 1280)).toBeLessThan(resized.bounds.minX);
-    expect(topAfter.centerX).toBeGreaterThanOrEqual(resized.bounds.minX);
-    expect(topAfter.centerX).toBeLessThanOrEqual(resized.bounds.maxX);
-    expect(topAfter.centerX).toBeCloseTo(resized.bounds.minX, 1);
-  });
-
-  it('forceFinalGroupSpawn is additive, cancels future spawns, and runs exactly once (S13 seam)', () => {
-    const forced = forceFinalGroupSpawn(createState());
-    expect(forced.finalGroupSpawned).toBe(true);
-    expect(forced.enemies).toHaveLength(8); // 3 regular + 5 final
-    expect(forced.enemies.slice(3).map((enemy) => enemy.id)).toEqual([
-      3, 4, 5, 6, 7,
-    ]);
-    // AC-042: existing enemies remain, while every future scheduled spawn is
-    // cancelled without changing the mission clock.
-    expect(forced.missionStepCount).toBe(0);
-    expect(forced.spawnPlanIndex).toBe(forced.spawnPlan.length);
-    // Idempotent: a second force is a strict no-op.
-    expect(forceFinalGroupSpawn(forced)).toBe(forced);
-    // Neither regular nor final groups spawn later: only the initial three and
-    // the five forced drones have ever been assigned ids.
-    const later = stepSeconds(forced, 120);
-    expect(later.nextEnemyId).toBe(8);
-  });
-
-  it('hardens the construction boundary against invalid seed/enemy/schedule input', () => {
-    for (const missionSeed of [
-      Number.NaN,
-      -1,
-      1.5,
-      0x100000000,
-      Number.POSITIVE_INFINITY,
-    ]) {
-      expect(() => createState(missionSeed)).toThrow(/seed/);
-    }
-    const badEnemy = {
-      ...BASIC_DRONE,
-      movementSpeedViewportHeightPerSecond: 0,
-    };
-    expect(() =>
-      createCombatSimulation({
-        initialMode: 'mouse',
-        viewportWidth: 1280,
-        viewportHeight: 600,
-        aircraftWidth: AIRCRAFT_WIDTH,
-        aircraftHeight: AIRCRAFT_HEIGHT,
-        weapon: MACHINE_GUN,
-        projectile: PLAYER_PROJECTILE,
-        missionSeed: SEED,
-        enemy: badEnemy,
-        schedule: MVP_ENEMY_GROUP_SCHEDULE,
-        playerHullIntegrity: 100,
-        playerMaximumHullIntegrity: 100,
-      }),
-    ).toThrow(/enemy/);
-    const badSchedule = {
-      ...MVP_ENEMY_GROUP_SCHEDULE,
-      final: { timeSeconds: -5, dronesPerGroup: 5 },
-    };
-    expect(() =>
-      createCombatSimulation({
-        initialMode: 'mouse',
-        viewportWidth: 1280,
-        viewportHeight: 600,
-        aircraftWidth: AIRCRAFT_WIDTH,
-        aircraftHeight: AIRCRAFT_HEIGHT,
-        weapon: MACHINE_GUN,
-        projectile: PLAYER_PROJECTILE,
-        missionSeed: SEED,
-        enemy: BASIC_DRONE,
-        schedule: badSchedule,
-        playerHullIntegrity: 100,
-        playerMaximumHullIntegrity: 100,
-      }),
-    ).toThrow(/schedule/);
-  });
-
-  it('exposes the approved centred aircraft hitbox geometry (AC-049, §8.6)', () => {
-    const box = aircraftCollisionAabb(
-      640,
-      480,
-      AIRCRAFT_WIDTH,
-      AIRCRAFT_HEIGHT,
-    );
-    expect(box.width).toBeCloseTo(AIRCRAFT_WIDTH * 0.6, 6);
-    expect(box.height).toBeCloseTo(AIRCRAFT_HEIGHT * 0.7, 6);
-    expect(box.x).toBeCloseTo(640 - (AIRCRAFT_WIDTH * 0.6) / 2, 6);
-    expect(box.y).toBeCloseTo(480 - (AIRCRAFT_HEIGHT * 0.7) / 2, 6);
-  });
-
-  it('freezes enemies after runtime disposal (cleanup contract)', () => {
-    const runtime = createCombatSimulationRuntime({
-      initialMode: 'mouse',
-      viewportWidth: 1280,
-      viewportHeight: 600,
-      aircraftWidth: AIRCRAFT_WIDTH,
-      aircraftHeight: AIRCRAFT_HEIGHT,
-      weapon: MACHINE_GUN,
-      projectile: PLAYER_PROJECTILE,
-      missionSeed: SEED,
-      enemy: BASIC_DRONE,
-      schedule: MVP_ENEMY_GROUP_SCHEDULE,
-      playerHullIntegrity: 100,
-      playerMaximumHullIntegrity: 100,
-    });
-    runtime.advance(0.1);
-    const before = runtime.getState();
-    runtime.dispose();
-    const after = runtime.advance(1);
-    expect(after).toBe(before);
-    expect(after.enemies).toBe(before.enemies);
+    expect(escaped).toBe(true);
   });
 });
 
-describe('S10 content seam resolvers', () => {
-  it('resolves the Basic Drone and the temporary seam schedule', () => {
-    expect(resolveBasicDrone(CONTENT_CATALOGUE)).toBe(BASIC_DRONE);
-    expect(resolveMissionSchedule()).toBe(MVP_ENEMY_GROUP_SCHEDULE);
+describe('Ranged Drone (Epic §9.2, V02-AC-006)', () => {
+  it('becomes authoritative and starts its 180-step first-shot timer on full-bounds entry', () => {
+    const def = enemyDef('ranged-drone');
+    let enemy = spawnEnemyFromPlacement({
+      id: 0,
+      type: 'ranged-drone',
+      hullIntegrity: def.maximumHullIntegrity,
+      width: 30,
+      height: 30,
+      placement: { kind: 'top', engagementBandFraction: 0.5 },
+      boundsMinX: 10,
+      boundsMaxX: 1270,
+      viewportWidth: VIEWPORT.width,
+      viewportHeight: VIEWPORT.height,
+      ordinal: 6,
+    });
+    expect(enemy.activated).toBe(false);
+    const input = stepInput({ movementSpeedPx: 600 * 0.09 });
+    let newlyActivated = false;
+    for (let index = 0; index < 120; index += 1) {
+      const result = stepEnemy(enemy, input);
+      if (result.newlyActivated) {
+        newlyActivated = true;
+      }
+      enemy = result.enemy as CombatEnemy;
+      if (enemy.activated) {
+        break;
+      }
+    }
+    expect(newlyActivated).toBe(true);
+    expect(enemy.activated).toBe(true);
+    if (enemy.kind === 'ranged') {
+      expect(enemy.firingStepsRemaining).toBe(180);
+    }
+  });
+
+  it('fires the first projectile at the mission level after 180 running fixed steps', () => {
+    let state = createState();
+    state = step(state, 57); // mission time 57 s: the e2 Ranged has spawned
+    const ranged = state.enemies.find((enemy) => enemy.kind === 'ranged');
+    expect(ranged).toBeDefined();
+    let current: CombatSimulationState = {
+      ...state,
+      // Clear the player's automatic projectiles so the teleported Ranged is
+      // not destroyed before its first shot, and offset it from the aircraft
+      // firing line so the timer is the only variable under test.
+      projectiles: [],
+      enemies: state.enemies.map((enemy) =>
+        enemy.kind === 'ranged'
+          ? {
+              ...enemy,
+              centerX: 200,
+              centerY: 300,
+              activated: false,
+              hasEnteredVisibleArea: true,
+            }
+          : enemy,
+      ),
+    };
+    let firstShotStep: number | null = null;
+    for (let index = 0; index < 260; index += 1) {
+      current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+      if (current.enemyProjectiles.length > 0) {
+        firstShotStep = current.missionStepCount;
+        break;
+      }
+    }
+    expect(firstShotStep).not.toBeNull();
+    // Activation on the step after teleport (3420+1); the first shot is
+    // exactly 180 running fixed steps later.
+    expect(firstShotStep).toBe(3421 + 180);
+  });
+
+  it('creates one independent ranged-fire stream per authored Ranged member ordinal', () => {
+    const state = createState();
+    const ordinals = Object.keys(state.rangedFireStreams)
+      .map(Number)
+      .sort((a, b) => a - b);
+    expect(ordinals).toEqual([6, 13]);
+  });
+
+  it('keeps the fired projectile collision-active in the same step (V02-WI-04 C01: muzzle top edge)', () => {
+    const state = createState();
+    // The Aircraft collision hitbox is 70% of the rendered height (v0.1
+    // Combat §7.4): top = 480 - (48 × 0.7) / 2 = 463.2 at 1280x600. Place the
+    // Ranged so that after its 0.9 px descent its bottom edge is 1.1 px above
+    // the hitbox top: the corrected muzzle (top edge at the Ranged bottom)
+    // reaches into the hitbox this step, while the previous sign (bottom edge
+    // at the Ranged bottom) stays entirely above it.
+    const hitboxTop = 480 - (AIRCRAFT_HEIGHT * 0.7) / 2;
+    const rangedHeight = 30;
+    const ranged: CombatEnemy = {
+      id: 900,
+      kind: 'ranged',
+      type: 'ranged-drone',
+      hullIntegrity: 4,
+      centerX: 640,
+      centerY: hitboxTop - 2 - rangedHeight / 2,
+      entry: 'top',
+      hasEnteredVisibleArea: true,
+      activated: true,
+      ordinal: 6, // an authored Ranged ordinal with a seeded stream
+      width: 30,
+      height: rangedHeight,
+      firingStepsRemaining: 1,
+    };
+    const current: CombatSimulationState = {
+      ...state,
+      projectiles: [],
+      enemyProjectiles: [],
+      enemies: [ranged],
+      firingStepsRemaining: 999, // the player must not fire this step
+      playerHullIntegrity: 100,
+    };
+    const stepped = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+    // The projectile spawns with its TOP edge exactly at the Ranged bottom
+    // edge (here 1.1 px above the Aircraft hitbox top), so it overlaps the
+    // Aircraft, deals 12 damage, and is consumed by that first valid hit in
+    // the SAME step it is fired. The previous muzzle sign (bottom edge at the
+    // Ranged bottom) left the projectile entirely above the hitbox: no damage,
+    // no consumption — this counter-regression fails for that defect.
+    expect(stepped.playerHullIntegrity).toBe(88);
+    expect(stepped.aircraftDangerFlashStepsRemaining).toBeGreaterThan(0);
+    expect(stepped.enemyProjectiles).toHaveLength(0);
+  });
+});
+
+describe('Hunter Drone (Epic §9.3, V02-AC-007)', () => {
+  it('enters horizontally without targeting, then commits on vertical distance or 2.0 s', () => {
+    const def = enemyDef('hunter-drone');
+    let enemy = spawnEnemyFromPlacement({
+      id: 0,
+      type: 'hunter-drone',
+      hullIntegrity: def.maximumHullIntegrity,
+      width: 20,
+      height: 20,
+      placement: { kind: 'side', side: 'upper-left', yViewportFraction: 0.2 },
+      viewportWidth: VIEWPORT.width,
+      viewportHeight: VIEWPORT.height,
+      ordinal: 7,
+    });
+    const input = stepInput({
+      movementSpeedPx: 600 * 0.18,
+      committedSpeedPx: 600 * 0.26,
+      aircraftCenterX: 900,
+      aircraftCenterY: 300,
+    });
+    // Horizontal entry: X increases toward the centre; Approach begins only
+    // when the complete bounds are fully inside (V02-DEC-020).
+    for (let index = 0; index < 200; index += 1) {
+      const result = stepEnemy(enemy, input);
+      enemy = result.enemy as CombatEnemy;
+      if (enemy.kind === 'hunter' && enemy.phase === 'approach') {
+        break;
+      }
+    }
+    expect(enemy.kind).toBe('hunter');
+    if (enemy.kind !== 'hunter') {
+      throw new Error('Expected the Hunter to enter Approach.');
+    }
+    expect(enemy.phase).toBe('approach');
+    // During Approach the Hunter steers directly toward the Aircraft centre.
+    const startX = enemy.centerX;
+    const result = stepEnemy(enemy, input);
+    enemy = result.enemy as CombatEnemy;
+    expect(enemy.centerX).toBeGreaterThan(startX);
+    // The vertical-distance commit condition is reached when close enough.
+    let committed = false;
+    for (let index = 0; index < 400; index += 1) {
+      const step = stepEnemy(enemy, input);
+      enemy = step.enemy as CombatEnemy;
+      if (enemy.kind === 'hunter' && enemy.phase === 'committed') {
+        committed = true;
+        break;
+      }
+    }
+    expect(committed).toBe(true);
+    if (enemy.kind !== 'hunter') {
+      throw new Error('Expected the Hunter to commit.');
+    }
+    expect(enemy.phase).toBe('committed');
+    // The committed direction is locked: the Aircraft moving away does not
+    // bend the attack run (Epic §9.3).
+    const locked = { ...enemy };
+    const awayInput = { ...input, aircraftCenterX: 200, aircraftCenterY: 500 };
+    const after = stepEnemy(enemy, awayInput).enemy as CombatEnemy;
+    if (after.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after the step.');
+    }
+    expect(after.committedVx).toBe(locked.committedVx);
+    expect(after.committedVy).toBe(locked.committedVy);
+  });
+
+  it('begins Approach on the exact step the moved complete bounds become fully inside (V02-WI-04 C01)', () => {
+    const def = enemyDef('hunter-drone');
+    let enemy = spawnEnemyFromPlacement({
+      id: 0,
+      type: 'hunter-drone',
+      hullIntegrity: def.maximumHullIntegrity,
+      width: 20,
+      height: 20,
+      placement: { kind: 'side', side: 'upper-left', yViewportFraction: 0.2 },
+      viewportWidth: VIEWPORT.width,
+      viewportHeight: VIEWPORT.height,
+      ordinal: 7,
+    });
+    // Place the Hunter just outside the left boundary so its next 18% VH/s
+    // inward move crosses fully inside ON THIS STEP.
+    enemy = { ...enemy, centerX: 9.5, centerY: 120 };
+    const input = stepInput({
+      movementSpeedPx: 600 * 0.18,
+      committedSpeedPx: 600 * 0.26,
+      aircraftCenterX: 900,
+      aircraftCenterY: 300,
+    });
+    const result = stepEnemy(enemy, input);
+    if (result.enemy?.kind !== 'hunter') {
+      throw new Error('Expected the Hunter to remain after the step.');
+    }
+    // No one-step entering stall: Approach, targeting, and the 2.0 s timer
+    // begin on the same authoritative step the moved bounds became fully
+    // inside (the previous code stayed in `entering` for one more step).
+    expect(result.enemy.phase).toBe('approach');
+    expect(result.enemy.approachStepsElapsed).toBe(0);
+  });
+
+  it('applies the locked 26% committed speed on the first commitment step (V02-WI-04 C01)', () => {
+    const def = enemyDef('hunter-drone');
+    const hunter: CombatEnemy = {
+      id: 0,
+      kind: 'hunter',
+      type: 'hunter-drone',
+      hullIntegrity: def.maximumHullIntegrity,
+      centerX: 640,
+      centerY: 200,
+      entry: 'upper-left',
+      hasEnteredVisibleArea: true,
+      activated: true,
+      ordinal: 7,
+      width: 20,
+      height: 20,
+      phase: 'approach',
+      committedVx: 0,
+      committedVy: 0,
+      // One step from the 2.0 s commitment timer expiring.
+      approachStepsElapsed: 119,
+    };
+    const input = stepInput({
+      movementSpeedPx: 600 * 0.18, // 108 px/s
+      committedSpeedPx: 600 * 0.26, // 156 px/s
+      aircraftCenterX: 640, // directly below: straight-down commit direction
+      aircraftCenterY: 300,
+    });
+    const result = stepEnemy(hunter, input);
+    if (result.enemy?.kind !== 'hunter' || result.enemy.phase !== 'committed') {
+      throw new Error('Expected the Hunter to commit on this step.');
+    }
+    // The first commitment step moves at 26% VH/s (156 px/s → 2.6 px), not the
+    // 18% approach speed (1.8 px) the previous code applied for one extra step.
+    expect(result.enemy.centerY).toBeCloseTo(200 + 156 / 60, 6);
+    expect(result.enemy.centerX).toBe(640);
   });
 });

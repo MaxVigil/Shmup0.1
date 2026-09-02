@@ -59,7 +59,7 @@ test('Combat opens full-viewport with a solid-black shell and no loading state (
   expect(pageErrors).toEqual([]);
 });
 
-test('Combat shows only the Hull Integrity bar below the aircraft with approved geometry (Combat AC-003, AC-053, AC-057, AC-081)', async ({
+test('Combat shows the v0.2 HUD: top-centred Countdown, Hull Bar, and CRITICAL HULL (Combat AC-003, AC-053, AC-057, AC-081, v0.2 §15.2–15.3)', async ({
   page,
 }) => {
   await startMission(page);
@@ -96,10 +96,21 @@ test('Combat shows only the Hull Integrity bar below the aircraft with approved 
   expect(geometry!.height).toBeCloseTo(8, 0); // 0.5rem at the 16px base font
   expect(geometry!.fillWidthRatio).toBeCloseTo(1, 1);
 
+  // v0.2 HUD (Epic §15.2–15.3): the top-centred ceiling-formula Combat
+  // Countdown shows the 190 s final arrival as `03:xx`, and the once-per-
+  // Mission-Instance `CRITICAL HULL` message stays hidden at full Hull.
+  const countdown = page.locator('.ds-combat-countdown');
+  await expect(countdown).toBeVisible();
+  await expect(countdown).toHaveText(/^03:0\d$/);
+  await expect(page.locator('.ds-combat-critical-hull')).toBeHidden();
+
   // No excluded HUD elements (Combat §4.3): no objectives, score, counters,
-  // ammo, minimap, damage numbers, or weapon-name indicators.
+  // ammo, minimap, damage numbers, or weapon-name indicators. The only HUD
+  // text is the Countdown value plus the hidden CRITICAL HULL label.
   const hudText = await hud.evaluate((el) => el.textContent ?? '');
-  expect(hudText).toBe('');
+  expect(hudText.replace(/03:\d\d/g, '').replace(/CRITICAL HULL/g, '')).toBe(
+    '',
+  );
 });
 
 test('Combat recalibrates the canvas, aircraft, and Hull bar on viewport resize with no repeated asset requests (Combat AC-001, AC-053, AC-057, AC-081, AC-082, MASTER-AC-010)', async ({

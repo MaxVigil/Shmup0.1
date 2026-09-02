@@ -8,7 +8,10 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
-import { createInitializedSessionStore } from '@test-support/session';
+import {
+  createInitializedSessionStore,
+  successMissionResult,
+} from '@test-support/session';
 import { createApplicationContextValue } from '@test-support/ui';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
@@ -42,15 +45,14 @@ function storeWithResult(result: 'success' | 'defeat'): SessionStore {
     type: 'mission/result',
     result:
       result === 'success'
-        ? {
-            kind: 'success',
+        ? successMissionResult({
             missionInstanceOrdinal: 0,
             creditsAfter: 13,
             hullIntegrityAfter: 80,
             unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
             completedMissionIdsAfter: ['interception-01'],
             creditsEarned: 8,
-          }
+          })
         : {
             kind: 'defeat',
             missionInstanceOrdinal: 0,
@@ -76,13 +78,17 @@ function renderOverlay(store: SessionStore): void {
 }
 
 describe('MissionResultOverlay (Base §9.5, S12)', () => {
-  it('shows Mission Complete / the earned completion reward with focused Continue on Success', () => {
+  it('shows MISSION COMPLETE with the v0.2 breakdown and focused Continue on Success', () => {
     const store = storeWithResult('success');
     renderOverlay(store);
     expect(
-      screen.getByRole('heading', { name: 'Mission Complete' }),
+      screen.getByRole('heading', { name: 'MISSION COMPLETE' }),
     ).toBeDefined();
-    expect(screen.getByText('Reward')).toBeDefined();
+    expect(screen.getByText('Destroyed')).toBeDefined();
+    expect(screen.getByText('Escaped')).toBeDefined();
+    expect(screen.getByText('Combat rewards')).toBeDefined();
+    expect(screen.getByText('Completion reward')).toBeDefined();
+    expect(screen.getByText('Escape penalties')).toBeDefined();
     expect(screen.getByText('8 Credits')).toBeDefined();
     const continueButton = screen.getByRole('button', { name: 'Continue' });
     expect(continueButton).toBeDefined();

@@ -51,7 +51,12 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
       0,
       0,
     );
-    expect(outcome).toBe('committed');
+    expect(outcome.outcome).toBe('committed');
+    // V02-WI-04: a Success result is returned for the deferred exit-sequence
+    // session dispatch (Epic §13.3); the test mirrors the entry's dispatch.
+    if (outcome.outcome === 'committed' && outcome.result?.kind === 'success') {
+      app.store.dispatch({ type: 'mission/result', result: outcome.result });
+    }
     // Durable before/after: marker cleared, completion reward applied exactly
     // once, mission completed, and only Interception 02 unlocked (V02-AC-002).
     expect(app.campaignStore.current?.missionInProgress).toBeNull();
@@ -78,10 +83,12 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
       'interception-01',
       'interception-02',
     ]);
-    expect(session?.missionResult).toEqual({
+    expect(session?.missionResult).toMatchObject({
       kind: 'success',
       missionInstanceOrdinal: 0,
       creditsEarned: INTERCEPTION_01.completionReward,
+      completionReward: INTERCEPTION_01.completionReward,
+      newlyUnlockedMissionId: 'interception-02',
     });
   });
 
@@ -99,7 +106,7 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
       0,
       0,
     );
-    expect(first).toBe('committed');
+    expect(first.outcome).toBe('committed');
     const afterFirst = app.campaignStore.current?.credits;
     const second = await commitMissionResult(
       {
@@ -112,7 +119,7 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
       0,
       0,
     );
-    expect(second).toBe('inert');
+    expect(second.outcome).toBe('inert');
     expect(app.campaignStore.current?.credits).toBe(afterFirst);
     expect(app.campaignStore.current?.missionInProgress).toBeNull();
   });
@@ -131,7 +138,7 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
       0,
       0,
     );
-    expect(outcome).toBe('committed');
+    expect(outcome.outcome).toBe('committed');
     expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS);
     expect(app.campaignStore.current?.hullIntegrity).toBe(25);
     expect(app.campaignStore.current?.missionInProgress).toBeNull();
@@ -156,7 +163,7 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
       0,
       99,
     );
-    expect(outcome).toBe('inert');
+    expect(outcome.outcome).toBe('inert');
     // The active mission and the persisted marker are untouched.
     expect(app.store.getState()?.activeMission).not.toBe('none');
     expect(app.campaignStore.current?.missionInProgress).toEqual({
@@ -179,7 +186,7 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
         0,
         0,
       ),
-    ).toBe('inert');
+    ).toMatchObject({ outcome: 'inert' });
   });
 
   it('a failed campaign transaction never updates the session (persist first)', async () => {
@@ -197,7 +204,7 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
       0,
       0,
     );
-    expect(outcome).toBe('failed');
+    expect(outcome.outcome).toBe('failed');
     // The session keeps the active mission; nothing was rewarded or cleared.
     expect(app.store.getState()?.activeMission).not.toBe('none');
     expect(app.store.getState()?.credits).toBe(V02_STARTING_CREDITS);

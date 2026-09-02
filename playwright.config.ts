@@ -18,6 +18,16 @@ export default defineConfig({
   use: {
     browserName: 'chromium',
     viewport: { width: 1366, height: 768 },
+    // STAB-E2E-WI03 + V02-WI-04 C01: real-time mission-clock evidence (the
+    // natural Defeat at ~147 s, the e5 workload performance window) must not
+    // be slowed by headless Chromium background rAF/timer throttling during
+    // long idle waits; these flags keep the fixed-step sim at ~1:1 wall time.
+    launchOptions: {
+      args: [
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+      ],
+    },
   },
   projects: [
     {
@@ -26,8 +36,11 @@ export default defineConfig({
       // S14 test-cost delta: the full behavioural browser suite runs against
       // the development server once. The compact production smoke (Delivery §7
       // plus production-only checks) is the production project's contract and
-      // is not repeated against the dev server.
-      testIgnore: /production-smoke\.spec\.ts/,
+      // is not repeated against the dev server. V02-WI-04 C03: the evidence
+      // build Pass A and the legacy proxy harness are separate evidence-only
+      // runs (own configs/ports) and never run against the dev server.
+      testIgnore:
+        /production-smoke\.spec\.ts|wi04-evidence-performance\.spec\.ts|legacy-proxy-performance\.spec\.ts/,
     },
     {
       name: 'production',

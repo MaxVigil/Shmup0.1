@@ -17,7 +17,7 @@ export { AIRCRAFT, GERMAN_FIGHTER } from './aircraft';
 export type { AircraftDefinition } from './aircraft';
 export { CANNON, MACHINE_GUN, PLAYER_PROJECTILE, WEAPONS } from './weapons';
 export type { PlayerProjectileConfig, WeaponDefinition } from './weapons';
-export { BASIC_DRONE, ENEMIES } from './enemies';
+export { BASIC_DRONE, ENEMIES, HUNTER_DRONE, RANGED_DRONE } from './enemies';
 export type { EnemyDefinition } from './enemies';
 export {
   ENCOUNTER_ENTRY_REGIONS,
@@ -34,6 +34,8 @@ export {
   totalDrones,
 } from './missions';
 export type {
+  ArrivalGroup,
+  ArrivalGroupMember,
   EncounterCompositionEntry,
   EncounterDefinition,
   EncounterEntry,
@@ -44,6 +46,7 @@ export type {
   MissionTotals,
   RoleDelay,
   SeededEntryVariants,
+  SpawnPlacement,
 } from './missions';
 export { PILOTS } from './pilots';
 export type { PilotRecord } from './pilots';

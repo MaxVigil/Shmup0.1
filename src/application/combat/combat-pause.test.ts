@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { BASIC_DRONE, MVP_ENEMY_GROUP_SCHEDULE } from '@content/index';
+import {
+  BASIC_DRONE,
+  HUNTER_DRONE,
+  INTERCEPTION_01,
+  RANGED_DRONE,
+} from '@content/index';
 import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import {
@@ -27,8 +32,8 @@ function createRuntime(): CombatSimulationRuntime {
     weapon: MACHINE_GUN,
     projectile: PLAYER_PROJECTILE,
     missionSeed: 1234,
-    enemy: BASIC_DRONE,
-    schedule: MVP_ENEMY_GROUP_SCHEDULE,
+    mission: INTERCEPTION_01,
+    enemies: [BASIC_DRONE, RANGED_DRONE, HUNTER_DRONE],
     playerHullIntegrity: 100,
     playerMaximumHullIntegrity: aircraft.maximumHullIntegrity,
   });
@@ -39,15 +44,17 @@ function enemyAboutToEscape(id: number): CombatEnemy {
   const speed = 600 * 0.12; // 12% of viewport height per second.
   return {
     id,
+    kind: 'basic',
     type: 'basic-drone',
     hullIntegrity: 3,
     centerX: 640,
     centerY: 600 + ENEMY_SIZE / 2 + speed * FIXED_STEP_SECONDS,
     entry: 'top',
-    waypointX: null,
-    waypointY: null,
-    waypointReached: false,
     hasEnteredVisibleArea: true,
+    activated: true,
+    ordinal: 0,
+    width: ENEMY_SIZE,
+    height: ENEMY_SIZE,
   };
 }
 
@@ -151,22 +158,20 @@ describe('S13 escaped-enemy observability count (Combat §7.5)', () => {
       weapon: MACHINE_GUN,
       projectile: PLAYER_PROJECTILE,
       missionSeed: 1234,
-      enemy: BASIC_DRONE,
-      schedule: MVP_ENEMY_GROUP_SCHEDULE,
+      mission: INTERCEPTION_01,
+      enemies: [BASIC_DRONE, RANGED_DRONE, HUNTER_DRONE],
       playerHullIntegrity: 100,
       playerMaximumHullIntegrity: aircraft.maximumHullIntegrity,
     });
     const withEscaper = {
       ...base,
       enemies: [enemyAboutToEscape(base.nextEnemyId)],
-      spawnPlanIndex: base.spawnPlan.length,
-      finalGroupSpawned: true,
     };
     const stepped = stepCombatSimulation(withEscaper, FIXED_STEP_SECONDS);
-    expect(stepped.escapedEnemyCount).toBe(1);
+    expect(stepped.escapedCountByType['basic-drone']).toBe(1);
     expect(stepped.enemies).toHaveLength(0);
     // The count is cumulative and never decrements.
     const again = stepCombatSimulation(stepped, FIXED_STEP_SECONDS);
-    expect(again.escapedEnemyCount).toBe(1);
+    expect(again.escapedCountByType['basic-drone']).toBe(1);
   });
 });

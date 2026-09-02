@@ -109,6 +109,35 @@ export interface RoleDelay {
   readonly delaySeconds: number;
 }
 
+/**
+ * Authored Spawn Placement for one Arrival Group member (Epic §8.1.1,
+ * V02-DEC-018/021). `top` is a normalized fraction measured inside the current
+ * Aircraft horizontal engagement band; `seeded-side` is the approved Hunter
+ * horizontal entry at a viewport-`Y` fraction, whose side the deterministic
+ * `mission-data` stream resolves in encounter order. Top Placements consume
+ * zero RNG draws (V02-AC-003).
+ */
+export type SpawnPlacement =
+  | { readonly kind: 'top'; readonly fraction: number }
+  | { readonly kind: 'seeded-side'; readonly yViewportFraction: number };
+
+/** One ordered member of an authored Arrival Group (Epic §8.1.1). */
+export interface ArrivalGroupMember {
+  readonly type: EnemyType;
+  readonly placement: SpawnPlacement;
+}
+
+/**
+ * One authored Arrival Group (Epic §8.1.1): a set of members created at the
+ * same mission-clock instant `encounter.timeSeconds + offsetSeconds`. The
+ * members are the exact authored order (stable member order, V02-AC-003).
+ */
+export interface ArrivalGroup {
+  /** Offset from the encounter arrival (`+N s`); `0` for the primary group. */
+  readonly offsetSeconds: number;
+  readonly members: readonly ArrivalGroupMember[];
+}
+
 /** One authored encounter on a mission timeline (Epic §8). */
 export interface EncounterDefinition {
   /**
@@ -135,6 +164,14 @@ export interface EncounterDefinition {
    * their subject-specific bounded formation id.
    */
   readonly roleDelays?: readonly RoleDelay[];
+  /**
+   * Exact authored runtime staging (Epic §8.1.1, V02-DEC-021): the ordered
+   * Arrival Groups and normalized Spawn Placements this encounter consumes at
+   * runtime. Present only where the canonical source records exact numeric
+   * staging (Mission 01 for V02-WI-04); Missions 02/03 remain qualitative and
+   * carry no staging until their Product Owner staging decisions are recorded.
+   */
+  readonly staging?: readonly ArrivalGroup[];
 }
 
 /** Authored per-role enemy totals for one mission (Epic §8 `Totals:`). */
@@ -214,6 +251,17 @@ export const INTERCEPTION_01: MissionDefinition = {
       composition: [entry('basic-drone', 4)],
       entry: { kind: 'fixed', region: 'top' },
       formation: 'wide-top',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.2 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.4 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.6 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.8 } },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-01-e2',
@@ -222,6 +270,21 @@ export const INTERCEPTION_01: MissionDefinition = {
       entry: { kind: 'unspecified' },
       formation: 'centred-behind-basics',
       roleDelays: [{ type: 'ranged-drone', delaySeconds: 2 }],
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.4 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.6 } },
+          ],
+        },
+        {
+          offsetSeconds: 2,
+          members: [
+            { type: 'ranged-drone', placement: { kind: 'top', fraction: 0.5 } },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-01-e3',
@@ -229,14 +292,53 @@ export const INTERCEPTION_01: MissionDefinition = {
       composition: [entry('hunter-drone', 1)],
       entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
       formation: null,
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'hunter-drone',
+              placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-01-e4',
       timeSeconds: 140,
       composition: [entry('basic-drone', 3), entry('hunter-drone', 1)],
-      entry: { kind: 'unspecified' },
+      entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
       formation: null,
       roleDelays: [{ type: 'hunter-drone', delaySeconds: 3 }],
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.25 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.5 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.75 },
+            },
+          ],
+        },
+        {
+          offsetSeconds: 3,
+          members: [
+            {
+              type: 'hunter-drone',
+              placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-01-e5',
@@ -246,8 +348,35 @@ export const INTERCEPTION_01: MissionDefinition = {
         entry('ranged-drone', 1),
         entry('hunter-drone', 1),
       ],
-      entry: { kind: 'unspecified' },
+      entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
       formation: 'authored-stagger',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.2 },
+            },
+            {
+              type: 'ranged-drone',
+              placement: { kind: 'top', fraction: 0.4 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.6 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.8 },
+            },
+            {
+              type: 'hunter-drone',
+              placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+            },
+          ],
+        },
+      ],
     },
   ],
   totals: { basic: 12, ranged: 2, hunter: 3, elite: 0 },

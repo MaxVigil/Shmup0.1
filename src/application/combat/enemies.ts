@@ -1,221 +1,454 @@
 import type { EnemyType } from '@domain/index';
-import { Mulberry32 } from '@domain/random';
 
 /**
- * Basic Drone enemy state and movement (Combat §7, S10). A concrete
- * BasicDrone/CombatEnemy rather than a generalized entity framework: stable
- * monotonic identity/order, type, Hull Integrity initialized from content,
- * full-square rendered/hitbox geometry, constant speed, selected entry region,
- * optional fixed side waypoint/trajectory phase, and the permanent
- * `hasEnteredVisibleArea` latch. Only the active/escaped lifecycle exists in
- * S10 (Escaped enemies are removed); the Destroyed transition is S11.
+ * Authoritative v0.2 regular-enemy state (Epic §9, V02-DEC-019, V02-WI-04).
+ * Basic, Ranged, and Hunter are distinct typed simulation states — no generic
+ * entity framework. Every enemy carries its own complete rendered bounds
+ * (width × height, px) and that AABB is the single rectangle used for spawn
+ * placement, first-visibility/activation, collision, and escape — never a
+ * superseded v0.1 square or an alpha-pixel mask.
+ *
+ * Entry contract (V02-DEC-018): every enemy starts fully outside its selected
+ * boundary with the nearest edge of its complete bounds touching that boundary
+ * and no additional hidden offset. Top entries spawn above the viewport and
+ * travel straight down; Side entries travel horizontally inward at the role
+ * movement speed until their complete bounds are fully inside the viewport.
  */
 
 export type EnemyEntryRegion = 'top' | 'upper-left' | 'upper-right';
 
-export interface CombatEnemy {
+/** Fields shared by every regular-enemy state. */
+interface EnemyCommonState {
   /** Stable monotonic identity per mission (presentation visual-map key). */
   readonly id: number;
   readonly type: EnemyType;
-  /** AC-014 durability prerequisite: initialized from content, unchanged in S10. */
+  /** Initialized from the content definition; reduced only by valid hits. */
   readonly hullIntegrity: number;
+  /** Complete rendered-bounds centre; authoritative geometry in px. */
   readonly centerX: number;
   readonly centerY: number;
+  /** Complete configured rendered bounds (V02-DEC-019) in px. */
+  readonly width: number;
+  readonly height: number;
+  /** The entry boundary this enemy was spawned against. */
   readonly entry: EnemyEntryRegion;
-  /** Fixed side-entry waypoint (null for top entries; never changes). */
-  readonly waypointX: number | null;
-  readonly waypointY: number | null;
-  /** One-way side-entry latch: true once the drone has arrived at its waypoint. */
-  readonly waypointReached: boolean;
-  /** Permanent latch (Combat §7.5, AC-018): true once any hitbox portion was visible. */
+  /**
+   * Permanent latch (v0.1 Combat §7.5, AC-018): true once any portion of the
+   * complete bounds was inside the visible viewport. Escape eligibility.
+   */
   readonly hasEnteredVisibleArea: boolean;
+  /**
+   * Permanent latch: true once the complete bounds are fully inside the
+   * visible viewport. Ranged activation and Hunter Approach begin on this step.
+   */
+  readonly activated: boolean;
+  /**
+   * Stable zero-based mission-member ordinal in authored encounter order
+   * (Epic §9.2, V02-AC-006): the deterministic `ranged-fire` stream ordinal.
+   * Never removal-sensitive or derived from runtime state.
+   */
+  readonly ordinal: number;
 }
 
-/** Independent 1/3 entry-region draw (Combat §7.4, AC-074). */
-export function selectEnemyEntryRegion(rng: Mulberry32): EnemyEntryRegion {
-  const draw = rng.nextInt(3);
-  if (draw === 0) {
-    return 'top';
-  }
-  if (draw === 1) {
-    return 'upper-left';
-  }
-  return 'upper-right';
+export interface BasicEnemyState extends EnemyCommonState {
+  readonly kind: 'basic';
 }
 
-/** Uniform fraction in [0, 1) — the raw spawn-axis draw resolved at spawn. */
-export function spawnAxisFraction(rng: Mulberry32): number {
-  return rng.nextFloat();
+export interface RangedEnemyState extends EnemyCommonState {
+  readonly kind: 'ranged';
+  /**
+   * Running fixed steps until the next shot. Set to `180` on the activation
+   * step (first shot after exactly 180 running fixed steps); each later
+   * interval resets to `60 + rangedFireStream.nextInt(121)` after an actual
+   * shot. A Ranged destroyed before its next shot consumes no further draw.
+   */
+  readonly firingStepsRemaining: number;
 }
 
-/** Uniform waypoint-x fraction in the approved `40%-60%` viewport-width band. */
-export function waypointXFraction(rng: Mulberry32): number {
-  return 0.4 + rng.nextFloat() * 0.2;
+export interface HunterEnemyState extends EnemyCommonState {
+  readonly kind: 'hunter';
+  readonly phase: 'entering' | 'approach' | 'committed';
+  /** Locked unit direction at commitment (never changed afterwards). */
+  readonly committedVx: number;
+  readonly committedVy: number;
+  /** Running fixed steps elapsed since Approach began (Epic §9.3 `2.0 s`). */
+  readonly approachStepsElapsed: number;
 }
 
-/** Uniform waypoint-y fraction in the approved `20%-40%` viewport-height band. */
-export function waypointYFraction(rng: Mulberry32): number {
-  return 0.2 + rng.nextFloat() * 0.2;
+export type CombatEnemy = BasicEnemyState | RangedEnemyState | HunterEnemyState;
+
+export interface EnemyStepInput {
+  /** Downward / approach speed in px/s (role content × current viewport height). */
+  readonly movementSpeedPx: number;
+  /** Committed Attack Run speed in px/s (Hunter `26%`; others unused). */
+  readonly committedSpeedPx: number;
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+  readonly stepSeconds: number;
+  readonly aircraftCenterX: number;
+  readonly aircraftCenterY: number;
+}
+
+export interface EnemyStepResult {
+  /** The advanced enemy, or `null` when it fully escaped this step. */
+  readonly enemy: CombatEnemy | null;
+  /** True exactly once, on the step the complete bounds became fully inside. */
+  readonly newlyActivated: boolean;
 }
 
 /**
- * Spawns a drone with its full hitbox outside the viewport and its nearest
- * edge exactly touching the selected boundary (Combat §7.4, AC-072):
- * top → bottom edge touches the top boundary; upper-left → right edge touches
- * the left boundary; upper-right → left edge touches the right boundary. The
- * non-entry axis keeps the complete hitbox within the viewport width (top) or
- * the upper half (side) (AC-073).
+ * Common creation helper for the authored-staging spawn (V02-DEC-018): the
+ * nearest edge of the complete bounds touches the selected boundary and the
+ * non-entry axis is placed from the normalized authored fraction.
  */
-export function spawnEnemy(
-  id: number,
-  type: EnemyType,
-  hullIntegrity: number,
-  entry: EnemyEntryRegion,
-  spawnAxisFractionValue: number,
-  waypointXFractionValue: number | null,
-  waypointYFractionValue: number | null,
-  viewportWidth: number,
-  viewportHeight: number,
-  enemySize: number,
-): CombatEnemy {
-  const half = enemySize / 2;
-  if (entry === 'top') {
-    return {
-      id,
-      type,
-      hullIntegrity,
-      centerX: half + spawnAxisFractionValue * (viewportWidth - enemySize),
-      centerY: -half,
-      entry,
-      waypointX: null,
-      waypointY: null,
-      waypointReached: false,
-      hasEnteredVisibleArea: false,
-    };
+export function spawnEnemyFromPlacement(input: {
+  readonly id: number;
+  readonly type: EnemyType;
+  readonly hullIntegrity: number;
+  readonly width: number;
+  readonly height: number;
+  readonly placement:
+    | { readonly kind: 'top'; readonly engagementBandFraction: number }
+    | {
+        readonly kind: 'side';
+        readonly side: 'upper-left' | 'upper-right';
+        readonly yViewportFraction: number;
+      };
+  /** Aircraft engagement-band horizontal range used only by Top projections
+   *  (V02-AC-004: the authored normalized fraction is projected inside it). */
+  readonly boundsMinX?: number;
+  readonly boundsMaxX?: number;
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+  readonly ordinal: number;
+}): CombatEnemy {
+  const halfWidth = input.width / 2;
+  const halfHeight = input.height / 2;
+  if (input.placement.kind === 'top') {
+    // Project the already-authored normalized fraction inside the current
+    // engagement band (V02-AC-004); the centre is clamped so the complete
+    // bounds stay inside the band horizontally.
+    const boundsMinX = input.boundsMinX ?? input.width / 2;
+    const boundsMaxX =
+      input.boundsMaxX ?? input.viewportWidth - input.width / 2;
+    const raw =
+      boundsMinX +
+      input.placement.engagementBandFraction * (boundsMaxX - boundsMinX);
+    const centerX = clamp(raw, boundsMinX + halfWidth, boundsMaxX - halfWidth);
+    return createEnemyState({
+      id: input.id,
+      type: input.type,
+      hullIntegrity: input.hullIntegrity,
+      centerX,
+      centerY: -halfHeight,
+      width: input.width,
+      height: input.height,
+      entry: 'top',
+      ordinal: input.ordinal,
+    });
   }
-  const upperHalf = viewportHeight / 2;
-  const centerY = half + spawnAxisFractionValue * (upperHalf - enemySize);
-  const waypoint =
-    waypointXFractionValue === null || waypointYFractionValue === null
-      ? null
-      : {
-          x: waypointXFractionValue * viewportWidth,
-          y: waypointYFractionValue * viewportHeight,
-        };
-  return {
-    id,
-    type,
-    hullIntegrity,
-    centerX: entry === 'upper-left' ? -half : viewportWidth + half,
+  const centerY = input.placement.yViewportFraction * input.viewportHeight;
+  return createEnemyState({
+    id: input.id,
+    type: input.type,
+    hullIntegrity: input.hullIntegrity,
+    centerX:
+      input.placement.side === 'upper-left'
+        ? -halfWidth
+        : input.viewportWidth + halfWidth,
     centerY,
-    entry,
-    waypointX: waypoint?.x ?? null,
-    waypointY: waypoint?.y ?? null,
-    waypointReached: false,
+    width: input.width,
+    height: input.height,
+    entry: input.placement.side,
+    ordinal: input.ordinal,
+  });
+}
+
+function createEnemyState(input: {
+  readonly id: number;
+  readonly type: EnemyType;
+  readonly hullIntegrity: number;
+  readonly centerX: number;
+  readonly centerY: number;
+  readonly width: number;
+  readonly height: number;
+  readonly entry: EnemyEntryRegion;
+  readonly ordinal: number;
+}): CombatEnemy {
+  const common = {
+    id: input.id,
+    type: input.type,
+    hullIntegrity: input.hullIntegrity,
+    centerX: input.centerX,
+    centerY: input.centerY,
+    width: input.width,
+    height: input.height,
+    entry: input.entry,
     hasEnteredVisibleArea: false,
+    activated: false,
+    ordinal: input.ordinal,
+  };
+  if (input.type === 'basic-drone') {
+    return { ...common, kind: 'basic' };
+  }
+  if (input.type === 'ranged-drone') {
+    return { ...common, kind: 'ranged', firingStepsRemaining: 0 };
+  }
+  return {
+    ...common,
+    kind: 'hunter',
+    phase: 'entering',
+    committedVx: 0,
+    committedVy: 0,
+    approachStepsElapsed: 0,
   };
 }
 
 /**
- * One deterministic fixed-step movement (Combat §7): top entries move straight
- * down; side entries travel a straight segment to their fixed waypoint, arrive
- * exactly at it (no overshoot), latch the waypoint phase without oscillation,
- * then move straight down at the same constant speed. Drones never target the
- * aircraft. After the movement, the permanent entered latch is applied and a
- * drone that has entered and now fully exits any boundary is returned as `null`
- * (Escaped, AC-018/029). A drone cannot escape during its initial entry.
+ * One deterministic fixed-step movement (Epic §9.1–9.3):
+ * - Basic/Ranged: side entries travel horizontally inward at the role movement
+ *   speed until fully inside, then travel straight down at that speed.
+ * - Hunter: horizontal Side Entry at the approach speed until fully inside;
+ *   then `Approach` steers directly toward the Aircraft's current centre at
+ *   `18% VH/s` (no predictive lead); the first of vertical distance `≤ 35% VH`
+ *   or `2.0 s` since Approach began locks the direction at `26% VH/s`.
+ * A side/top entry can never escape during its initial entry. An enemy that
+ * has entered and now fully exits any boundary is returned as `null` (Escaped).
  */
-export function moveEnemy(
+export function stepEnemy(
   enemy: CombatEnemy,
-  speedPxPerSecond: number,
-  stepSeconds: number,
-  viewportWidth: number,
-  viewportHeight: number,
-  enemySize: number,
-): CombatEnemy | null {
-  let next = stepEnemyPosition(enemy, speedPxPerSecond, stepSeconds);
-  if (
-    !next.hasEnteredVisibleArea &&
-    isEnemyAnyPortionVisible(next, viewportWidth, viewportHeight, enemySize)
-  ) {
-    next = { ...next, hasEnteredVisibleArea: true };
-  }
+  input: EnemyStepInput,
+): EnemyStepResult {
+  const positioned =
+    enemy.kind === 'hunter'
+      ? stepHunter(enemy, input)
+      : stepRegular(enemy, input);
+  const fullyInside = isEnemyFullyInsideViewport(
+    positioned,
+    input.viewportWidth,
+    input.viewportHeight,
+  );
+  const newlyActivated = !positioned.activated && fullyInside;
+  const next = newlyActivated ? activateEnemy(positioned) : positioned;
+  let escaped = false;
   if (
     next.hasEnteredVisibleArea &&
-    isEnemyFullyOutsideViewport(next, viewportWidth, viewportHeight, enemySize)
+    isEnemyFullyOutsideViewport(next, input.viewportWidth, input.viewportHeight)
   ) {
-    return null;
+    escaped = true;
   }
-  return next;
+  return { enemy: escaped ? null : next, newlyActivated };
 }
 
-function stepEnemyPosition(
-  enemy: CombatEnemy,
-  speedPxPerSecond: number,
-  stepSeconds: number,
-): CombatEnemy {
+/** Basic/Ranged movement: side entry inward until fully inside, then straight
+ *  down at the role movement speed. */
+function stepRegular(
+  enemy: BasicEnemyState | RangedEnemyState,
+  input: EnemyStepInput,
+): BasicEnemyState | RangedEnemyState {
   if (
-    enemy.waypointX === null ||
-    enemy.waypointY === null ||
-    enemy.waypointReached
+    enemy.entry !== 'top' &&
+    !isEnemyFullyInsideViewport(
+      enemy,
+      input.viewportWidth,
+      input.viewportHeight,
+    )
   ) {
-    // Top entry or waypoint reached: straight down at constant speed (AC-009).
+    const direction = enemy.entry === 'upper-left' ? 1 : -1;
     return {
       ...enemy,
-      centerY: enemy.centerY + speedPxPerSecond * stepSeconds,
-    };
-  }
-  const dx = enemy.waypointX - enemy.centerX;
-  const dy = enemy.waypointY - enemy.centerY;
-  const distance = Math.hypot(dx, dy);
-  const travel = speedPxPerSecond * stepSeconds;
-  if (distance <= travel) {
-    // Resolve the waypoint crossing without overshoot or oscillation, then use
-    // the remainder of this fixed step on the downward segment. This preserves
-    // the approved constant speed across the trajectory-phase boundary.
-    const remainingTravel = travel - distance;
-    return {
-      ...enemy,
-      centerX: enemy.waypointX,
-      centerY: enemy.waypointY + remainingTravel,
-      waypointReached: true,
+      centerX:
+        enemy.centerX + direction * input.movementSpeedPx * input.stepSeconds,
+      hasEnteredVisibleArea:
+        enemy.hasEnteredVisibleArea ||
+        isEnemyAnyPortionVisible(
+          enemy,
+          input.viewportWidth,
+          input.viewportHeight,
+        ),
     };
   }
   return {
     ...enemy,
-    centerX: enemy.centerX + (dx / distance) * travel,
-    centerY: enemy.centerY + (dy / distance) * travel,
+    centerY: enemy.centerY + input.movementSpeedPx * input.stepSeconds,
+    hasEnteredVisibleArea:
+      enemy.hasEnteredVisibleArea ||
+      isEnemyAnyPortionVisible(
+        enemy,
+        input.viewportWidth,
+        input.viewportHeight,
+      ),
   };
 }
 
-/** True when any hitbox portion is strictly inside the visible viewport. */
+/** Hunter state machine (Epic §9.3, V02-AC-007): entering → approach →
+ *  committed. */
+function stepHunter(
+  enemy: HunterEnemyState,
+  input: EnemyStepInput,
+): HunterEnemyState {
+  const hasEntered = (state: HunterEnemyState): boolean =>
+    state.hasEnteredVisibleArea ||
+    isEnemyAnyPortionVisible(state, input.viewportWidth, input.viewportHeight);
+  if (enemy.phase === 'entering') {
+    if (
+      isEnemyFullyInsideViewport(
+        enemy,
+        input.viewportWidth,
+        input.viewportHeight,
+      )
+    ) {
+      // Full-bounds entry completes: begin Approach, targeting, and the 2.0 s
+      // commitment timer only on this authoritative step (V02-DEC-020).
+      return {
+        ...enemy,
+        hasEnteredVisibleArea: hasEntered(enemy),
+        phase: 'approach',
+        approachStepsElapsed: 0,
+      };
+    }
+    const direction = enemy.entry === 'upper-left' ? 1 : -1;
+    const movedX =
+      enemy.centerX + direction * input.movementSpeedPx * input.stepSeconds;
+    // V02-WI-04 C01: Approach begins on the exact step the MOVED complete
+    // bounds first become fully inside — the previous code checked only the
+    // pre-move position and stalled one step after crossing the boundary.
+    const moved: HunterEnemyState = {
+      ...enemy,
+      centerX: movedX,
+      hasEnteredVisibleArea: hasEntered(enemy),
+    };
+    if (
+      isEnemyFullyInsideViewport(
+        moved,
+        input.viewportWidth,
+        input.viewportHeight,
+      )
+    ) {
+      return {
+        ...moved,
+        phase: 'approach',
+        approachStepsElapsed: 0,
+      };
+    }
+    return moved;
+  }
+  if (enemy.phase === 'approach') {
+    const dx = input.aircraftCenterX - enemy.centerX;
+    const dy = input.aircraftCenterY - enemy.centerY;
+    const distance = Math.hypot(dx, dy);
+    const unitX = distance > 0 ? dx / distance : 0;
+    const unitY = distance > 0 ? dy / distance : 1;
+    const approachStepsElapsed = enemy.approachStepsElapsed + 1;
+    const verticalDistance = Math.abs(enemy.centerY - input.aircraftCenterY);
+    const commits =
+      verticalDistance <= 0.35 * input.viewportHeight ||
+      approachStepsElapsed >= Math.round(2.0 / input.stepSeconds);
+    if (commits) {
+      // V02-WI-04 C01: the locked 26% VH/s committed speed applies on the
+      // FIRST commitment step (the previous code moved this step at the 18%
+      // approach speed and only switched speed on the following step).
+      const nextX =
+        enemy.centerX + unitX * input.committedSpeedPx * input.stepSeconds;
+      const nextY =
+        enemy.centerY + unitY * input.committedSpeedPx * input.stepSeconds;
+      // Direction is locked at the first commit condition; later Aircraft
+      // movement does not bend the attack run.
+      return {
+        ...enemy,
+        hasEnteredVisibleArea: hasEntered(enemy),
+        phase: 'committed',
+        committedVx: unitX,
+        committedVy: unitY,
+        approachStepsElapsed,
+        centerX: nextX,
+        centerY: nextY,
+      };
+    }
+    const nextX =
+      enemy.centerX + unitX * input.movementSpeedPx * input.stepSeconds;
+    const nextY =
+      enemy.centerY + unitY * input.movementSpeedPx * input.stepSeconds;
+    return {
+      ...enemy,
+      hasEnteredVisibleArea: hasEntered(enemy),
+      approachStepsElapsed,
+      centerX: nextX,
+      centerY: nextY,
+    };
+  }
+  // Committed Attack Run: fixed direction at the committed speed.
+  return {
+    ...enemy,
+    hasEnteredVisibleArea: hasEntered(enemy),
+    centerX:
+      enemy.centerX +
+      enemy.committedVx * input.committedSpeedPx * input.stepSeconds,
+    centerY:
+      enemy.centerY +
+      enemy.committedVy * input.committedSpeedPx * input.stepSeconds,
+  };
+}
+
+/** Applies the permanent full-bounds activation latch (the Ranged first-shot
+ *  timer starts on this exact step; Hunter Approach is entered by its owner). */
+function activateEnemy(enemy: CombatEnemy): CombatEnemy {
+  if (enemy.kind === 'ranged') {
+    return { ...enemy, activated: true, firingStepsRemaining: 180 };
+  }
+  return { ...enemy, activated: true };
+}
+
+/** True when any portion of the complete bounds is strictly inside the viewport. */
 export function isEnemyAnyPortionVisible(
   enemy: CombatEnemy,
   viewportWidth: number,
   viewportHeight: number,
-  enemySize: number,
 ): boolean {
-  const half = enemySize / 2;
   return (
-    enemy.centerX - half < viewportWidth &&
-    enemy.centerX + half > 0 &&
-    enemy.centerY - half < viewportHeight &&
-    enemy.centerY + half > 0
+    enemy.centerX - enemy.width / 2 < viewportWidth &&
+    enemy.centerX + enemy.width / 2 > 0 &&
+    enemy.centerY - enemy.height / 2 < viewportHeight &&
+    enemy.centerY + enemy.height / 2 > 0
   );
 }
 
-/** True when the complete hitbox is outside every viewport boundary. */
+/** True when the complete bounds are fully inside the visible viewport
+ *  (activation and Hunter Approach begin only at this point, V02-DEC-020). */
+export function isEnemyFullyInsideViewport(
+  enemy: CombatEnemy,
+  viewportWidth: number,
+  viewportHeight: number,
+): boolean {
+  const halfWidth = enemy.width / 2;
+  const halfHeight = enemy.height / 2;
+  return (
+    enemy.centerX - halfWidth >= 0 &&
+    enemy.centerX + halfWidth <= viewportWidth &&
+    enemy.centerY - halfHeight >= 0 &&
+    enemy.centerY + halfHeight <= viewportHeight
+  );
+}
+
+/** True when the complete bounds are outside every viewport boundary. */
 export function isEnemyFullyOutsideViewport(
   enemy: CombatEnemy,
   viewportWidth: number,
   viewportHeight: number,
-  enemySize: number,
 ): boolean {
-  const half = enemySize / 2;
+  const halfWidth = enemy.width / 2;
+  const halfHeight = enemy.height / 2;
   return (
-    enemy.centerX + half <= 0 ||
-    enemy.centerX - half >= viewportWidth ||
-    enemy.centerY + half <= 0 ||
-    enemy.centerY - half >= viewportHeight
+    enemy.centerX + halfWidth <= 0 ||
+    enemy.centerX - halfWidth >= viewportWidth ||
+    enemy.centerY + halfHeight <= 0 ||
+    enemy.centerY - halfHeight >= viewportHeight
   );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (min > max) {
+    return (min + max) / 2;
+  }
+  return Math.min(max, Math.max(min, value));
 }

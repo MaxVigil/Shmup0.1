@@ -101,9 +101,10 @@ test('Weapon Selection shows canonical statistics with Confirm left and Cancel r
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByText('Machine Gun')).toBeVisible();
   await expect(dialog.getByText('Cannon')).toBeVisible();
-  await expect(dialog.getByText('6 shots/s')).toBeVisible();
+  // v0.2 §10 weapon content: Machine Gun fires 5 shots/s, Cannon 1.5 shots/s.
+  await expect(dialog.getByText('5 shots/s', { exact: true })).toBeVisible();
   await expect(dialog.getByText('3 hits')).toBeVisible();
-  await expect(dialog.getByText('2 shots/s')).toBeVisible();
+  await expect(dialog.getByText('1.5 shots/s', { exact: true })).toBeVisible();
   await expect(dialog.getByText('1 hit')).toBeVisible();
   const confirm = dialog.getByRole('button', { name: 'Confirm' });
   const cancel = dialog.getByRole('button', { name: 'Cancel' });

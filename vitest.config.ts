@@ -5,6 +5,13 @@ import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    // Unit tests always run the ordinary-build behaviour (evidence counters
+    // and benchmark scenarios compile-time disabled); the evidence builds are
+    // validated by the browser harnesses and the artifact-hygiene regression.
+    __SHMUP_EVIDENCE_SCENARIOS__: 'false',
+    __SHMUP_EVIDENCE_COUNTERS__: 'false',
+  },
   resolve: {
     alias: {
       '@bootstrap': fileURLToPath(new URL('./src/bootstrap', import.meta.url)),
@@ -25,6 +32,14 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    exclude: [...configDefaults.exclude, 'e2e/**'],
+    exclude: [
+      ...configDefaults.exclude,
+      'e2e/**',
+      // V02-WI-04 C05: the evidence-integrity mutation suite runs under the
+      // Node built-in test runner (`npm run evidence:mutation`) after all
+      // evidence records are regenerated; it must never be collected by
+      // Vitest's default include pattern.
+      'scripts/evidence-integrity.mutation.test.mjs',
+    ],
   },
 });

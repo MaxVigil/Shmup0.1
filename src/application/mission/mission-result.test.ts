@@ -4,6 +4,7 @@ import { V02_STARTING_CREDITS } from '@domain/index';
 import { initializeSession } from '../session/initialize-session';
 import { createSessionStore } from '../session/store';
 import type { SessionStore } from '../session/store';
+import { successMissionResult } from '@test-support/session';
 import type { MissionSnapshot } from './snapshot';
 
 function snapshotFor(store: SessionStore): MissionSnapshot {
@@ -43,15 +44,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     startMissionIn(store);
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 80,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     const session = store.getState()!;
     expect(session.credits).toBe(V02_STARTING_CREDITS + 1);
@@ -66,15 +66,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     // Duplicate terminal signals never reapply the reward.
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 80,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     expect(store.getState()!.credits).toBe(V02_STARTING_CREDITS + 1);
   });
@@ -118,15 +117,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     const before = store.getState()!;
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: -1,
         hullIntegrityAfter: 80,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     expect(store.getState()).toBe(before);
   });
@@ -136,15 +134,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     const before = store.getState()!;
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 80,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     expect(store.getState()).toBe(before);
   });
@@ -215,15 +212,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     expect(store.getState()!.missionInstanceCount).toBe(1);
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     expect(store.getState()!.credits).toBe(V02_STARTING_CREDITS + 1);
     store.dispatch({
@@ -250,15 +246,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     startMissionIn(store); // mission 0, count 1
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     store.dispatch({
       type: 'mission/result-consumed',
@@ -270,15 +265,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     // Duplicated / delayed terminal from mission 0 arrives during mission 1.
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 99,
         hullIntegrityAfter: 99,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     const after = store.getState()!;
     expect(after).toBe(before); // strict no-op: no reward, no result, mission 1 intact
@@ -296,15 +290,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     startMissionIn(store); // mission 0
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     store.dispatch({
       type: 'mission/result-consumed',
@@ -337,15 +330,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     startMissionIn(store); // mission 0
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     store.dispatch({
       type: 'mission/result-consumed',
@@ -354,15 +346,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     startMissionIn(store); // mission 1
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 1,
         creditsAfter: V02_STARTING_CREDITS + 2,
         hullIntegrityAfter: 60,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
 
     // Mission 1's result is now presented (ordinal 1). A delayed Continue
@@ -390,15 +381,14 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     startMissionIn(store); // mission 0
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 75,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     // Raw action is a strict no-op too: no active mission and no ordinal advance.
     const before = store.getState()!;

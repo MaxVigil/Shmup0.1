@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { BASIC_DRONE, MVP_ENEMY_GROUP_SCHEDULE } from '@content/index';
 import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import type { WeaponDefinition } from '@content/weapons';
+import { CONTENT_CATALOGUE } from '@test-support/content';
+import {
+  createTestCombatRuntime,
+  createTestCombatState,
+  AIRCRAFT_HEIGHT,
+  AIRCRAFT_WIDTH,
+  TEST_MISSION_SEED,
+} from '@test-support/domain';
 import {
   advanceSimulationFrames,
   createCombatSimulation,
-  createCombatSimulationRuntime,
   FIXED_STEP_SECONDS,
   MAX_STEPS_PER_FRAME,
   stepCombatSimulation,
@@ -16,29 +22,11 @@ import type { CombatInputCommand } from './input-command';
 import { brakingDistance, resolveMovementConfig } from './movement-config';
 import { isPointerInsideViewport } from './input-command';
 
-// 1280x600: short side 600 → aircraft height 48, width 48 * 1278/1231 ≈ 49.83.
-const AIRCRAFT_WIDTH = 48 * (1278 / 1231);
-const AIRCRAFT_HEIGHT = 48;
-const MISSION_SEED = 3735928559;
-
 function createState(
   mode: 'mouse' | 'keyboard' = 'mouse',
   weapon: WeaponDefinition = MACHINE_GUN,
 ): CombatSimulationState {
-  return createCombatSimulation({
-    initialMode: mode,
-    viewportWidth: 1280,
-    viewportHeight: 600,
-    aircraftWidth: AIRCRAFT_WIDTH,
-    aircraftHeight: AIRCRAFT_HEIGHT,
-    weapon,
-    projectile: PLAYER_PROJECTILE,
-    missionSeed: MISSION_SEED,
-    enemy: BASIC_DRONE,
-    schedule: MVP_ENEMY_GROUP_SCHEDULE,
-    playerHullIntegrity: 100,
-    playerMaximumHullIntegrity: 100,
-  });
+  return createTestCombatState({ mode, weapon });
 }
 
 function submit(
@@ -442,20 +430,7 @@ describe('mode exclusivity (AC-006)', () => {
 
   describe('runtime cleanup (S08)', () => {
     it('makes submit and advance inert after dispose', () => {
-      const runtime = createCombatSimulationRuntime({
-        initialMode: 'keyboard',
-        viewportWidth: 1280,
-        viewportHeight: 600,
-        aircraftWidth: AIRCRAFT_WIDTH,
-        aircraftHeight: AIRCRAFT_HEIGHT,
-        weapon: MACHINE_GUN,
-        projectile: PLAYER_PROJECTILE,
-        missionSeed: MISSION_SEED,
-        enemy: BASIC_DRONE,
-        schedule: MVP_ENEMY_GROUP_SCHEDULE,
-        playerHullIntegrity: 100,
-        playerMaximumHullIntegrity: 100,
-      });
+      const runtime = createTestCombatRuntime({ mode: 'keyboard' });
       runtime.submit({ type: 'combat/keyboard', key: 'up', pressed: true });
       runtime.advance(0.5);
       const moved = runtime.getState();
@@ -597,9 +572,9 @@ describe('fixed-step/runtime boundary hardening (S08-WI01)', () => {
           aircraftHeight: 48,
           weapon: MACHINE_GUN,
           projectile: PLAYER_PROJECTILE,
-          missionSeed: MISSION_SEED,
-          enemy: BASIC_DRONE,
-          schedule: MVP_ENEMY_GROUP_SCHEDULE,
+          missionSeed: TEST_MISSION_SEED,
+          mission: CONTENT_CATALOGUE.missions[0]!,
+          enemies: CONTENT_CATALOGUE.enemies,
           playerHullIntegrity: 100,
           playerMaximumHullIntegrity: 100,
         }),
@@ -610,20 +585,7 @@ describe('fixed-step/runtime boundary hardening (S08-WI01)', () => {
 
 describe('fixed-step accumulator reset on accepted resize (S08-WI01)', () => {
   it('resets the accumulator exactly once per accepted effective-dimension change', () => {
-    const runtime = createCombatSimulationRuntime({
-      initialMode: 'keyboard',
-      viewportWidth: 1280,
-      viewportHeight: 600,
-      aircraftWidth: AIRCRAFT_WIDTH,
-      aircraftHeight: AIRCRAFT_HEIGHT,
-      weapon: MACHINE_GUN,
-      projectile: PLAYER_PROJECTILE,
-      missionSeed: MISSION_SEED,
-      enemy: BASIC_DRONE,
-      schedule: MVP_ENEMY_GROUP_SCHEDULE,
-      playerHullIntegrity: 100,
-      playerMaximumHullIntegrity: 100,
-    });
+    const runtime = createTestCombatRuntime({ mode: 'keyboard' });
     runtime.submit({
       type: 'combat/keyboard',
       key: 'up',
@@ -667,5 +629,114 @@ describe('fixed-step accumulator reset on accepted resize (S08-WI01)', () => {
     expect(afterSecondTinyFrame.aircraft.centerY).toBeLessThan(
       afterFirstTinyFrame.aircraft.centerY,
     );
+  });
+});
+
+describe('v0.2 CRITICAL HULL message (v0.2 §15.3, V02-WI-04)', () => {
+  // `2.0 s` at the fixed `1/60 s` step.
+  const CRITICAL_HULL_STEPS = 120;
+
+  it('triggers exactly once below 25 Hull and runs its full 2 s timer without later collision passes resetting it', () => {
+    let state = createState();
+    state = { ...state, playerHullIntegrity: 24 };
+    const triggered = stepCombatSimulation(state, FIXED_STEP_SECONDS);
+    expect(triggered.criticalHullMessageTriggered).toBe(true);
+    expect(triggered.criticalHullMessageStepsRemaining).toBe(
+      CRITICAL_HULL_STEPS,
+    );
+    // A later collision pass must preserve the running timer (it used to reset
+    // it to 0 on the very next step, hiding the message after one frame).
+    const next = stepCombatSimulation(triggered, FIXED_STEP_SECONDS);
+    expect(next.criticalHullMessageTriggered).toBe(true);
+    expect(next.criticalHullMessageStepsRemaining).toBe(
+      CRITICAL_HULL_STEPS - 1,
+    );
+    // The message counts down once per step and expires after 2 s; the latch
+    // stays consumed (once per Mission Instance, never re-triggered).
+    let current = next;
+    for (let index = 1; index < CRITICAL_HULL_STEPS; index += 1) {
+      current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+    }
+    expect(current.criticalHullMessageTriggered).toBe(true);
+    expect(current.criticalHullMessageStepsRemaining).toBe(0);
+    // Recovery to full Hull does not re-trigger the message.
+    current = { ...current, playerHullIntegrity: 100 };
+    const recovered = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+    expect(recovered.criticalHullMessageTriggered).toBe(true);
+    expect(recovered.criticalHullMessageStepsRemaining).toBe(0);
+  });
+});
+
+describe('v0.2 Success exit ordering and timing (Epic §13.3, V02-WI-04 C01)', () => {
+  it('keeps the deterministic exit frozen until the campaign transaction authorizes it', () => {
+    const runtime = createTestCombatRuntime();
+    runtime.submitDebug({ type: 'combat-debug/win-mission' });
+    let state = runtime.getState();
+    expect(state.terminalResult).toEqual({ kind: 'success' });
+    expect(state.successExitPhase).toBe('centre');
+    expect(state.successExitAuthorized).toBe(false);
+    // Without the commit-authorization seam the exit does not advance at all,
+    // even over many frames (gameplay already froze at the terminal step).
+    const frozen = runtime.advance(5);
+    expect(frozen).toBe(state);
+    expect(frozen.aircraft.centerX).toBe(state.aircraft.centerX);
+    // The transaction commits Success → the entry authorizes the exit → the
+    // centre phase advances from exactly its 30 remaining steps.
+    runtime.authorizeSuccessExit();
+    state = runtime.advance(FIXED_STEP_SECONDS);
+    expect(state.successExitAuthorized).toBe(true);
+    expect(state.successExitPhase).toBe('centre');
+    expect(state.exitCentreStepsRemaining).toBe(29);
+  });
+
+  it('runs exactly 30 centre steps then moves upward with no extra idle step', () => {
+    const runtime = createTestCombatRuntime();
+    // Move the Aircraft off the 50% VW rest position so the centre phase has
+    // actual horizontal movement to perform.
+    runtime.submit({ type: 'combat/pointer-move', x: 900, y: 480 });
+    for (let index = 0; index < 180; index += 1) {
+      runtime.advance(FIXED_STEP_SECONDS);
+    }
+    expect(runtime.getState().aircraft.centerX).toBeGreaterThan(880);
+    runtime.submitDebug({ type: 'combat-debug/win-mission' });
+    runtime.authorizeSuccessExit();
+    let state = runtime.getState();
+    const startCenterX = state.aircraft.centerX;
+    for (let index = 0; index < 30; index += 1) {
+      state = runtime.advance(FIXED_STEP_SECONDS);
+      expect(state.successExitPhase).toBe('centre');
+      expect(state.exitCentreStepsRemaining).toBe(29 - index);
+    }
+    // After exactly 30 fixed steps the Aircraft reached 50% VW and the centre
+    // phase is exhausted; the very next step must already move upward (the
+    // previous code consumed one idle step at the transition).
+    expect(state.aircraft.centerX).toBeCloseTo(state.viewportWidth * 0.5, 6);
+    expect(state.exitCentreStepsRemaining).toBe(0);
+    expect(startCenterX).toBeGreaterThan(state.aircraft.centerX);
+    const beforeY = state.aircraft.centerY;
+    const upward = runtime.advance(FIXED_STEP_SECONDS);
+    expect(upward.successExitPhase).toBe('fly-up');
+    expect(upward.aircraft.centerY).toBeLessThan(beforeY);
+    expect(upward.aircraft.centerX).toBe(state.aircraft.centerX);
+  });
+
+  it('a repeated authorize is inert and the exit completes and dispatches once', () => {
+    const runtime = createTestCombatRuntime();
+    runtime.submitDebug({ type: 'combat-debug/win-mission' });
+    runtime.authorizeSuccessExit();
+    runtime.authorizeSuccessExit(); // inert
+    let state = runtime.getState();
+    // 30 centre steps + 85 fly-up steps fully exit the 1280x600 viewport
+    // (48 px tall aircraft at 480 px, 60% VH/s = 6 px/step).
+    for (let index = 0; index < 30 + 90; index += 1) {
+      state = runtime.advance(FIXED_STEP_SECONDS);
+      if (state.successExitPhase === 'complete') {
+        break;
+      }
+    }
+    expect(state.successExitPhase).toBe('complete');
+    expect(
+      state.aircraft.centerY + state.aircraftHeight / 2,
+    ).toBeLessThanOrEqual(0);
   });
 });

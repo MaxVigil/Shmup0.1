@@ -7,5 +7,10 @@ export { PauseOverlay } from './pause-overlay';
 export type { PauseOverlayProps } from './pause-overlay';
 export { SettingsOverlay } from './settings-overlay';
 export type { SettingsOverlayProps } from './settings-overlay';
+export {
+  SaveConflictOverlay,
+  SaveErrorOverlay,
+  TerminalExitPauseOverlay,
+} from './terminal-save-overlays';
 export { WeaponSelectionOverlay } from './weapon-selection-overlay';
 export type { WeaponSelectionOverlayProps } from './weapon-selection-overlay';

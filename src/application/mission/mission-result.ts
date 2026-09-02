@@ -9,12 +9,21 @@
  * carries the pre-committed persisted mission progression
  * (`unlockedMissionIdsAfter`, `completedMissionIdsAfter`) so the session
  * mirrors the durable unlock/completion exactly once (V02-AC-002).
+ *
+ * V02-WI-04: the Success result additionally relays the simulation-owned
+ * mission run facts (Destroyed/Escaped counts by type, pending combat rewards,
+ * escape penalties) so the v0.2 Success Result Overlay (Epic §15.4) presents
+ * the committed run without mutating or re-computing any economy.
  */
-import type { MissionId } from '@domain/index';
+import type { EnemyType, MissionId } from '@domain/index';
 
 /** Authoritative terminal trigger emitted by the Combat simulation. */
 export type CombatTerminalResult =
   { readonly kind: 'success' } | { readonly kind: 'defeat' };
+
+/** Per-role destroyed/escaped counts relayed from the authoritative Combat
+ *  simulation at the Success commitment instant. */
+export type RoleCounts = Readonly<Record<EnemyType, number>>;
 
 /** One typed Mission Result committed through `mission/result`. */
 export type MissionResult =
@@ -23,9 +32,19 @@ export type MissionResult =
       readonly missionInstanceOrdinal: number;
       readonly creditsAfter: number;
       readonly hullIntegrityAfter: number;
-      /** Credits earned by this Success (the seam completion reward); shown by
-       *  the temporary result overlay until the v0.2 result presentation. */
+      /** Total Credits earned by this Success (`netCombat + completionReward`). */
       readonly creditsEarned: number;
+      /** Pending combat rewards (Epic §12) relayed for presentation. */
+      readonly combatRewards: number;
+      /** Pending escape penalties (Epic §12) relayed for presentation. */
+      readonly escapePenalties: number;
+      /** Net combat payout `max(0, combatRewards - escapePenalties)`. */
+      readonly netCombatReward: number;
+      readonly completionReward: number;
+      /** The mission newly unlocked by this Success, or `null` (Epic §15.4). */
+      readonly newlyUnlockedMissionId: MissionId | null;
+      readonly destroyedCounts: RoleCounts;
+      readonly escapedCounts: RoleCounts;
       /** Durable mission progression after the atomic commitment (V02-WI-03). */
       readonly unlockedMissionIdsAfter: readonly MissionId[];
       readonly completedMissionIdsAfter: readonly MissionId[];

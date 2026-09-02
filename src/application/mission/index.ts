@@ -6,8 +6,11 @@ export type { AbortMissionDeps, AbortMissionOutcome } from './abort-mission';
 export { commitMissionResult } from './commit-mission-result';
 export type {
   CommitMissionResultDeps,
+  CommitMissionResultResult,
   MissionCommitOutcome,
+  SuccessEconomyRelay,
 } from './commit-mission-result';
+export { emptyRoleCounts } from './commit-mission-result';
 export { failMissionStart } from './fail-mission-start';
 export type {
   FailMissionStartDeps,

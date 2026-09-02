@@ -62,6 +62,23 @@ function storeWithPendingResult(): SessionStore {
       unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
       completedMissionIdsAfter: ['interception-01'],
       creditsEarned: 8,
+      combatRewards: 0,
+      escapePenalties: 0,
+      netCombatReward: 0,
+      completionReward: 8,
+      newlyUnlockedMissionId: 'interception-02',
+      destroyedCounts: {
+        'basic-drone': 0,
+        'ranged-drone': 0,
+        'hunter-drone': 0,
+        'elite-drone': 0,
+      },
+      escapedCounts: {
+        'basic-drone': 0,
+        'ranged-drone': 0,
+        'hunter-drone': 0,
+        'elite-drone': 0,
+      },
     },
   });
   return store;
@@ -172,7 +189,7 @@ describe('BaseShell', () => {
     renderShell(store);
     // Exactly one blocking Overlay: the Mission Result (Continue), never Settings.
     expect(
-      screen.getByRole('heading', { name: 'Mission Complete' }),
+      screen.getByRole('heading', { name: 'MISSION COMPLETE' }),
     ).toBeDefined();
 
     // Settings Button is disabled for user activation…
@@ -185,7 +202,7 @@ describe('BaseShell', () => {
     });
     expect(screen.queryByRole('heading', { name: 'Settings' })).toBeNull();
     expect(
-      screen.getByRole('heading', { name: 'Mission Complete' }),
+      screen.getByRole('heading', { name: 'MISSION COMPLETE' }),
     ).toBeDefined();
 
     // Base Navigation stays blocked: the pending Result cannot be bypassed.
@@ -194,7 +211,7 @@ describe('BaseShell', () => {
     });
     expect(store.getState()?.currentScreen).toBe('operations');
     expect(
-      screen.getByRole('heading', { name: 'Mission Complete' }),
+      screen.getByRole('heading', { name: 'MISSION COMPLETE' }),
     ).toBeDefined();
 
     // Continue remains the only continuation point and clears the boundary.
@@ -202,7 +219,7 @@ describe('BaseShell', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     });
     expect(
-      screen.queryByRole('heading', { name: 'Mission Complete' }),
+      screen.queryByRole('heading', { name: 'MISSION COMPLETE' }),
     ).toBeNull();
     // Settings becomes available again after the Result is consumed.
     expect(

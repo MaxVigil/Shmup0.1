@@ -3,9 +3,10 @@ import type { Page } from '@playwright/test';
 
 /**
  * S12 Mission Resolution and Return Loop — minimal wiring-level browser
- * evidence (Base §9.5, AC-032/033, MASTER-AC-005). The session seed is fixed
- * through the existing crypto seed path so the natural mission produces a
- * deterministic Defeat at ~24 s (session seed 19023). The test proves the
+ * evidence (Base §9.5, AC-032/033, MASTER-AC-005). V02-WI-04 authored M01
+ * staging (first arrival at 10 s) removes the legacy natural early-Defeat
+ * seed; the deterministic dev-only Debug `Lose Mission` action enters the same
+ * accepted v0.1 Defeat seam the WI-05 contract replaces. The test proves the
  * Defeat Mission Result Overlay opens and blocks, Continue returns to
  * Operations with the committed state (Hull 25, Credits unchanged) and permits
  * another mission with a fresh runtime, and there are no page errors or
@@ -72,8 +73,10 @@ test(
     await startCombatWithSeed(page, DEFEAT_SESSION_SEED);
     const requestsAfterFirstCombat = assetRequests.length;
 
-    // The natural mission resolves in Defeat: the Mission Result Overlay opens
-    // as the only continuation point.
+    // The dev-only Debug `Lose Mission` action enters the normal Defeat seam:
+    // the Mission Result Overlay opens as the only continuation point.
+    await page.keyboard.press('F1');
+    await page.getByRole('button', { name: 'Lose Mission' }).click();
     const dialog = page.getByRole('dialog');
     await expect
       .poll(
@@ -83,7 +86,7 @@ test(
           }
           return dialog.getByRole('heading').textContent();
         },
-        { timeout: 50000 },
+        { timeout: 5000 },
       )
       .toBe('Mission Failed');
     await expect(dialog.getByText('Reward')).toBeVisible();

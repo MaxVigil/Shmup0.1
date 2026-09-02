@@ -34,6 +34,8 @@ describe('applyMissionSuccess (Epic §6.2, §12.2; V02-AC-002, V02-AC-020)', () 
       0,
       'interception-01',
       80,
+      0,
+      0,
       8,
       'interception-02',
     );
@@ -69,6 +71,8 @@ describe('applyMissionSuccess (Epic §6.2, §12.2; V02-AC-002, V02-AC-020)', () 
       5,
       'interception-03',
       60,
+      0,
+      0,
       16,
       null,
     );
@@ -105,6 +109,8 @@ describe('applyMissionSuccess (Epic §6.2, §12.2; V02-AC-002, V02-AC-020)', () 
       3,
       'interception-01',
       90,
+      0,
+      0,
       8,
       'interception-02',
     );
@@ -132,6 +138,8 @@ describe('applyMissionSuccess (Epic §6.2, §12.2; V02-AC-002, V02-AC-020)', () 
       7, // non-matching attempt id
       'interception-01',
       80,
+      0,
+      0,
       8,
       'interception-02',
     );
@@ -152,6 +160,8 @@ describe('applyMissionSuccess (Epic §6.2, §12.2; V02-AC-002, V02-AC-020)', () 
       0,
       'interception-02',
       80,
+      0,
+      0,
       8,
       'interception-02',
     );
@@ -168,6 +178,8 @@ describe('applyMissionSuccess (Epic §6.2, §12.2; V02-AC-002, V02-AC-020)', () 
         0,
         'interception-01',
         80,
+        0,
+        0,
         8,
         'interception-02',
       ),
@@ -186,6 +198,8 @@ describe('applyMissionSuccess (Epic §6.2, §12.2; V02-AC-002, V02-AC-020)', () 
         0,
         'interception-01',
         101,
+        0,
+        0,
         8,
         'interception-02',
       ),
@@ -196,6 +210,8 @@ describe('applyMissionSuccess (Epic §6.2, §12.2; V02-AC-002, V02-AC-020)', () 
         0,
         'interception-01',
         80,
+        0,
+        0,
         8,
         'not-a-mission' as never,
       ),

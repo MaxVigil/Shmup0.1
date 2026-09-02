@@ -59,12 +59,56 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
       roleDelays: [{ type: 'ranged-drone', delaySeconds: 2 }],
     });
     expect(plan.encounters[3]).toMatchObject({
-      entryRegion: null,
       formation: null,
       roleDelays: [{ type: 'hunter-drone', delaySeconds: 3 }],
     });
+    // e4/e5 are seeded Hunter encounters (V02-WI-04): their entry region is
+    // resolved from the mission-data stream in authored order.
+    expect(['upper-left', 'upper-right']).toContain(
+      plan.encounters[3]?.entryRegion,
+    );
+    expect(['upper-left', 'upper-right']).toContain(
+      plan.encounters[4]?.entryRegion,
+    );
     // Fixed encounters carry no seeded variant set.
     expect(plan.encounters[0]?.entryVariants).toBeNull();
+  });
+
+  it('resolves the exact Mission 01 Arrival Groups with normalized placements (V02-DEC-021, V02-AC-003)', () => {
+    const plan = resolveMissionEncounters(
+      INTERCEPTION_01,
+      SEED,
+      FIXED_STEP_SECONDS,
+    );
+    // e2: +0 s two Top Basics and +2 s one Top Ranged at fraction 0.5.
+    const e2 = plan.encounters[1];
+    expect(e2?.staging?.map((group) => group.stepIndex)).toEqual([
+      Math.round(55 / FIXED_STEP_SECONDS),
+      Math.round(57 / FIXED_STEP_SECONDS),
+    ]);
+    expect(e2?.staging?.[1]?.members).toEqual([
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.5 },
+      },
+    ]);
+    // e3/e4/e5 seeded-side Hunters resolve to their drawn side at 20% VH.
+    for (const index of [2, 3, 4]) {
+      const members = plan.encounters[index]?.staging?.flatMap(
+        (group) => group.members,
+      );
+      const hunter = members?.find((member) => member.type === 'hunter-drone');
+      expect(hunter?.placement.kind).toBe('side');
+      if (hunter?.placement.kind === 'side') {
+        expect(hunter.placement.yViewportFraction).toBe(0.2);
+        expect(['upper-left', 'upper-right']).toContain(hunter.placement.side);
+      }
+    }
+    // Top Placements consume zero draws: only the three seeded Hunter draws
+    // occurred, in e3 → e4 → e5 order (the e5 member side matches e5's region).
+    expect(plan.encounters[4]?.staging?.[0]?.members[4]?.placement.kind).toBe(
+      'side',
+    );
   });
 
   it('preserves the delayed-role association for the V02-WI-04 consumer (C02)', () => {

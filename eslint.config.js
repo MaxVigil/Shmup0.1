@@ -14,6 +14,8 @@ export default tseslint.config(
     ignores: [
       'assets/**',
       'dist/**',
+      'dist-evidence/**',
+      'dist-evidence-uninstrumented/**',
       'node_modules/**',
       'playwright-report/**',
       'test-results/**',

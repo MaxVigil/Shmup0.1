@@ -12,7 +12,7 @@ import {
   PILOTS,
   PLAYER_PROJECTILE,
 } from '../index';
-import type { MissionDefinition } from '../missions';
+import type { EncounterDefinition, MissionDefinition } from '../missions';
 import type { WeaponDefinition } from '../weapons';
 import { isContentCatalogue, validateCatalogue } from './validate-catalogue';
 
@@ -384,6 +384,68 @@ describe('validateCatalogue', () => {
     ).toBe(true);
   });
 
+  it('rejects a Mission 01 encounter whose staging is missing while a sibling is staged (V02-WI-04 C01)', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_01,
+      encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
+        index === 2
+          ? ({
+              ...encounter,
+              staging: undefined,
+            } as unknown as EncounterDefinition)
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith(registryWith(invalidMission)),
+    );
+    expect(
+      issues.some(
+        (issue) =>
+          issue.path === 'missions[0].encounters' &&
+          /every Interception 01 encounter/.test(issue.message),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects runtime staging on Missions 02 or 03 (V02-WI-04 C01)', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_02,
+      encounters: INTERCEPTION_02.encounters.map((encounter, index) =>
+        index === 0
+          ? {
+              ...encounter,
+              staging: [
+                {
+                  offsetSeconds: 0,
+                  members: [
+                    {
+                      type: 'basic-drone',
+                      placement: { kind: 'top', fraction: 0.5 },
+                    },
+                  ],
+                },
+              ],
+            }
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith({
+        missions: [INTERCEPTION_01, invalidMission, INTERCEPTION_03],
+      }),
+    );
+    expect(
+      issues.some(
+        (issue) =>
+          issue.path === 'missions[1].encounters' &&
+          /only Mission 01 may carry runtime Arrival Groups/.test(
+            issue.message,
+          ),
+      ),
+    ).toBe(true);
+  });
+
   it('rejects an empty pilot list', () => {
     const issues = validateCatalogue(contentCatalogueWith({ pilots: [] }));
     expect(issues.some((issue) => issue.path === 'pilots')).toBe(true);
@@ -511,15 +573,18 @@ describe('validateCatalogue', () => {
     ).toBe(true);
   });
 
-  it('rejects an invalid projectile speed', () => {
+  it('rejects an invalid weapon projectile speed', () => {
+    const invalidWeapon: WeaponDefinition = {
+      ...MACHINE_GUN,
+      projectileSpeedViewportHeightPerSecond: 0,
+    };
     const issues = validateCatalogue(
-      contentCatalogueWith({
-        projectile: { ...PLAYER_PROJECTILE, speedViewportHeightPerSecond: 0 },
-      }),
+      contentCatalogueWith({ weapons: [invalidWeapon] }),
     );
     expect(
       issues.some(
-        (issue) => issue.path === 'projectile.speedViewportHeightPerSecond',
+        (issue) =>
+          issue.path === 'weapons[0].projectileSpeedViewportHeightPerSecond',
       ),
     ).toBe(true);
   });

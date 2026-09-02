@@ -11,7 +11,10 @@ import type { AssetPreloadResult } from '@application/ports';
 import type { ContentCatalogue } from '@application/content';
 import { INTERCEPTION_01, INTERCEPTION_03 } from '@application/content';
 import { contentCatalogueWith } from '@test-support/content';
-import { createInitializedSessionStore } from '@test-support/session';
+import {
+  createInitializedSessionStore,
+  successMissionResult,
+} from '@test-support/session';
 import { createApplicationContextValue } from '@test-support/ui';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import { ApplicationContext } from '../application-context';
@@ -81,15 +84,14 @@ function storeWithPendingResult(): SessionStore {
   });
   store.dispatch({
     type: 'mission/result',
-    result: {
-      kind: 'success',
+    result: successMissionResult({
       missionInstanceOrdinal: 0,
       creditsAfter: 13,
       hullIntegrityAfter: 80,
       unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
       completedMissionIdsAfter: ['interception-01'],
       creditsEarned: 8,
-    },
+    }),
   });
   return store;
 }

@@ -1,18 +1,30 @@
 import type { CombatSession, CombatSessionInput } from '@application/combat';
+import type { MissionResult } from '@application/mission';
 import {
   buildCombatObservability,
   createCombatSimulationRuntime,
+  EVIDENCE_COUNTERS_ENABLED,
+  EVIDENCE_MODE,
+  EVIDENCE_SCENARIOS_ENABLED,
   isDebugCommandEligible,
   synchronizeSharedModeAfterToggle,
   type CombatDebugCommand,
+  type CombatEvidenceRecord,
+  type CombatEvidenceWindow,
   type CombatInputCommand,
   type CombatObservability,
   type CombatSimulationState,
+  type TerminalCommitOutcome,
 } from '@application/combat';
 import { createCombatHudBridge } from './hud-bridge/combat-hud-bridge';
 import { createCombatGame } from './phaser/combat-game';
 import { CombatScene } from './phaser/combat-scene';
 import { resolveCombatGeometry } from './presentation-config/combat-config';
+import {
+  createFrozenTerminalPayload,
+  createTerminalRetryController,
+  terminalCommitDisposition,
+} from './terminal-commit';
 
 /**
  * Lazy Combat presentation entry (Repository Architecture §9, S08): invoked
@@ -55,11 +67,81 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     weapon: input.weapon,
     projectile: input.projectile,
     missionSeed: input.snapshot.combatMissionSeed,
-    enemy: input.enemy,
-    schedule: input.schedule,
+    mission: input.mission,
+    enemies: input.enemies,
     playerHullIntegrity: input.snapshot.hullIntegrity,
     playerMaximumHullIntegrity: input.playerMaximumHullIntegrity,
   });
+
+  // V02-WI-04 C03 development observability: in development builds only, expose
+  // the authoritative read-only observability snapshot to the browser evidence
+  // harness (same read model as the Debug Overlay, refreshed on demand, never
+  // mutating simulation state). Compile-time absent from production
+  // (`import.meta.env.DEV` is a constant `false` in production builds).
+  if (import.meta.env.DEV) {
+    (
+      window as Window & {
+        __shmupDevObservability__?: () => CombatObservability;
+      }
+    ).__shmupDevObservability__ = () =>
+      buildCombatObservability(runtime.getState());
+  }
+  // V02-WI-04 C03/C04 evidence builds: expose ONLY the approved read-only
+  // performance record (counters gate) plus the evidence-only benchmark
+  // scenarios and the workload-identity observer (scenarios gate). In the
+  // ordinary production build both gates are `false`, so this branch (and the
+  // `__shmupEvidence__` / `__legacyBenchmarkIdentity__` symbols) is eliminated
+  // from the artifact. The uninstrumented timing build has scenarios ON and
+  // counters OFF, so its surface has `runBenchmarkScenario` and the identity
+  // observer but no `read()` (no timing instrumentation).
+  if (EVIDENCE_SCENARIOS_ENABLED || EVIDENCE_COUNTERS_ENABLED) {
+    window.__shmupEvidence__ = {
+      ...(EVIDENCE_COUNTERS_ENABLED
+        ? {
+            read: (): CombatEvidenceRecord | null =>
+              runtime.getState().evidence?.record() ?? null,
+          }
+        : {}),
+      runBenchmarkScenario: (scenario: 'legacy-five-basic' | 'm01-e5') => {
+        if (
+          disposed ||
+          (scenario !== 'legacy-five-basic' && scenario !== 'm01-e5')
+        ) {
+          return;
+        }
+        // Evidence-only authoritative spawn through the deterministic runtime;
+        // the evidence builds have no Debug UI, so this is the only runner
+        // surface for the benchmark scenarios.
+        runtime.submitEvidenceBenchmark?.(scenario);
+      },
+    } as CombatEvidenceWindow;
+  }
+  // V02-WI-04 C04 workload-identity observer (scenarios gate): present in the
+  // UNINSTRUMENTED timing builds as well as Pass A so both legacy proxy sides
+  // can prove exactly five Basic + zero other enemies concurrently. Reads the
+  // CURRENT active mix — never cumulative maxima or timing.
+  if (EVIDENCE_SCENARIOS_ENABLED) {
+    window.__legacyBenchmarkIdentity__ = {
+      spawnFiveBasic: () =>
+        runtime.submitEvidenceBenchmark?.('legacy-five-basic'),
+      readActiveByType: () => {
+        const state = runtime.getState();
+        const counts: Record<
+          'basic-drone' | 'ranged-drone' | 'hunter-drone' | 'elite-drone',
+          number
+        > = {
+          'basic-drone': 0,
+          'ranged-drone': 0,
+          'hunter-drone': 0,
+          'elite-drone': 0,
+        };
+        for (const enemy of state.enemies) {
+          counts[enemy.type] += 1;
+        }
+        return counts;
+      },
+    };
+  }
 
   const submitCommand = (command: CombatInputCommand): void => {
     const before = runtime.getState().mode;
@@ -71,28 +153,119 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     }
   };
 
-  // S12: relay the authoritative terminal trigger exactly once. Phaser/React
-  // never calculate a result, mutate Credits/Hull, or touch persistence — the
-  // WI-02 application command owns the persisted campaign transaction and then
-  // updates the Session Store (Epic §13, V02-AC-020). S13: forced Debug results
-  // reuse the same relay, so the runtime disposes once through normal mission
-  // resolution.
+  // S12 + V02-WI-04: relay the authoritative terminal trigger exactly once.
+  // Phaser/React never calculate a result, mutate Credits/Hull, or touch
+  // persistence — the WI-02 application command owns the persisted campaign
+  // transaction and exposes the typed pre-committed MissionResult. A Success
+  // result is committed atomically at the terminal step, but its session
+  // dispatch is deferred until the immutable deterministic centre-and-up exit
+  // sequence completes (Epic §13.3, V02-AC-023); the v0.1 Defeat seam
+  // dispatches immediately. S13: forced Debug results reuse the same relay.
+  // V02-WI-04 C02: the commit reports one typed TerminalCommitOutcome; only a
+  // committed Success may authorize the deterministic exit, while failed /
+  // rejected opens Save Error and inert opens Save Conflict.
   let terminalDispatched = false;
-  const relayTerminalIfPresent = (state: CombatSimulationState): void => {
-    if (terminalDispatched || state.terminalResult === null) {
+  let pendingSuccessResult: MissionResult | null = null;
+  let successResultDispatched = false;
+  const retryController = createTerminalRetryController();
+  const frozenPayload = createFrozenTerminalPayload();
+  const dispatchSaveState = (
+    type: 'combat-terminal/save-error' | 'combat-terminal/save-conflict',
+  ): void => {
+    input.store.dispatch({
+      type,
+      missionInstanceOrdinal: input.snapshot.missionInstanceOrdinal,
+    });
+  };
+  const handleCommitOutcome = (outcome: TerminalCommitOutcome): void => {
+    const disposition = terminalCommitDisposition(outcome);
+    if (disposition.kind === 'authorize-success') {
+      pendingSuccessResult = disposition.result;
+      // V02-WI-04 C01: the deterministic exit advances only after the
+      // campaign transaction has committed Success (Epic §13.3 order:
+      // freeze → commit → exit).
+      runtime.authorizeSuccessExit();
+    }
+    // A committed outcome closes Save Error (recover is inert otherwise):
+    // the Success exit runs (deferred dispatch) or the Defeat seam already
+    // dispatched the result, which resets the lifecycle.
+    if (
+      disposition.kind === 'authorize-success' ||
+      disposition.kind === 'recover'
+    ) {
+      input.store.dispatch({
+        type: 'combat-terminal/recover',
+        missionInstanceOrdinal: input.snapshot.missionInstanceOrdinal,
+      });
       return;
     }
-    terminalDispatched = true;
+    if (disposition.kind === 'save-conflict') {
+      dispatchSaveState('combat-terminal/save-conflict');
+      return;
+    }
+    // save-error (failed | rejected).
+    dispatchSaveState('combat-terminal/save-error');
+  };
+  const commitFrozenTerminal = (
+    onComplete: (outcome: TerminalCommitOutcome) => void,
+  ): void => {
+    const state = runtime.getState();
+    if (state.terminalResult === null) {
+      return;
+    }
+    // The frozen payload reuses the exact terminal, attempt/instance identity,
+    // and the economy relay frozen at the first relay (never re-read).
     input.commitTerminalResult(
       state.terminalResult,
       state.playerHullIntegrity,
       input.snapshot.missionAttemptId,
       input.snapshot.missionInstanceOrdinal,
+      frozenPayload.currentEconomy() ?? {
+        combatRewards: state.pendingCombatRewards,
+        escapePenalties: state.pendingEscapePenalties,
+        destroyedCounts: state.destroyedCountByType,
+        escapedCounts: state.escapedCountByType,
+      },
+      onComplete,
     );
+  };
+  const relayTerminalIfPresent = (state: CombatSimulationState): void => {
+    if (terminalDispatched || state.terminalResult === null) {
+      return;
+    }
+    terminalDispatched = true;
+    frozenPayload.freezeEconomy({
+      combatRewards: state.pendingCombatRewards,
+      escapePenalties: state.pendingEscapePenalties,
+      destroyedCounts: state.destroyedCountByType,
+      escapedCounts: state.escapedCountByType,
+    });
+    commitFrozenTerminal(handleCommitOutcome);
+  };
+  const dispatchSuccessWhenExitComplete = (
+    state: CombatSimulationState,
+  ): void => {
+    if (
+      successResultDispatched ||
+      pendingSuccessResult === null ||
+      state.successExitPhase !== 'complete'
+    ) {
+      return;
+    }
+    successResultDispatched = true;
+    // The persist-then-session ordering is preserved: the command resolved
+    // only after the atomic campaign transaction succeeded. The session
+    // reducer validates the originating Mission Instance ordinal.
+    input.store.dispatch({
+      type: 'mission/result',
+      result: pendingSuccessResult,
+    });
+    pendingSuccessResult = null;
   };
   const advanceFrame = (frameDeltaSeconds: number): CombatSimulationState => {
     const state = runtime.advance(frameDeltaSeconds);
     relayTerminalIfPresent(state);
+    dispatchSuccessWhenExitComplete(state);
     return state;
   };
 
@@ -125,6 +298,7 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
       aircraftAsset?.status === 'ready'
         ? (aircraftAsset.imageDataUri ?? aircraftAsset.url)
         : null,
+    preparedAssets: input.preparedAssets,
     submitCommand,
     advanceFrame,
     getSimulationState: () => runtime.getState(),
@@ -231,10 +405,50 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
       runtime.submitDebug(command);
       // Forced Debug results enter the same S12 typed terminal-result relay;
       // repeated or racing commands after the first terminal are strict no-ops.
-      relayTerminalIfPresent(runtime.getState());
+      const after = runtime.getState();
+      relayTerminalIfPresent(after);
+      // V02-WI-04 C01: forced Success runs the same committed 0.5 s centre
+      // phase and 60% VH/s upward exit as natural Success. The Debug Overlay
+      // holds the runtime paused, so it is closed through the authoritative
+      // lifecycle (unpausing when Debug opened from running Combat) before the
+      // committed exit advances; the exit itself still waits for the campaign
+      // transaction to commit through the `authorizeSuccessExit` seam.
+      if (after.terminalResult?.kind === 'success') {
+        input.store.dispatch({
+          type: 'combat-lifecycle/close-debug',
+          missionInstanceOrdinal: input.snapshot.missionInstanceOrdinal,
+        });
+      }
     },
     getObservability(): CombatObservability {
       return buildCombatObservability(runtime.getState());
+    },
+    retryTerminalSave() {
+      if (disposed || !retryController.beginRetry()) {
+        return;
+      }
+      const state = runtime.getState();
+      if (state.terminalResult === null) {
+        retryController.finishRetry();
+        return;
+      }
+      // Single-flight: only one retry in flight at a time; the callback clears
+      // the flag on every typed outcome (including a repeated failure or
+      // rejection), so the user may retry again while Combat stays frozen.
+      commitFrozenTerminal((outcome) => {
+        retryController.finishRetry();
+        handleCommitOutcome(outcome);
+      });
+    },
+    reloadForSaveConflict() {
+      // V02-WI-04 C02: Reload is the only Save Conflict continuation. It
+      // performs browser navigation without any local reward, result, campaign
+      // mutation, or exit animation, and never reuses the failed terminal as
+      // authority.
+      if (disposed) {
+        return;
+      }
+      window.location.reload();
     },
     dispose() {
       if (disposed) {
@@ -242,6 +456,19 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
       }
       disposed = true;
       unsubscribeLifecycle();
+      if (EVIDENCE_MODE) {
+        delete window.__shmupEvidence__;
+      }
+      if (EVIDENCE_SCENARIOS_ENABLED) {
+        delete window.__legacyBenchmarkIdentity__;
+      }
+      if (import.meta.env.DEV) {
+        delete (
+          window as Window & {
+            __shmupDevObservability__?: () => CombatObservability;
+          }
+        ).__shmupDevObservability__;
+      }
       if (resizeObserver !== null) {
         resizeObserver.disconnect();
         resizeObserver = null;

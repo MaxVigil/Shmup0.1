@@ -13,6 +13,7 @@ export type MissionStartResult =
         | 'no-session'
         | 'mission-not-found'
         | 'mission-not-available'
+        | 'mission-not-ready'
         | 'active-mission-exists'
         | 'mission-result-pending'
         | 'persist-failed';
@@ -70,6 +71,17 @@ export async function startMission(
   }
   if (!session.unlockedMissionIds.includes(missionId)) {
     return { kind: 'rejected', reason: 'mission-not-available' };
+  }
+  // V02-WI-04 bounded staging: only Mission 01 carries authored runtime
+  // Arrival Groups. An unlocked Mission 02/03 (reachable after Mission 01
+  // Success) is rejected before any mission-start transaction until the
+  // Product Owner records its exact staging; the runtime never infers
+  // geometry for a mission that has none.
+  const hasRuntimeStaging = mission.encounters.some(
+    (encounter) => (encounter.staging?.length ?? 0) > 0,
+  );
+  if (!hasRuntimeStaging) {
+    return { kind: 'rejected', reason: 'mission-not-ready' };
   }
   if (session.activeMission !== 'none') {
     return { kind: 'rejected', reason: 'active-mission-exists' };

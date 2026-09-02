@@ -2,23 +2,36 @@ import Phaser from 'phaser';
 import {
   routeKeyInput,
   shouldForwardPointerMove,
+  type CombatEnemy,
   type CombatInputCommand,
   type CombatInputContext,
   type CombatSimulationState,
   type RoutedKeyIntent,
 } from '@application/combat';
+import type { PreparedRuntimeAsset } from '@application/ports';
 import type { CombatHudBridge } from '../hud-bridge/combat-hud-bridge';
 import type { CombatGeometry } from '../presentation-config/combat-config';
 import {
   COMBAT_RENDER_DEPTH,
+  formatCombatCountdown,
   resolveCombatGeometry,
 } from '../presentation-config/combat-config';
+import {
+  enemyVisualMappingFor,
+  resolveEnemyVisual,
+  type EnemyVisualKind,
+  type EnemyVisualResolution,
+  type FallbackPolygon,
+} from '../presentation-config/enemy-visuals';
+import type { EnemyType } from '@domain/index';
 
 export interface CombatSceneContext {
   readonly geometry: CombatGeometry;
   readonly bridge: CombatHudBridge;
   /** Prepared `german-fighter` runtime URL, or `null` for the approved fallback. */
   readonly aircraftUrl: string | null;
+  /** Prepared runtime assets for the per-role enemy visual resolution. */
+  readonly preparedAssets: readonly PreparedRuntimeAsset[];
   /** Forwards semantic input commands to the application simulation (S08). */
   readonly submitCommand: (command: CombatInputCommand) => void;
   /** Advances the fixed-step simulation by one rendered frame and returns the
@@ -66,8 +79,21 @@ export class CombatScene extends Phaser.Scene {
   >();
   /** Read-only stable-ID visual map for active Basic Drones (S10): Phaser
    *  reflects the authoritative snapshot each frame and never owns enemy
-   *  lifetime, spawning, movement, hitbox, or escape. */
+   *  lifetime, spawning, movement, hitbox, or escape. V02-WI-04: the map
+   *  holds per-role rendered visuals (prepared image or procedural fallback). */
   private readonly enemyVisuals = new Map<
+    number,
+    Phaser.GameObjects.GameObject
+  >();
+  /** Per-role resolved prepared-or-fallback result, fixed for the session. */
+  private readonly enemyVisualResolutions = new Map<
+    EnemyVisualKind,
+    EnemyVisualResolution
+  >();
+  /** True once the prepared texture for a kind is registered (no late swap). */
+  private readonly enemyTexturesReady = new Set<EnemyVisualKind>();
+  /** Read-only stable-ID visual map for enemy (Ranged) projectiles (v0.2 §9.2). */
+  private readonly enemyProjectileVisuals = new Map<
     number,
     Phaser.GameObjects.Rectangle
   >();
@@ -101,12 +127,14 @@ export class CombatScene extends Phaser.Scene {
       this.enemyVisuals.clear();
       this.destroyedEnemyFlashVisuals.clear();
       this.projectileVisuals.clear();
+      this.enemyProjectileVisuals.clear();
       this.aircraftFlashActive = false;
       this.removeCombatListeners();
     });
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleScaleResize, this);
     this.registerCombatListeners();
     this.cameras.main.setBackgroundColor(this.geometry.backgroundColor);
+    this.initEnemyVisualResolutions();
     this.layoutAircraft();
   }
 
@@ -122,7 +150,24 @@ export class CombatScene extends Phaser.Scene {
     this.syncEnemyVisuals();
     this.syncDestroyedEnemyFlashes();
     this.syncProjectileVisuals();
+    this.syncEnemyProjectileVisuals();
     this.applyAircraftFlash();
+  }
+
+  /** Resolves the per-role prepared-or-fallback visual once for the session
+   *  (V02-AC-025): the result is fixed when Boot settled; Combat never issues
+   *  a second request or swaps a late fallback. */
+  private initEnemyVisualResolutions(): void {
+    for (const kind of REGULAR_VISUAL_KINDS) {
+      this.enemyVisualResolutions.set(
+        kind,
+        resolveEnemyVisual(
+          kind,
+          this.context.preparedAssets,
+          this.geometry.shortSide,
+        ),
+      );
+    }
   }
 
   /** The rendered aircraft aspect ratio (image texture, or approved fallback). */
@@ -326,50 +371,172 @@ export class CombatScene extends Phaser.Scene {
    */
   /**
    * Reflects the authoritative enemy snapshot into the stable-ID visual map
-   * (S10): a solid `danger` square is created for each new Basic Drone id,
-   * existing visuals are repositioned/resized, and visuals whose id left the
-   * simulation (Escaped) are destroyed. Spawning, movement, hitbox, and escape
-   * all remain application-owned. The explicit `COMBAT_RENDER_DEPTH.enemy`
-   * layer keeps the canonical background → drone → projectile → aircraft order
-   * deterministic regardless of object-creation timing (Combat §4.5, AC-078).
+   * (V02-WI-04): each role renders its prepared image (once its texture is
+   * registered) or its approved procedural fallback geometry, both sized to
+   * the enemy's complete rendered bounds. Existing visuals are repositioned/
+   * resized, and visuals whose id left the simulation are destroyed. Spawning,
+   * movement, activation, hitbox, and escape remain application-owned; the
+   * explicit `COMBAT_RENDER_DEPTH.enemy` layer keeps render order deterministic.
    */
   private syncEnemyVisuals(): void {
     if (this.isShuttingDown) {
       return;
     }
-    const { enemies, enemySize, activeEnemyFlashStepsRemaining } =
-      this.simState;
+    const { enemies, activeEnemyFlashStepsRemaining } = this.simState;
     const seen = new Set<number>();
     for (const enemy of enemies) {
       seen.add(enemy.id);
-      // S11: an active enemy flashes white for 50 ms after a non-destroying hit.
-      const flashing = (activeEnemyFlashStepsRemaining[enemy.id] ?? 0) > 0;
-      const fillColor = hexToNumber(
-        flashing ? this.geometry.enemyFlashColor : this.geometry.droneColor,
-      );
-      let visual = this.enemyVisuals.get(enemy.id);
-      if (visual === undefined) {
-        visual = this.add
-          .rectangle(
-            enemy.centerX,
-            enemy.centerY,
-            enemySize,
-            enemySize,
-            fillColor,
-          )
-          .setDepth(COMBAT_RENDER_DEPTH.enemy);
-        this.enemyVisuals.set(enemy.id, visual);
-      } else {
-        visual.setPosition(enemy.centerX, enemy.centerY);
-        visual.setSize(enemySize, enemySize);
-        visual.setFillStyle(fillColor);
+      const kind = enemyVisualKindForType(enemy.type);
+      const resolution = this.enemyVisualResolutions.get(kind);
+      if (resolution === undefined) {
+        continue;
       }
+      const flashing = (activeEnemyFlashStepsRemaining[enemy.id] ?? 0) > 0;
+      if (resolution.status === 'ready') {
+        this.ensureEnemyTexture(kind, resolution);
+        if (!this.enemyTexturesReady.has(kind)) {
+          // The prepared texture is still decoding: render the stable fallback
+          // geometry (the session resolution is already fixed to `ready`).
+          this.upsertFallbackEnemyVisual(enemy, kind, flashing);
+          continue;
+        }
+        this.upsertImageEnemyVisual(enemy, kind, flashing);
+        continue;
+      }
+      this.upsertFallbackEnemyVisual(enemy, kind, flashing);
     }
     for (const [id, visual] of this.enemyVisuals) {
       if (!seen.has(id)) {
         visual.destroy();
         this.enemyVisuals.delete(id);
       }
+    }
+  }
+
+  /** Registers the prepared enemy texture exactly once per kind when ready. */
+  private ensureEnemyTexture(
+    kind: EnemyVisualKind,
+    resolution: Extract<EnemyVisualResolution, { readonly status: 'ready' }>,
+  ): void {
+    if (this.enemyTexturesReady.has(kind)) {
+      return;
+    }
+    const key = enemyTextureKey(kind);
+    if (this.textures.exists(key)) {
+      this.enemyTexturesReady.add(kind);
+      return;
+    }
+    const image = new Image();
+    const onLoad = (): void => {
+      if (this.isShuttingDown) {
+        return;
+      }
+      if (this.textures.addImage(key, image) === null) {
+        // Registration failure falls back to the approved procedural geometry
+        // for the remainder of the session; no second request is issued.
+        return;
+      }
+      this.enemyTexturesReady.add(kind);
+    };
+    image.onload = onLoad;
+    image.onerror = () => {
+      // The prepared URL failed after Boot settled: the fallback stays fixed.
+    };
+    image.src = resolution.url;
+  }
+
+  /** Renders one enemy as the prepared image (texture already registered). */
+  private upsertImageEnemyVisual(
+    enemy: CombatEnemy,
+    kind: EnemyVisualKind,
+    flashing: boolean,
+  ): void {
+    const key = enemyTextureKey(kind);
+    const existing = this.enemyVisuals.get(enemy.id);
+    if (
+      existing !== undefined &&
+      !(existing instanceof Phaser.GameObjects.Image)
+    ) {
+      existing.destroy();
+      this.enemyVisuals.delete(enemy.id);
+    }
+    let visual = this.enemyVisuals.get(enemy.id) as
+      Phaser.GameObjects.Image | undefined;
+    if (visual === undefined) {
+      visual = this.add.image(enemy.centerX, enemy.centerY, key);
+      visual.setDepth(COMBAT_RENDER_DEPTH.enemy);
+      this.enemyVisuals.set(enemy.id, visual);
+    }
+    visual.setPosition(enemy.centerX, enemy.centerY);
+    visual.setDisplaySize(enemy.width, enemy.height);
+    if (flashing) {
+      visual.setTint(hexToNumber(this.geometry.enemyFlashColor));
+    } else {
+      visual.clearTint();
+    }
+  }
+
+  /** Renders one enemy as its approved procedural fallback geometry. */
+  private upsertFallbackEnemyVisual(
+    enemy: CombatEnemy,
+    kind: EnemyVisualKind,
+    flashing: boolean,
+  ): void {
+    const existing = this.enemyVisuals.get(enemy.id);
+    if (
+      existing !== undefined &&
+      !(existing instanceof Phaser.GameObjects.Graphics)
+    ) {
+      existing.destroy();
+      this.enemyVisuals.delete(enemy.id);
+    }
+    let visual = this.enemyVisuals.get(enemy.id) as
+      Phaser.GameObjects.Graphics | undefined;
+    if (visual === undefined) {
+      visual = this.add.graphics();
+      visual.setDepth(COMBAT_RENDER_DEPTH.enemy);
+      this.enemyVisuals.set(enemy.id, visual);
+    }
+    const resolution = this.enemyVisualResolutions.get(kind);
+    const geometry =
+      resolution?.status === 'ready' ? undefined : resolution?.geometry;
+    visual.clear();
+    if (geometry === undefined) {
+      // A `ready` resolution whose texture is still decoding: draw the role's
+      // fallback shapes from the mapping so the enemy is never invisible.
+      this.drawFallbackShapes(
+        visual,
+        enemy,
+        enemyVisualMappingShapes(kind),
+        flashing,
+      );
+      return;
+    }
+    this.drawFallbackShapes(visual, enemy, geometry.shapes, flashing);
+    visual.setPosition(enemy.centerX, enemy.centerY);
+  }
+
+  private drawFallbackShapes(
+    graphics: Phaser.GameObjects.Graphics,
+    enemy: CombatEnemy,
+    shapes: readonly FallbackPolygon[],
+    flashing: boolean,
+  ): void {
+    graphics.clear();
+    graphics.setPosition(enemy.centerX, enemy.centerY);
+    for (const shape of shapes) {
+      const points: Phaser.Math.Vector2[] = shape.points.map(
+        ([x, y]) => new Phaser.Math.Vector2(x * enemy.width, y * enemy.height),
+      );
+      graphics.fillStyle(
+        hexToNumber(
+          flashing
+            ? this.geometry.enemyFlashColor
+            : fallbackFillColor(shape.fill, this.geometry),
+        ),
+        1,
+      );
+      graphics.fillPoints(points, true);
     }
   }
 
@@ -471,6 +638,40 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
+  private syncEnemyProjectileVisuals(): void {
+    if (this.isShuttingDown) {
+      return;
+    }
+    const { enemyProjectiles } = this.simState;
+    const seen = new Set<number>();
+    for (const projectile of enemyProjectiles) {
+      seen.add(projectile.id);
+      let visual = this.enemyProjectileVisuals.get(projectile.id);
+      if (visual === undefined) {
+        // The Ranged projectile is a solid horizontal `danger` rectangle whose
+        // complete bounds equal its authoritative AABB (v0.2 §9.2).
+        visual = this.add.rectangle(
+          projectile.centerX,
+          projectile.centerY,
+          projectile.width,
+          projectile.height,
+          hexToNumber(this.geometry.rangedProjectileColor),
+        );
+        visual.setDepth(COMBAT_RENDER_DEPTH.projectile);
+        this.enemyProjectileVisuals.set(projectile.id, visual);
+      } else {
+        visual.setPosition(projectile.centerX, projectile.centerY);
+        visual.setSize(projectile.width, projectile.height);
+      }
+    }
+    for (const [id, visual] of this.enemyProjectileVisuals) {
+      if (!seen.has(id)) {
+        visual.destroy();
+        this.enemyProjectileVisuals.delete(id);
+      }
+    }
+  }
+
   private placeAircraft(): void {
     if (this.aircraftLoadStarted) {
       return;
@@ -558,9 +759,10 @@ export class CombatScene extends Phaser.Scene {
     centerY: number,
     aircraftWidth: number,
   ): void {
-    // S11: the CombatHudBridge is updated from the authoritative player Hull
-    // every rendered frame so the bar width and aria-valuenow change in the
-    // same frame as damage, without any React per-frame state.
+    // V02-WI-04: the CombatHudBridge is updated from the authoritative player
+    // Hull, Countdown, and Critical Hull state every rendered frame so the bar
+    // width, fill, aria-valuenow, countdown text, and warning change in the
+    // same frame as the simulation — without any React per-frame state.
     this.context.bridge.update({
       aircraftCenterX: centerX,
       aircraftBottomY: centerY + this.geometry.aircraftHeightPx / 2,
@@ -568,9 +770,56 @@ export class CombatScene extends Phaser.Scene {
       hullRatio:
         this.simState.playerHullIntegrity /
         this.simState.playerMaximumHullIntegrity,
+      // Strict-below-25 danger fill (v0.2 §15.3, DS §8.26): at 25 it is accent.
+      hullDanger: this.simState.playerHullIntegrity < 25,
       viewportShortSide: this.geometry.shortSide,
+      countdownText: formatCombatCountdown(this.simState.countdownSeconds),
+      criticalHullVisible: this.simState.criticalHullMessageStepsRemaining > 0,
     });
   }
+}
+
+/** The three approved regular-enemy visual kinds consumed by V02-WI-04. */
+const REGULAR_VISUAL_KINDS: readonly EnemyVisualKind[] = [
+  'basic-drone',
+  'ranged-drone',
+  'hunter-drone',
+];
+
+/** Maps the authoritative enemy type to its visual kind. */
+function enemyVisualKindForType(type: EnemyType): EnemyVisualKind {
+  if (type === 'basic-drone') {
+    return 'basic-drone';
+  }
+  if (type === 'ranged-drone') {
+    return 'ranged-drone';
+  }
+  return 'hunter-drone';
+}
+
+function enemyTextureKey(kind: EnemyVisualKind): string {
+  return `enemy-visual-${kind}`;
+}
+
+/** Reads the approved fallback shape set for one kind (mapping owner). */
+function enemyVisualMappingShapes(
+  kind: EnemyVisualKind,
+): readonly FallbackPolygon[] {
+  return enemyVisualMappingFor(kind).fallback.shapes;
+}
+
+/** Resolves an approved fallback fill token to its rendered colour. */
+function fallbackFillColor(
+  fill: 'border-strong' | 'surface-raised' | 'accent',
+  geometry: CombatGeometry,
+): string {
+  if (fill === 'border-strong') {
+    return geometry.fallbackBorderStrongColor;
+  }
+  if (fill === 'surface-raised') {
+    return geometry.fallbackSurfaceRaisedColor;
+  }
+  return geometry.fallbackAccentColor;
 }
 
 function hexToNumber(hex: string): number {

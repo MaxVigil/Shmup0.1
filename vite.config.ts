@@ -80,6 +80,20 @@ export default defineConfig({
   },
   define: {
     __APP_BUILD_IDENTIFIER__: JSON.stringify(resolveBuildIdentifier()),
+    // V02-WI-04 C03/C04 two-pass performance evidence. The benchmark-scenario
+    // capability (`SHMUP_EVIDENCE=1`) and the workload-counter capability
+    // (`SHMUP_EVIDENCE_COUNTERS=1`) are independent compile-time flags:
+    // `build:evidence` enables both (Pass A), `build:evidence-uninstrumented`
+    // enables scenarios only so the post-integration legacy timing run carries
+    // the workload identity but no instrumentation, and the ordinary
+    // production build enables neither (dead code eliminated).
+    __SHMUP_EVIDENCE_SCENARIOS__:
+      process.env.SHMUP_EVIDENCE === '1' ||
+      process.env.SHMUP_EVIDENCE_COUNTERS === '1'
+        ? 'true'
+        : 'false',
+    __SHMUP_EVIDENCE_COUNTERS__:
+      process.env.SHMUP_EVIDENCE_COUNTERS === '1' ? 'true' : 'false',
   },
   plugins: [react(), cacheableRuntimeAssets()],
   resolve: {

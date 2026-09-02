@@ -64,13 +64,18 @@ function exactMarkerMatch(
 }
 
 /**
- * v0.2 Success transition (Epic §6.2, §12.2, V02-AC-002, V02-AC-020): the
- * authoritative atomic Success commitment through the campaign transaction —
- * grants the authored mission completion reward, marks the mission completed,
- * unlocks exactly the one defined next mission when the mission was not already
- * completed, retains the Combat Hull, and clears the active-mission marker — all
- * in one coherent before/after state, only for the exact campaign attempt that
- * started the mission.
+ * v0.2 Success transition (Epic §6.2, §12.2, V02-AC-002, V02-AC-013, V02-AC-020):
+ * the authoritative atomic Success commitment through the campaign transaction —
+ * grants the pending combat economy plus the authored mission completion reward,
+ * marks the mission completed, unlocks exactly the one defined next mission when
+ * the mission was not already completed, retains the Combat Hull, and clears the
+ * active-mission marker — all in one coherent before/after state, only for the
+ * exact campaign attempt that started the mission.
+ *
+ * Economy (Epic §12.2): `netCombat = max(0, combatRewards - escapePenalties)` and
+ * the credits increase is `netCombat + completionReward`. Credits are integers
+ * and can never go negative; escape penalties can reduce only the mission combat
+ * contribution, never the existing persistent balance.
  *
  * Idempotency: the transition requires the persisted marker to belong to the
  * exact `attemptId` AND the exact `missionId` that started it. Repeated,
@@ -86,6 +91,8 @@ export function applyMissionSuccess(
   attemptId: number,
   missionId: MissionId,
   combatHullIntegrity: number,
+  combatRewards: number,
+  escapePenalties: number,
   completionReward: number,
   unlockMissionId: MissionId | null,
 ): CampaignTransitionResult {
@@ -100,6 +107,10 @@ export function applyMissionSuccess(
   }
   if (
     !isHullIntegrity(combatHullIntegrity) ||
+    !Number.isInteger(combatRewards) ||
+    combatRewards < 0 ||
+    !Number.isInteger(escapePenalties) ||
+    escapePenalties < 0 ||
     !Number.isInteger(completionReward) ||
     completionReward < 0
   ) {
@@ -108,6 +119,7 @@ export function applyMissionSuccess(
   if (unlockMissionId !== null && !isMissionId(unlockMissionId)) {
     return { kind: 'rejected', reason: 'invalid-unlock-target' };
   }
+  const netCombat = Math.max(0, combatRewards - escapePenalties);
   const completedMissionIds = campaign.completedMissionIds.includes(missionId)
     ? campaign.completedMissionIds
     : [...campaign.completedMissionIds, missionId];
@@ -120,7 +132,7 @@ export function applyMissionSuccess(
     kind: 'applied',
     campaign: {
       ...campaign,
-      credits: campaign.credits + completionReward,
+      credits: campaign.credits + netCombat + completionReward,
       hullIntegrity: combatHullIntegrity,
       unlockedMissionIds,
       completedMissionIds,

@@ -67,110 +67,143 @@ function readHullBar(
   });
 }
 
-/** Longest contiguous near-white vertical run in any scanned column (feedback
- *  vs projectiles: a drone flash is a 24 px square, a projectile 9 px tall).
- *  The screenshot Buffer is decoded in-page through `createImageBitmap` (no
- *  data-URL round-trip) and the scan is bounded to the upper half — the
- *  deterministic enemy entry/destruction zone (Combat §7.4, AC-073): top
- *  entries descend at 0.12 × viewport-height per second and side entries spawn
- *  within the upper half, so every destroyed-drone flash occurs there.
+/** V02-WI-04 C01: in-page rAF-rate flash sampler. Reads the composited Combat
+ *  canvas through `toDataURL` every frame (no slow Playwright screenshot
+ *  round-trip), so the one-time deterministic 6-step (100 ms) near-white
+ *  destruction flash cannot straddle the sampling cadence. The scan is bounded
+ *  to the upper half — the deterministic enemy entry/destruction zone (Combat
+ *  §7.4, AC-073): top entries descend at 0.12 × viewport-height per second and
+ *  side entries spawn within the upper half, so every destroyed-drone flash
+ *  occurs there. Returns the longest near-white vertical run seen (feedback vs
+ *  projectiles: a drone flash is a 24+ px square, a projectile 9 px tall).
  */
-function maxNearWhiteRun(
-  page: Page,
-  width: number,
-  height: number,
-): Promise<number> {
-  return page
-    .locator('.ds-combat-canvas canvas')
-    .screenshot()
-    .then((shot) => scanShot(page, shot, width, height));
-}
-
-/** In-page scan of one screenshot Buffer: `createImageBitmap` decode, 1:1 copy
- *  of the upper-half rows into a fresh canvas, and pixel read. Every second
- *  column is scanned (a 24 px flash always contains ≥12 even-indexed columns,
- *  so the vertical-run detection is unaffected) to keep every sample inside
- *  the one-time 100 ms flash window under parallel load — the root cause of
- *  the review failure was a sampling cadence that could exceed the flash
- *  lifetime, not the deterministic flash itself (diagnostic recorded in
- *  `.agent-handoff/evidence`; V02-WI-02 correction C02). */
-function scanShot(
-  page: Page,
-  shot: Buffer,
-  width: number,
-  height: number,
-): Promise<number> {
-  const scanHeight = Math.floor(height / 2);
-  const base64 = shot.toString('base64');
+function scanCanvasForFlash(page: Page, windowMs: number): Promise<number> {
   return page.evaluate(
-    async ({ base64: b64, width: w, scanHeight: h }) => {
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      const blob = new Blob([bytes], { type: 'image/png' });
-      const bitmap = await createImageBitmap(blob);
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (ctx === null) {
-        return 0;
-      }
-      // 1:1 copy of the screenshot's TOP `h` rows (no scaling distortion).
-      ctx.drawImage(bitmap, 0, 0, w, h, 0, 0, w, h);
-      const data = ctx.getImageData(0, 0, w, h).data;
-      let maxRun = 0;
-      for (let x = 0; x < w; x += 2) {
-        let run = 0;
-        for (let y = 0; y < h; y += 1) {
-          const i = (y * w + x) * 4;
-          const nearWhite =
-            Math.abs(data[i] - 241) <= 3 &&
-            Math.abs(data[i + 1] - 245) <= 3 &&
-            Math.abs(data[i + 2] - 247) <= 3;
-          if (nearWhite) {
-            run += 1;
-            if (run > maxRun) {
-              maxRun = run;
-            }
-          } else {
-            run = 0;
-          }
+    (durationMs) =>
+      new Promise<number>((resolve) => {
+        const canvas = document.querySelector<HTMLCanvasElement>(
+          '.ds-combat-canvas canvas',
+        );
+        if (canvas === null) {
+          resolve(0);
+          return;
         }
-      }
-      return maxRun;
-    },
-    { base64, width, scanHeight },
+        let maxRun = 0;
+        const start = performance.now();
+        const halfHeight = Math.floor(canvas.height / 2);
+        const sample = (): void => {
+          try {
+            const url = canvas.toDataURL();
+            const image = new Image();
+            image.src = url;
+            image.decode().then(() => {
+              const ctx = document.createElement('canvas').getContext('2d', {
+                willReadFrequently: true,
+              });
+              if (ctx === null) {
+                resolve(maxRun);
+                return;
+              }
+              ctx.canvas.width = canvas.width;
+              ctx.canvas.height = halfHeight;
+              ctx.drawImage(image, 0, 0);
+              const data = ctx.getImageData(
+                0,
+                0,
+                canvas.width,
+                halfHeight,
+              ).data;
+              for (let x = 0; x < canvas.width; x += 2) {
+                let run = 0;
+                for (let y = 0; y < halfHeight; y += 1) {
+                  const i = (y * canvas.width + x) * 4;
+                  const nearWhite =
+                    Math.abs(data[i] - 241) <= 3 &&
+                    Math.abs(data[i + 1] - 245) <= 3 &&
+                    Math.abs(data[i + 2] - 247) <= 3;
+                  if (nearWhite) {
+                    run += 1;
+                    if (run > maxRun) {
+                      maxRun = run;
+                    }
+                  } else {
+                    run = 0;
+                  }
+                }
+              }
+              if (performance.now() - start < durationMs) {
+                requestAnimationFrame(sample);
+              } else {
+                resolve(maxRun);
+              }
+            });
+          } catch {
+            if (performance.now() - start < durationMs) {
+              requestAnimationFrame(sample);
+            } else {
+              resolve(maxRun);
+            }
+          }
+        };
+        requestAnimationFrame(sample);
+      }),
+    windowMs,
   );
 }
 
-test('authoritative Hull updates the visible and accessible Hull Bar (AC-059)', async ({
+test('authoritative Hull updates the visible/accessible Bar and the v0.2 CRITICAL HULL warning (AC-059, v0.2 §15.2–15.3)', async ({
   page,
 }) => {
+  test.setTimeout(150_000);
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   await startCombatWithSeed(page, CONTACT_SESSION_SEED);
   expect((await readHullBar(page))?.aria).toBe('100');
 
-  // A drone contacts the aircraft at ~6.5 s; the bar drops and persists.
+  // V02-WI-04 authored M01 staging (first arrival at 10 s) removes the legacy
+  // natural early-contact seed. Park the aircraft off the e2 Ranged column
+  // (x = 640) so the Ranged survives the automatic Machine Gun fire and its
+  // aimed projectiles land deterministically (first hit ~62 s).
+  await page.mouse.move(400, 480);
+
+  // Drive the authoritative Hull to 25 through the dev-only Debug Set Hull
+  // (V02-WI-04 C01: the corrected lower muzzle places the first Ranged shot
+  // reliably inside the viewport). The first Ranged hit then takes Hull to 13,
+  // strictly below 25, triggering the once-per-Mission-Instance 2 s CRITICAL
+  // HULL message and the danger fill in the same authoritative snapshot
+  // (v0.2 §15.3). The message is the rarest signal, so poll for it first.
+  await page.keyboard.press('F1');
+  await page.getByRole('button', { name: 'Set Hull: 25' }).click();
+  await page.keyboard.press('F1');
   await expect
     .poll(async () => Number((await readHullBar(page))?.aria), {
-      timeout: 20000,
+      timeout: 5000,
     })
-    .toBeLessThan(100);
+    .toBe(25);
 
-  // Width and accessible value change in the same authoritative snapshot.
+  await expect(page.locator('.ds-combat-critical-hull')).toBeVisible({
+    timeout: 90000,
+  });
+  await expect
+    .poll(async () => Number((await readHullBar(page))?.aria), {
+      timeout: 5000,
+    })
+    .toBeLessThan(25);
+  const dangerFill = await page
+    .locator('.ds-combat-hud__fill')
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(dangerFill).toBe('rgb(217, 103, 103)'); // --color-danger
   const after = await readHullBar(page);
   expect(after).not.toBeNull();
-  expect(after!.aria).toBe('75');
-  expect(Math.abs(after!.fillWidthRatio - 0.75)).toBeLessThan(0.02);
+  expect(
+    Math.abs(after!.fillWidthRatio - Number(after!.aria) / 100),
+  ).toBeLessThan(0.02);
 
-  // The bar remains at the damaged ratio (not a transient flash artifact).
-  const later = await readHullBar(page);
-  expect(later!.aria).toBe('75');
+  // The warning is a timed one-shot: it expires after ~2 s.
+  await expect(page.locator('.ds-combat-critical-hull')).toBeHidden({
+    timeout: 5000,
+  });
   expect(pageErrors).toEqual([]);
 });
 
@@ -182,28 +215,28 @@ test('enemy damage/destruction feedback renders and cleans up (AC-024, AC-058)',
 
   await startCombatWithSeed(page, DESTRUCTION_SESSION_SEED);
 
-  // The first projectile destruction of seed 86 happens at ~1 s. The flash is
-  // a one-time deterministic 6-step (100 ms) #f1f5f7 24 px square (Combat
-  // §8.5.1); poll with the dense in-page sampler so a single slow screenshot
-  // cannot straddle the whole window under parallel load (root cause of the
-  // review failure; diagnostic recorded in `.agent-handoff/evidence`).
-  let sawFlash = false;
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline && !sawFlash) {
-    if ((await maxNearWhiteRun(page, 1280, 600)) >= FLASH_RUN_THRESHOLD) {
-      sawFlash = true;
-    }
-  }
-  expect(sawFlash).toBe(true);
+  // V02-WI-04 C01: authored staging replaces the legacy natural early-
+  // destruction seed; the dev-only Debug Spawn Basic materializes one authored
+  // Basic Drone per click at the engagement-band centre directly in the
+  // automatic Machine Gun column. The in-page rAF-rate sampler reads the
+  // composited canvas every frame, so the one-time deterministic 6-step
+  // (100 ms) #f1f5f7 destruction flash (Combat §8.5.1) cannot be missed by a
+  // slower screenshot cadence (the review-failure root cause).
+  await page.keyboard.press('F1');
+  await page.getByRole('button', { name: 'Spawn Basic' }).click();
+  await page.getByRole('button', { name: 'Spawn Basic' }).click();
+  await page.getByRole('button', { name: 'Spawn Basic' }).click();
+  await page.keyboard.press('F1');
 
-  // The flash expires and the destroyed drone does not return: the long white
+  // The destruction happens ~1-2 s after the spawn; a 12 s in-page window is
+  // deterministic for the auto-fire column.
+  const flashRun = await scanCanvasForFlash(page, 12000);
+  expect(flashRun).toBeGreaterThanOrEqual(FLASH_RUN_THRESHOLD);
+
+  // The flash expires and the destroyed drones do not return: the long white
   // run disappears again.
-  await expect
-    .poll(async () => maxNearWhiteRun(page, 1280, 600), {
-      timeout: 8000,
-      intervals: [100, 100, 100, 100, 100, 100],
-    })
-    .toBeLessThan(FLASH_RUN_THRESHOLD);
+  const laterRun = await scanCanvasForFlash(page, 4000);
+  expect(laterRun).toBeLessThan(FLASH_RUN_THRESHOLD);
 
   expect(pageErrors).toEqual([]);
 });

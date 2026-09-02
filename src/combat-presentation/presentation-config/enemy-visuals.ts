@@ -1,4 +1,5 @@
 import type { PreparedRuntimeAsset } from '@application/ports';
+import { ENEMIES, enemyRenderedBounds } from '@application/content';
 
 /**
  * V02-WI-01 enemy visual presentation mapping (v0.2 Epic §16).
@@ -10,11 +11,11 @@ import type { PreparedRuntimeAsset } from '@application/ports';
  * complete rendered bounds, orientation, and gameplay-scale footprint as their
  * prepared sprites.
  *
- * WI-01 owns presentation configuration and evidence only: no enemy
- * simulation, content, missions, persistence, or player-visible product UI is
- * introduced here. Authoritative gameplay hitbox mapping is verified by the
- * Work Item that introduces each enemy's simulation consumer (regular enemies
- * in V02-WI-04, Elite in V02-WI-06).
+ * WI-01 owns presentation configuration and evidence only; WI-04 introduces
+ * the regular-enemy simulation consumers. The complete rendered bounds are
+ * sourced from the content `EnemyDefinition` values (V02-DEC-019) so the
+ * presentation always equals the authoritative gameplay AABB — a single
+ * content contract, never a second geometry authority.
  */
 
 export const ENEMY_VISUAL_KINDS = [
@@ -115,12 +116,27 @@ const ELITE_OUTER_SILHOUETTE: readonly FallbackPolygon[] = [
   },
 ];
 
+/** Derives one regular-enemy gameplay scale from the single content contract
+ *  (V02-DEC-019): the authoritative simulation AABB and the presentation's
+ *  complete rendered bounds always share these exact footprint/aspect values. */
+function regularScale(
+  type: 'basic-drone' | 'ranged-drone' | 'hunter-drone',
+): EnemyVisualScale {
+  const definition = ENEMIES.find((enemy) => enemy.type === type);
+  if (definition === undefined) {
+    throw new Error(`Missing regular-enemy definition for ${type}.`);
+  }
+  return {
+    footprintAreaRatio: definition.visualFootprintAreaRatio,
+    aspectRatio: definition.visualAspectRatio,
+  };
+}
+
 export const ENEMY_VISUAL_MAPPINGS: readonly EnemyVisualMapping[] = [
   {
     kind: 'basic-drone',
     assetId: 'enemy-basic-drone',
-    // §16.2: wide, short, simple swept-wing silhouette, 1.7–1.9:1 width:length.
-    scale: { footprintAreaRatio: 1, aspectRatio: 192 / 101 },
+    scale: regularScale('basic-drone'),
     fallback: {
       shapes: [
         {
@@ -140,7 +156,7 @@ export const ENEMY_VISUAL_MAPPINGS: readonly EnemyVisualMapping[] = [
     kind: 'ranged-drone',
     assetId: 'enemy-ranged-drone',
     // §16.2: heavier/wider gun platform with two weapon housings, 1.2× Basic.
-    scale: { footprintAreaRatio: 1.2, aspectRatio: 224 / 163 },
+    scale: regularScale('ranged-drone'),
     fallback: {
       shapes: [
         {
@@ -179,7 +195,7 @@ export const ENEMY_VISUAL_MAPPINGS: readonly EnemyVisualMapping[] = [
     assetId: 'enemy-hunter-drone',
     // §16.2: narrow, elongated, pointed interceptor, 0.8× Basic; must read as
     // an aircraft, not a missile, so the fallback adds small swept wings.
-    scale: { footprintAreaRatio: 0.8, aspectRatio: 114 / 192 },
+    scale: regularScale('hunter-drone'),
     fallback: {
       shapes: [
         // Narrow, elongated pointed fuselage with the nose at the bottom.
@@ -288,21 +304,22 @@ export interface EnemyRenderedBounds {
 
 /**
  * Complete rendered bounds at gameplay scale for the given viewport short
- * side. The complete rendered area equals `footprintAreaRatio × (0.04 ×
- * shortSide)²` (the historical Basic Drone rendered square area) and the
- * width/height split preserves the prepared-PNG aspect ratio exactly, so the
- * sprite and its procedural fallback always share the same centre, complete
- * bounds, and orientation.
+ * side. Delegates to the single application/content contract
+ * (`enemyRenderedBounds`), so the presentation and the authoritative gameplay
+ * AABB always resolve the same complete rendered bounds from the same content
+ * values (V02-DEC-019).
  */
 export function resolveEnemyRenderedBounds(
   mapping: EnemyVisualMapping,
   shortSidePx: number,
 ): EnemyRenderedBounds {
-  const areaPx2 = mapping.scale.footprintAreaRatio * (0.04 * shortSidePx) ** 2;
-  return {
-    widthPx: Math.sqrt(areaPx2 * mapping.scale.aspectRatio),
-    heightPx: Math.sqrt(areaPx2 / mapping.scale.aspectRatio),
-  };
+  return enemyRenderedBounds(
+    {
+      visualFootprintAreaRatio: mapping.scale.footprintAreaRatio,
+      visualAspectRatio: mapping.scale.aspectRatio,
+    },
+    shortSidePx,
+  );
 }
 
 export type EnemyVisualResolution =

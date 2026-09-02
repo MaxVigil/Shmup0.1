@@ -3,26 +3,36 @@ import { Suspense, lazy, useEffect, useRef } from 'react';
 import type { ReactElement } from 'react';
 import {
   loadCombatSession,
-  resolveBasicDrone,
   resolveEquippedWeapon,
   resolveGermanFighter,
-  resolveMissionSchedule,
+  resolveMission,
 } from '@application/combat';
 import type {
   CombatDebugCommand,
   CombatObservability,
   CombatSession,
+  TerminalCommitOutcome,
 } from '@application/combat';
 import {
   abortMission as abortMissionCommand,
   commitMissionResult as commitMissionResultCommand,
   failMissionStart,
 } from '@application/mission';
-import type { CombatTerminalResult } from '@application/mission';
+import { mapCommitMissionOutcome } from '@combat-presentation/terminal-commit';
+import type {
+  CombatTerminalResult,
+  SuccessEconomyRelay,
+} from '@application/mission';
 import { useApplication } from '../application-context';
 import { SettingsButton } from '../components';
 import { useSessionState } from '../hooks';
-import { PauseOverlay, SettingsOverlay } from '../overlays';
+import {
+  PauseOverlay,
+  SaveConflictOverlay,
+  SaveErrorOverlay,
+  SettingsOverlay,
+  TerminalExitPauseOverlay,
+} from '../overlays';
 import { Button, Icon } from '../primitives';
 
 /**
@@ -64,13 +74,18 @@ export function CombatScreen(): ReactElement | null {
 
   // WI-02 application command ports (bound at the composition root through the
   // context): Combat/UI relay typed intents; the commands persist the campaign
-  // transaction first and only then update the Session Store. UI never touches
-  // persistence directly (Epic §14.2, V02-AC-020).
+  // transaction first and only then report the typed completion outcome.
+  // UI never touches persistence directly (Epic §14.2, V02-AC-020). V02-WI-04
+  // C02: the binding maps every command outcome (committed/inert/failed) and
+  // catches rejected Promises into the typed `rejected` outcome, so no
+  // terminal-persistence path can produce an unhandled rejection.
   const commitTerminalResult = (
     terminal: CombatTerminalResult,
     combatHullIntegrity: number,
     missionAttemptId: number,
     missionInstanceOrdinal: number,
+    successEconomy?: SuccessEconomyRelay,
+    onComplete: (outcome: TerminalCommitOutcome) => void = () => undefined,
   ): void => {
     void commitMissionResultCommand(
       { store, campaignStore, content },
@@ -78,6 +93,12 @@ export function CombatScreen(): ReactElement | null {
       combatHullIntegrity,
       missionAttemptId,
       missionInstanceOrdinal,
+      successEconomy,
+    ).then(
+      (outcome) => onComplete(mapCommitMissionOutcome(outcome)),
+      (error) => {
+        onComplete({ status: 'rejected', error });
+      },
     );
   };
   const abortMission = (
@@ -112,9 +133,12 @@ export function CombatScreen(): ReactElement | null {
     let disposed = false;
     let owner: CombatSession | null = null;
     const weapon = resolveEquippedWeapon(content, snapshot.equippedWeapon);
-    const enemy = resolveBasicDrone(content);
-    const schedule = resolveMissionSchedule();
+    const mission = resolveMission(content, snapshot.missionId);
     const aircraft = resolveGermanFighter(content);
+    if (mission === undefined) {
+      // Defensive: the validated registry guarantees the started mission.
+      return;
+    }
     // Defer the lazy load one microtask: React StrictMode in development
     // mounts, cleans up, and remounts the effect synchronously, so the first
     // effect must not create a Phaser Game that is destroyed before its boot
@@ -131,8 +155,8 @@ export function CombatScreen(): ReactElement | null {
           container,
           weapon,
           projectile: content.projectile,
-          enemy,
-          schedule,
+          mission,
+          enemies: content.enemies,
           playerMaximumHullIntegrity: aircraft.maximumHullIntegrity,
           store,
           // S13-WI01: build-time Debug capability passed into the lazy boundary;
@@ -409,6 +433,25 @@ export function CombatScreen(): ReactElement | null {
         open={lifecycle.overlay === 'settings'}
         onClose={dispatchCloseSettings}
       />
+      {/* V02-WI-04 C02 terminal-persistence recovery overlays. Combat is
+          already terminal and frozen; Retry Save re-runs the immutable payload
+          and Reload is the only Save Conflict continuation. */}
+      {lifecycle.overlay === 'save-error' ? (
+        <SaveErrorOverlay
+          onRetry={() => sessionRef.current?.retryTerminalSave()}
+        />
+      ) : null}
+      {lifecycle.overlay === 'save-conflict' ? (
+        <SaveConflictOverlay
+          onReload={() => sessionRef.current?.reloadForSaveConflict()}
+        />
+      ) : null}
+      {/* V02-WI-04 C03: a committed Success that resolved while the tab was
+          hidden/blurred closes Save Error into this Resume-only terminal-exit
+          Pause. Only explicit Resume starts the committed exit. */}
+      {lifecycle.overlay === 'terminal-exit-pause' ? (
+        <TerminalExitPauseOverlay onResume={dispatchResume} />
+      ) : null}
       {DEV_MODE &&
       DebugOverlayComponent !== null &&
       lifecycle.overlay === 'debug' ? (

@@ -55,9 +55,9 @@ describe('WeaponSelectionOverlay', () => {
     ).toBeDefined();
     expect(screen.getByText('Machine Gun')).toBeDefined();
     expect(screen.getByText('Cannon')).toBeDefined();
-    expect(screen.getByText('6 shots/s')).toBeDefined();
+    expect(screen.getByText('5 shots/s')).toBeDefined();
     expect(screen.getByText('3 hits')).toBeDefined();
-    expect(screen.getByText('2 shots/s')).toBeDefined();
+    expect(screen.getByText('1.5 shots/s')).toBeDefined();
     expect(screen.getByText('1 hit')).toBeDefined();
     expect(dialog.querySelectorAll('button')).toHaveLength(2);
     expect(dialog.getElementsByClassName('ds-weapon-option').length).toBe(2);

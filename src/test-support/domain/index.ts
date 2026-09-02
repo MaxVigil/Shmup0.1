@@ -13,3 +13,12 @@ export {
   testCombatMissionStream,
   testPilotSelectionStream,
 } from './rng';
+export {
+  AIRCRAFT_HEIGHT,
+  AIRCRAFT_WIDTH,
+  TEST_MISSION_SEED,
+  TEST_VIEWPORT,
+  createTestCombatRuntime,
+  createTestCombatState,
+} from './combat';
+export type { TestCombatOptions } from './combat';

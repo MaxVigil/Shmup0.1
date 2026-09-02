@@ -22,7 +22,13 @@ export interface CombatGeometry {
   readonly hullBarGapRatio: number;
   readonly aircraftFallbackColor: string;
   readonly projectileColor: string;
-  readonly droneColor: string;
+  /** Approved fallback fill tokens for the regular-enemy procedural geometry
+   *  (v0.2 §16.5), resolved from the canonical token source. */
+  readonly fallbackBorderStrongColor: string;
+  readonly fallbackSurfaceRaisedColor: string;
+  readonly fallbackAccentColor: string;
+  /** Solid horizontal `danger` rectangle fill for the Ranged projectile. */
+  readonly rangedProjectileColor: string;
   /** Approved white flash for enemy damage/destruction feedback (S11). */
   readonly enemyFlashColor: string;
   /** Approved danger flash for the player aircraft after valid damage (S11). */
@@ -60,10 +66,31 @@ export function resolveCombatGeometry(viewport: {
     hullBarGapRatio: 0.01,
     aircraftFallbackColor: '#cccccc',
     projectileColor: readColorToken('--color-text-primary', '#f1f5f7'),
-    droneColor: readColorToken('--color-danger', '#d96767'),
+    fallbackBorderStrongColor: readColorToken(
+      '--color-border-strong',
+      '#526471',
+    ),
+    fallbackSurfaceRaisedColor: readColorToken(
+      '--color-surface-raised',
+      '#182128',
+    ),
+    fallbackAccentColor: readColorToken('--color-accent', '#65a9d6'),
+    rangedProjectileColor: readColorToken('--color-danger', '#d96767'),
     enemyFlashColor: readColorToken('--color-text-primary', '#f1f5f7'),
     aircraftFlashColor: readColorToken('--color-danger', '#d96767'),
   };
+}
+
+/**
+ * Formats the authoritative countdown value as `MM:SS` (v0.2 §15.2). The
+ * simulation already applies the ceiling formula; this is pure presentation
+ * formatting of a whole-second value and never re-derives time.
+ */
+export function formatCombatCountdown(wholeSeconds: number): string {
+  const clamped = Math.max(0, Math.floor(wholeSeconds));
+  const minutes = Math.floor(clamped / 60);
+  const seconds = clamped % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 export function readColorToken(token: string, fallback: string): string {

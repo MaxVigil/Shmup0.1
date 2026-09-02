@@ -14,6 +14,7 @@ import {
 } from '@domain/model';
 import type { MissionId } from '@domain/model';
 import { isEncounterEntryRegion, isEncounterFormation } from '../missions';
+import { INTERCEPTION_01 } from '../missions';
 
 export interface ContentValidationIssue {
   readonly path: string;
@@ -149,6 +150,12 @@ function validateWeapons(
         message: 'must be a positive finite number',
       });
     }
+    if (!isPositiveFinite(item.projectileSpeedViewportHeightPerSecond)) {
+      issues.push({
+        path: `${path}.projectileSpeedViewportHeightPerSecond`,
+        message: 'must be a positive finite number (v0.2 §10)',
+      });
+    }
   });
 }
 
@@ -195,6 +202,42 @@ function validateEnemies(
     if (!isPositiveFinite(item.movementSpeedViewportHeightPerSecond)) {
       issues.push({
         path: `${path}.movementSpeedViewportHeightPerSecond`,
+        message: 'must be a positive finite number',
+      });
+    }
+    if (!isPositiveFinite(item.committedAttackSpeedViewportHeightPerSecond)) {
+      issues.push({
+        path: `${path}.committedAttackSpeedViewportHeightPerSecond`,
+        message: 'must be a positive finite number',
+      });
+    }
+    if (!isPositiveInteger(item.contactDamage)) {
+      issues.push({
+        path: `${path}.contactDamage`,
+        message: 'must be a positive integer',
+      });
+    }
+    if (!isNonNegativeInteger(item.playerDestructionReward)) {
+      issues.push({
+        path: `${path}.playerDestructionReward`,
+        message: 'must be a non-negative integer',
+      });
+    }
+    if (!isNonNegativeInteger(item.escapePenalty)) {
+      issues.push({
+        path: `${path}.escapePenalty`,
+        message: 'must be a non-negative integer',
+      });
+    }
+    if (!isPositiveFinite(item.visualFootprintAreaRatio)) {
+      issues.push({
+        path: `${path}.visualFootprintAreaRatio`,
+        message: 'must be a positive finite number',
+      });
+    }
+    if (!isPositiveFinite(item.visualAspectRatio)) {
+      issues.push({
+        path: `${path}.visualAspectRatio`,
         message: 'must be a positive finite number',
       });
     }
@@ -314,6 +357,7 @@ function validateMissions(
     }
   });
   validateCanonicalUnlockMapping(value, issues);
+  validateMissionStagingScope(value, issues);
 }
 
 /** The exact canonical ordered unlock mapping (Epic §6.2, V02-AC-002). */
@@ -437,7 +481,399 @@ function validateEncounters(
       `${encounterPath}.roleDelays`,
       issues,
     );
+    validateStaging(
+      item.staging,
+      item.entry,
+      item.composition,
+      `${encounterPath}.staging`,
+      issues,
+    );
+    // V02-WI-04 C03: the production validator enforces the EXACT canonical
+    // Mission 01 staging projection (V02-DEC-021) — Arrival Group count/order,
+    // offset, member count/order/role, placement kind, Top fraction, and Side Y
+    // fraction must match the single canonical content owner. Generic range/
+    // totals validation alone is insufficient: any path-qualified drift is
+    // rejected even when totals, offsets, and unit intervals stay valid.
+    if (missionId === 'interception-01') {
+      validateCanonicalMission01Staging(
+        item.staging,
+        index,
+        `${encounterPath}.staging`,
+        issues,
+      );
+    }
   });
+}
+
+/**
+ * Validates exact authored runtime staging (Epic §8.1.1, V02-DEC-021). Staging
+ * is present only for Mission 01 (enforced by `validateMissionStagingScope`):
+ * every Arrival Group carries a non-negative offset and ordered typed members,
+ * Top fractions and Side Y fractions stay in `[0, 1]`, `seeded-side` members
+ * require a `seeded` encounter entry (the resolved side is the single
+ * encounter-level mission-data draw), and the member totals must equal the
+ * encounter composition totals so the authored staging never contradicts the
+ * authored composition.
+ */
+function validateStaging(
+  value: unknown,
+  entry: unknown,
+  composition: unknown,
+  path: string,
+  issues: ContentValidationIssue[],
+): void {
+  if (value === undefined) {
+    return;
+  }
+  if (!isArray(value)) {
+    issues.push({
+      path,
+      message: 'when present must be an array of Arrival Groups',
+    });
+    return;
+  }
+  if (value.length === 0) {
+    issues.push({ path, message: 'must contain at least one Arrival Group' });
+    return;
+  }
+  const compositionTotals = totalsFromComposition(composition);
+  const stagingTotals = { basic: 0, ranged: 0, hunter: 0, elite: 0 };
+  value.forEach((group, groupIndex) => {
+    const groupPath = `${path}[${groupIndex}]`;
+    if (!isRecord(group)) {
+      issues.push({ path: groupPath, message: 'must be an object' });
+      return;
+    }
+    if (!isNonNegativeNumber(group.offsetSeconds)) {
+      issues.push({
+        path: `${groupPath}.offsetSeconds`,
+        message: 'must be a non-negative finite number of seconds',
+      });
+    }
+    if (!isArray(group.members)) {
+      issues.push({
+        path: `${groupPath}.members`,
+        message: 'must be an array of ordered members',
+      });
+      return;
+    }
+    if (group.members.length === 0) {
+      issues.push({
+        path: `${groupPath}.members`,
+        message: 'must contain at least one ordered member',
+      });
+    }
+    group.members.forEach((member, memberIndex) => {
+      const memberPath = `${groupPath}.members[${memberIndex}]`;
+      if (!isRecord(member)) {
+        issues.push({ path: memberPath, message: 'must be an object' });
+        return;
+      }
+      if (!isEnemyType(member.type)) {
+        issues.push({
+          path: `${memberPath}.type`,
+          message: 'invalid enemy type',
+        });
+      } else {
+        const key = roleKeyForType(member.type);
+        if (key !== null) {
+          const current = stagingTotals[key];
+          if (current !== undefined) {
+            stagingTotals[key] = current + 1;
+          }
+        }
+      }
+      validateSpawnPlacement(
+        member.placement,
+        entry,
+        `${memberPath}.placement`,
+        issues,
+      );
+    });
+  });
+  if (compositionTotals !== null) {
+    const matches =
+      stagingTotals.basic === compositionTotals.basic &&
+      stagingTotals.ranged === compositionTotals.ranged &&
+      stagingTotals.hunter === compositionTotals.hunter &&
+      stagingTotals.elite === compositionTotals.elite;
+    if (!matches) {
+      issues.push({
+        path,
+        message:
+          'staging member totals must equal the encounter composition totals',
+      });
+    }
+  }
+}
+
+/**
+ * V02-WI-04 C03 exact-canonical staging projection (Epic §8.1.1, V02-DEC-021):
+ * the input Mission 01 staging is compared path-by-path against the single
+ * canonical content owner (`INTERCEPTION_01`). This validator rejects drift in
+ * Arrival Group count and order, offsets, member count/order/role, placement
+ * kind, Top fractions, and seeded-side Y fractions even when every generic
+ * range/totals/unit-interval rule stays satisfied. It is safe for hostile
+ * unknown input: no nested value is read before its structure is verified, so
+ * validation never throws on malformed staging. Encounter count/order is
+ * enforced by the exact-content contract separately; this function only guards
+ * the staging fields of the encounters that exist.
+ */
+function validateCanonicalMission01Staging(
+  value: unknown,
+  encounterIndex: number,
+  path: string,
+  issues: ContentValidationIssue[],
+): void {
+  if (value === undefined || !isArray(value)) {
+    return; // missing/malformed staging is reported by validateStaging/scope
+  }
+  const canonicalEncounter = INTERCEPTION_01.encounters[encounterIndex];
+  if (canonicalEncounter === undefined) {
+    return;
+  }
+  const expected = canonicalEncounter.staging;
+  if (expected === undefined) {
+    return;
+  }
+  if (value.length !== expected.length) {
+    issues.push({
+      path,
+      message: `must contain exactly ${expected.length} Arrival Groups in canonical order (V02-DEC-021)`,
+    });
+  }
+  const groupCount = Math.min(value.length, expected.length);
+  for (let groupIndex = 0; groupIndex < groupCount; groupIndex += 1) {
+    const groupPath = `${path}[${groupIndex}]`;
+    const group = value[groupIndex];
+    // Index-bounded by the canonical staging length (groupIndex < groupCount).
+    const expectedGroup = expected[groupIndex]!;
+    if (!isRecord(group)) {
+      continue; // structural issue already reported by validateStaging
+    }
+    // Group order is enforced positionally: a swapped group fails on its
+    // offset/members against the expected group at this index.
+    if (group.offsetSeconds !== expectedGroup.offsetSeconds) {
+      issues.push({
+        path: `${groupPath}.offsetSeconds`,
+        message: `must be exactly ${expectedGroup.offsetSeconds} s (canonical Mission 01 Arrival Group)`,
+      });
+    }
+    if (!isArray(group.members)) {
+      continue; // structural issue already reported by validateStaging
+    }
+    if (group.members.length !== expectedGroup.members.length) {
+      issues.push({
+        path: `${groupPath}.members`,
+        message: `must contain exactly ${expectedGroup.members.length} ordered members (canonical Mission 01 Arrival Group)`,
+      });
+    }
+    const memberCount = Math.min(
+      group.members.length,
+      expectedGroup.members.length,
+    );
+    for (let memberIndex = 0; memberIndex < memberCount; memberIndex += 1) {
+      const memberPath = `${groupPath}.members[${memberIndex}]`;
+      const member = group.members[memberIndex];
+      // Index-bounded by the canonical group member length (memberIndex
+      // < memberCount <= expectedGroup.members.length).
+      const expectedMember = expectedGroup.members[memberIndex]!;
+      if (!isRecord(member)) {
+        continue;
+      }
+      // Member order is enforced positionally: a swapped or re-typed member
+      // fails on its role at this index.
+      if (member.type !== expectedMember.type) {
+        issues.push({
+          path: `${memberPath}.type`,
+          message: `must be exactly ${expectedMember.type} at this canonical member position`,
+        });
+      }
+      const placement = member.placement;
+      if (!isRecord(placement)) {
+        continue; // structural issue already reported by validateSpawnPlacement
+      }
+      const expectedPlacement = expectedMember.placement;
+      if (placement.kind !== expectedPlacement.kind) {
+        issues.push({
+          path: `${memberPath}.placement.kind`,
+          message: `must be exactly "${expectedPlacement.kind}" (canonical Mission 01 placement kind)`,
+        });
+      } else if (expectedPlacement.kind === 'top') {
+        if (placement.fraction !== expectedPlacement.fraction) {
+          issues.push({
+            path: `${memberPath}.placement.fraction`,
+            message: `must be exactly ${expectedPlacement.fraction} (canonical Mission 01 Top fraction)`,
+          });
+        }
+      } else if (
+        expectedPlacement.kind === 'seeded-side' &&
+        placement.yViewportFraction !== expectedPlacement.yViewportFraction
+      ) {
+        issues.push({
+          path: `${memberPath}.placement.yViewportFraction`,
+          message: `must be exactly ${expectedPlacement.yViewportFraction} (canonical Mission 01 Side Y fraction)`,
+        });
+      }
+    }
+  }
+}
+
+function totalsFromComposition(
+  composition: unknown,
+): { basic: number; ranged: number; hunter: number; elite: number } | null {
+  if (!isArray(composition)) {
+    return null;
+  }
+  const totals = { basic: 0, ranged: 0, hunter: 0, elite: 0 };
+  for (const roleEntry of composition) {
+    if (
+      !isRecord(roleEntry) ||
+      !isEnemyType(roleEntry.type) ||
+      !isNonNegativeInteger(roleEntry.count)
+    ) {
+      return null;
+    }
+    const key = roleKeyForType(roleEntry.type);
+    if (key !== null) {
+      const current = totals[key];
+      if (current !== undefined) {
+        totals[key] = current + (roleEntry.count as number);
+      }
+    }
+  }
+  return totals;
+}
+
+function validateSpawnPlacement(
+  value: unknown,
+  entry: unknown,
+  path: string,
+  issues: ContentValidationIssue[],
+): void {
+  if (!isRecord(value)) {
+    issues.push({
+      path,
+      message: 'must be a top or seeded-side placement object',
+    });
+    return;
+  }
+  if (value.kind === 'top') {
+    if (!isUnitInterval(value.fraction)) {
+      issues.push({
+        path: `${path}.fraction`,
+        message: 'must be a normalized fraction in [0, 1]',
+      });
+    }
+    return;
+  }
+  if (value.kind === 'seeded-side') {
+    if (!isUnitInterval(value.yViewportFraction)) {
+      issues.push({
+        path: `${path}.yViewportFraction`,
+        message: 'must be a normalized viewport fraction in [0, 1]',
+      });
+    }
+    if (
+      !isRecord(entry) ||
+      entry.kind !== 'seeded' ||
+      !isArray(entry.variants)
+    ) {
+      issues.push({
+        path,
+        message: 'seeded-side placement requires a seeded encounter entry',
+      });
+    }
+    return;
+  }
+  issues.push({
+    path: `${path}.kind`,
+    message: 'must be "top" or "seeded-side"',
+  });
+}
+
+/** Enforces the bounded staging scope (V02-WI-04): Mission 01 is fully staged;
+ *  Missions 02/03 remain qualitative and must carry no invented staging. */
+function validateMissionStagingScope(
+  value: unknown,
+  issues: ContentValidationIssue[],
+): void {
+  if (!isArray(value)) {
+    return;
+  }
+  value.forEach((item, index) => {
+    if (!isRecord(item) || !isMissionId(item.id)) {
+      return;
+    }
+    const expected = CANONICAL_MISSION_IDS[index];
+    if (expected === undefined) {
+      return;
+    }
+    // V02-WI-04 C01: EVERY Interception 01 encounter must carry its exact
+    // authored Arrival Groups — a missing or empty staging on any one of them
+    // is rejected (the previous check passed when at least one encounter was
+    // staged, allowing an encounter to silently fall back to qualitative data).
+    const allStaged =
+      isArray(item.encounters) &&
+      item.encounters.length > 0 &&
+      item.encounters.every(
+        (encounter) =>
+          isRecord(encounter) &&
+          isArray(encounter.staging) &&
+          encounter.staging.length > 0,
+      );
+    if (expected === 'interception-01' && !allStaged) {
+      issues.push({
+        path: `missions[${index}].encounters`,
+        message:
+          'every Interception 01 encounter must carry its exact authored Arrival Groups (V02-DEC-021)',
+      });
+    }
+    const staged = isArray(item.encounters)
+      ? item.encounters.some(
+          (encounter) => isRecord(encounter) && isArray(encounter.staging),
+        )
+      : false;
+    if (expected !== 'interception-01' && staged) {
+      issues.push({
+        path: `missions[${index}].encounters`,
+        message:
+          'only Mission 01 may carry runtime Arrival Groups until the Product Owner records Mission 02/03 staging',
+      });
+    }
+  });
+}
+
+function isUnitInterval(value: unknown): boolean {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 1
+  );
+}
+
+function isNonNegativeNumber(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/** Maps an enemy type to its authored per-role totals key (Epic §8 Totals). */
+function roleKeyForType(
+  type: string,
+): 'basic' | 'ranged' | 'hunter' | 'elite' | null {
+  if (type === 'basic-drone') {
+    return 'basic';
+  }
+  if (type === 'ranged-drone') {
+    return 'ranged';
+  }
+  if (type === 'hunter-drone') {
+    return 'hunter';
+  }
+  if (type === 'elite-drone') {
+    return 'elite';
+  }
+  return null;
 }
 
 /**
@@ -652,16 +1088,21 @@ function validateProjectile(
     issues.push({ path, message: 'must be an object' });
     return;
   }
-  if (!isPositiveFinite(value.speedViewportHeightPerSecond)) {
-    issues.push({
-      path: `${path}.speedViewportHeightPerSecond`,
-      message: 'must be a positive finite number',
-    });
-  }
   if (!isPositiveFinite(value.maximumLifetimeSeconds)) {
     issues.push({
       path: `${path}.maximumLifetimeSeconds`,
       message: 'must be a positive finite number',
+    });
+  }
+  if (
+    isRecord(value) &&
+    'speedViewportHeightPerSecond' in value &&
+    !isPositiveFinite(value.speedViewportHeightPerSecond)
+  ) {
+    issues.push({
+      path: `${path}.speedViewportHeightPerSecond`,
+      message:
+        'must not exist: projectile speed is per-weapon content (v0.2 §10)',
     });
   }
 }

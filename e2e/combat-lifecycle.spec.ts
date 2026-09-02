@@ -29,17 +29,6 @@ async function startCombat(page: Page): Promise<void> {
   });
 }
 
-/** Reads the Field Row value for a Debug observability label. */
-async function fieldValue(
-  dialog: ReturnType<Page['getByRole']>,
-  label: string,
-): Promise<string> {
-  const text =
-    (await dialog.locator('.ds-field-row', { hasText: label }).textContent()) ??
-    '';
-  return text.replace(label, '').trim();
-}
-
 test('utility cluster and Pause Button/P/Esc open and resume the Pause Overlay (Combat AC-052, AC-079)', async ({
   page,
 }) => {
@@ -220,10 +209,11 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
   await page.keyboard.press('F1');
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Debug' })).toBeVisible();
-  await expect(dialog.getByText('Mission Time')).toBeVisible();
+  await expect(dialog.getByText('Mission Clock')).toBeVisible();
   await expect(dialog.getByText('Player Hull')).toBeVisible();
 
-  // God Mode is a canonical Checkbox.
+  // God Mode is a canonical Checkbox; the visual input is the clipped
+  // accessibility element, so the interaction is a real click on the label.
   const godMode = dialog.getByRole('checkbox', { name: 'God Mode' });
   await expect(godMode).not.toBeChecked();
 
@@ -234,7 +224,7 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
   ).toContainText('100');
 
   // Enabling God Mode sets Hull to maximum and disables the Hull controls.
-  await godMode.check({ force: true });
+  await dialog.locator('.ds-checkbox', { hasText: 'God Mode' }).click();
   await expect(godMode).toBeChecked();
   await expect(
     dialog.getByRole('button', { name: 'Set Hull: 25' }),
@@ -244,15 +234,19 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
   ).toBeDisabled();
 
   // Spawn Standard Enemy adds exactly one drone (Active Enemies +1).
-  const activeBefore = Number(await fieldValue(dialog, 'Active Enemies'));
-  await dialog.getByRole('button', { name: 'Spawn Standard Enemy' }).click();
-  const activeAfter = Number(await fieldValue(dialog, 'Active Enemies'));
-  expect(activeAfter).toBe(activeBefore + 1);
+  const activeRow = dialog.locator('.ds-field-row', {
+    hasText: 'Active Enemies',
+  });
+  await expect(activeRow).toContainText('0');
+  await dialog.getByRole('button', { name: 'Spawn Basic' }).click();
+  await expect(activeRow).toContainText('Basic 1');
 
-  // Spawn Final Group is one-use and disables itself.
-  const finalGroup = dialog.getByRole('button', { name: 'Spawn Final Group' });
-  await finalGroup.click();
-  await expect(finalGroup).toBeDisabled();
+  // Spawn E1 materializes the authored opening Encounter (4 Basics, V02-WI-04)
+  // and is inert when repeated (the Encounter is already spawned).
+  await dialog.getByRole('button', { name: 'Spawn E1' }).click();
+  await expect(activeRow).toContainText('Basic 5');
+  await dialog.getByRole('button', { name: 'Spawn E1' }).click();
+  await expect(activeRow).toContainText('Basic 5');
 
   // F1 closes Debug from the running origin and resumes.
   await page.keyboard.press('F1');
@@ -269,14 +263,14 @@ test('development Debug Win/Lose enter the normal S12 result flow exactly once (
   await startCombat(page);
 
   // Win Mission resolves as a normal one-time Success (+8 completion reward
-  // for Interception 01, Epic §12; V02-WI-03).
+  // for Interception 01, Epic §12; V02-WI-03; v0.2 §15.4 result composition).
   await page.keyboard.press('F1');
   await page.getByRole('button', { name: 'Win Mission' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Mission Complete' }),
+    page.getByRole('heading', { name: 'MISSION COMPLETE' }),
   ).toBeVisible();
-  await expect(page.getByText('Reward')).toBeVisible();
-  await expect(page.getByText('8 Credits')).toBeVisible();
+  await expect(page.getByText('Credits earned')).toBeVisible();
+  await expect(page.getByText('8 Credits', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await expect(page.getByText('Credits: 20')).toBeVisible();

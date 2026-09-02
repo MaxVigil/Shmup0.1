@@ -2,22 +2,18 @@ import type {
   AircraftDefinition,
   ContentCatalogue,
   EnemyDefinition,
-  EnemyGroupSchedule,
+  MissionDefinition,
   PlayerProjectileConfig,
   WeaponDefinition,
 } from '../content';
-import {
-  BASIC_DRONE,
-  GERMAN_FIGHTER,
-  MACHINE_GUN,
-  MVP_ENEMY_GROUP_SCHEDULE,
-} from '../content';
-import type { CombatTerminalResult } from '../mission';
+import { GERMAN_FIGHTER, MACHINE_GUN } from '../content';
+import type { CombatTerminalResult, MissionResult } from '../mission';
 import type { MissionSnapshot } from '../mission/snapshot';
 import type { AssetPreloadResult } from '../ports';
 import type { SessionAction, SessionStore } from '../session';
 import type { CombatControlMode } from './input-command';
 import type { CombatDebugCommand, CombatObservability } from './debug-command';
+import type { SuccessEconomyRelay } from '../mission/commit-mission-result';
 import type { WeaponType } from '@domain/index';
 
 export interface CombatSession {
@@ -26,7 +22,7 @@ export interface CombatSession {
    * S12 application seam with the originating `missionInstanceOrdinal` and the
    * current authoritative Combat Hull, then discards the Combat runtime. No
    * reward, recovery, or Mission Result Overlay is produced; Operations opens
-   * directly.
+   * directly. Retained unexpanded until V02-WI-05 removes the v0.1 seam.
    */
   readonly requestReturnToBase: () => void;
   /**
@@ -37,6 +33,18 @@ export interface CombatSession {
   readonly setControlMode: (mode: CombatControlMode) => void;
   /** S13 Debug command seam: relays one deterministic application command. */
   readonly submitDebugCommand: (command: CombatDebugCommand) => void;
+  /**
+   * V02-WI-04 C02 Save Error recovery: retries the SAME immutable frozen
+   * terminal payload and originating attempt/instance through the idempotent
+   * application command. Single-flight: a retry already in flight is a no-op.
+   */
+  readonly retryTerminalSave: () => void;
+  /**
+   * V02-WI-04 C02 Save Conflict recovery: the only continuation is Reload,
+   * performing browser navigation without any local reward, result, campaign
+   * mutation, or exit animation.
+   */
+  readonly reloadForSaveConflict: () => void;
   /** S13 read-only Debug observability snapshot (Combat §11.7). */
   readonly getObservability: () => CombatObservability;
   readonly dispose: () => void;
@@ -58,30 +66,6 @@ export function resolveEquippedWeapon(
 }
 
 /**
- * Resolves the validated Basic Drone definition (S10). The catalogue
- * guarantees the single MVP enemy, so the fallback is defensive.
- */
-export function resolveBasicDrone(
-  catalogue: ContentCatalogue,
-): EnemyDefinition {
-  return (
-    catalogue.enemies.find((enemy) => enemy.type === 'basic-drone') ??
-    catalogue.enemies[0] ??
-    BASIC_DRONE
-  );
-}
-
-/**
- * Resolves the temporary v0.1 enemy-group schedule used by the Combat
- * compatibility seam (S10): the accepted legacy single-Interception schedule,
- * consumed until V02-WI-04 routes Combat onto the v0.2 mission registry. It is
- * the single retained seam schedule and never a second mission authority.
- */
-export function resolveMissionSchedule(): EnemyGroupSchedule {
-  return MVP_ENEMY_GROUP_SCHEDULE;
-}
-
-/**
  * Resolves the validated German Fighter definition (S11) so the player's
  * maximum Hull Integrity comes from the content catalogue, never a duplicated
  * magic number. The MVP has exactly one aircraft; the fallback is defensive.
@@ -94,6 +78,15 @@ export function resolveGermanFighter(
     catalogue.aircraft[0] ??
     GERMAN_FIGHTER
   );
+}
+
+/** Resolves the authored mission the snapshot started (V02-WI-04). The
+ *  validated registry guarantees the mission; the fallback is defensive. */
+export function resolveMission(
+  catalogue: ContentCatalogue,
+  missionId: string,
+): MissionDefinition | undefined {
+  return catalogue.missions.find((mission) => mission.id === missionId);
 }
 
 /**
@@ -116,6 +109,20 @@ export function synchronizeSharedModeAfterToggle(
   });
 }
 
+/**
+ * V02-WI-04 C02 typed terminal-persistence completion contract. The campaign
+ * transaction resolves to exactly one of these outcomes; only `committed`
+ * carries the pre-committed MissionResult and may authorize the deterministic
+ * Success exit. `failed`/`rejected` open Save Error (Retry Save); `inert` opens
+ * Save Conflict (Reload). A rejected Promise is caught and never surfaces as an
+ * unhandled rejection.
+ */
+export type TerminalCommitOutcome =
+  | { readonly status: 'committed'; readonly result: MissionResult }
+  | { readonly status: 'inert' }
+  | { readonly status: 'failed' }
+  | { readonly status: 'rejected'; readonly error: unknown };
+
 export interface CombatSessionInput {
   readonly snapshot: MissionSnapshot;
   readonly preparedAssets: AssetPreloadResult;
@@ -124,10 +131,10 @@ export interface CombatSessionInput {
   readonly weapon: WeaponDefinition;
   /** Shared player-projectile configuration (S09). */
   readonly projectile: PlayerProjectileConfig;
-  /** Basic Drone definition resolved from the catalogue (S10). */
-  readonly enemy: EnemyDefinition;
-  /** Interception enemy-group schedule resolved from the catalogue (S10). */
-  readonly schedule: EnemyGroupSchedule;
+  /** Authored mission definition resolved from the catalogue (V02-WI-04). */
+  readonly mission: MissionDefinition;
+  /** v0.2 regular-enemy definitions resolved from the catalogue (V02-WI-04). */
+  readonly enemies: readonly EnemyDefinition[];
   /** Validated German Fighter maximum Hull (S11, from the content seam). */
   readonly playerMaximumHullIntegrity: number;
   /**
@@ -147,18 +154,23 @@ export interface CombatSessionInput {
    */
   readonly debugMode: boolean;
   /**
-   * WI-02 application command ports: bound at the composition root to the
-   * canonical persisted campaign transaction. Combat relays the authoritative
-   * terminal trigger + final Combat Hull; the command persists the coherent
-   * before/after state first and only then updates the Session Store. Phaser
-   * never calculates a result, mutates Credits/Hull, or touches persistence
-   * directly (Epic §13, V02-AC-020).
+   * WI-02 + V02-WI-04 application command port bound at the composition root
+   * to the canonical persisted campaign transaction. Combat relays the
+   * authoritative terminal trigger + final Combat Hull + (on Success) the
+   * pending-economy relay; the command persists the coherent before/after state
+   * first and then reports one typed `TerminalCommitOutcome` through
+   * `onComplete`. Phaser never calculates a result, mutates Credits/Hull, or
+   * touches persistence directly (Epic §13, V02-AC-020). On a committed Success
+   * the entry defers the session dispatch until the deterministic exit sequence
+   * completes; on Defeat the v0.1 seam dispatches immediately.
    */
   readonly commitTerminalResult: (
     terminal: CombatTerminalResult,
     combatHullIntegrity: number,
     missionAttemptId: number,
     missionInstanceOrdinal: number,
+    successEconomy?: SuccessEconomyRelay,
+    onComplete?: (outcome: TerminalCommitOutcome) => void,
   ) => void;
   /** Bound Aborted (Return to Base) application command through the seam. */
   readonly abortMission: (

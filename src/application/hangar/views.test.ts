@@ -13,13 +13,13 @@ describe('weaponOptions', () => {
     expect(machineGun).toMatchObject({
       displayName: 'Machine Gun',
       damage: 1,
-      fireRate: 6,
+      fireRate: 5,
       basicDroneHits: 3,
     });
     expect(cannon).toMatchObject({
       displayName: 'Cannon',
       damage: 3,
-      fireRate: 2,
+      fireRate: 1.5,
       basicDroneHits: 1,
     });
   });

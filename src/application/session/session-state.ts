@@ -5,6 +5,7 @@ import type {
   MissionId,
   WeaponType,
 } from '@domain/index';
+import type { RoleCounts } from '../mission/mission-result';
 import type { CombatLifecycleState } from '../combat/lifecycle';
 import type { MissionSnapshot } from '../mission/snapshot';
 
@@ -21,16 +22,31 @@ export type { CampaignRunStatus };
 export type BaseScreenId = 'operations' | 'hangar';
 
 /**
- * The presented Mission Result read model (S12): only Success/Defeat are
- * presented by the Result Overlay; Aborted opens Operations directly. The
- * `missionInstanceOrdinal` binds consumption to the originating mission.
+ * The presented Mission Result read model (S12, V02-WI-04): Success carries the
+ * v0.2 run facts relayed from the authoritative simulation and the pre-committed
+ * progression so the Result Overlay (Epic §15.4) presents committed values only.
+ * Aborted opens Operations directly. The `missionInstanceOrdinal` binds
+ * consumption to the originating mission.
  */
-export interface PresentedMissionResult {
-  readonly kind: 'success' | 'defeat';
-  readonly missionInstanceOrdinal: number;
-  /** Credits earned by the presented Success (temporary seam overlay value). */
-  readonly creditsEarned: number;
-}
+export type PresentedMissionResult =
+  | {
+      readonly kind: 'success';
+      readonly missionInstanceOrdinal: number;
+      readonly creditsEarned: number;
+      readonly combatRewards: number;
+      readonly escapePenalties: number;
+      readonly netCombatReward: number;
+      readonly completionReward: number;
+      readonly newlyUnlockedMissionId: MissionId | null;
+      readonly destroyedCounts: RoleCounts;
+      readonly escapedCounts: RoleCounts;
+      readonly unlockedMissionIdsAfter: readonly MissionId[];
+    }
+  | {
+      readonly kind: 'defeat';
+      readonly missionInstanceOrdinal: number;
+      readonly creditsEarned: number;
+    };
 
 /**
  * The single authoritative Shared Session State (Base §9.1, §9.3; Epic §14.1).

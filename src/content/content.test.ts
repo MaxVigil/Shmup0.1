@@ -4,6 +4,7 @@ import {
   CANNON,
   CONTENT_CATALOGUE,
   GERMAN_FIGHTER,
+  HUNTER_DRONE,
   INTERCEPTION_01,
   INTERCEPTION_02,
   INTERCEPTION_03,
@@ -12,6 +13,7 @@ import {
   MVP_ENEMY_GROUP_SCHEDULE,
   PILOTS,
   PLAYER_PROJECTILE,
+  RANGED_DRONE,
   derivedTotals,
   totalDrones,
 } from './index';
@@ -20,7 +22,7 @@ describe('canonical content catalogue', () => {
   it('loads a validated catalogue', () => {
     expect(CONTENT_CATALOGUE.aircraft).toHaveLength(1);
     expect(CONTENT_CATALOGUE.weapons).toHaveLength(2);
-    expect(CONTENT_CATALOGUE.enemies).toHaveLength(1);
+    expect(CONTENT_CATALOGUE.enemies).toHaveLength(3);
     expect(CONTENT_CATALOGUE.missions).toHaveLength(3);
     expect(CONTENT_CATALOGUE.pilots).toHaveLength(6);
   });
@@ -31,23 +33,37 @@ describe('canonical content catalogue', () => {
     expect(GERMAN_FIGHTER.maximumHullIntegrity).toBe(100);
   });
 
-  it('defines Machine Gun and Cannon with the approved damage and fire rate', () => {
+  it('defines Machine Gun and Cannon with the v0.2 tuning (Epic §10)', () => {
     expect(MACHINE_GUN.type).toBe('machine-gun');
     expect(MACHINE_GUN.damage).toBe(1);
-    expect(MACHINE_GUN.fireRate).toBe(6);
+    expect(MACHINE_GUN.fireRate).toBe(5);
+    expect(MACHINE_GUN.projectileSpeedViewportHeightPerSecond).toBe(0.55);
     expect(CANNON.type).toBe('cannon');
     expect(CANNON.damage).toBe(3);
-    expect(CANNON.fireRate).toBe(2);
+    expect(CANNON.fireRate).toBe(1.5);
+    expect(CANNON.projectileSpeedViewportHeightPerSecond).toBe(0.45);
   });
 
-  it('defines the Basic Drone enemy with the approved durability and movement speed', () => {
+  it('defines the v0.2 regular-enemy family (Epic §9)', () => {
     expect(BASIC_DRONE.type).toBe('basic-drone');
     expect(BASIC_DRONE.maximumHullIntegrity).toBe(3);
     expect(BASIC_DRONE.movementSpeedViewportHeightPerSecond).toBe(0.12);
+    expect(BASIC_DRONE.contactDamage).toBe(15);
+    expect(BASIC_DRONE.playerDestructionReward).toBe(1);
+    expect(BASIC_DRONE.escapePenalty).toBe(1);
+    expect(RANGED_DRONE.maximumHullIntegrity).toBe(4);
+    expect(RANGED_DRONE.movementSpeedViewportHeightPerSecond).toBe(0.09);
+    expect(RANGED_DRONE.playerDestructionReward).toBe(2);
+    expect(RANGED_DRONE.escapePenalty).toBe(2);
+    expect(HUNTER_DRONE.maximumHullIntegrity).toBe(3);
+    expect(HUNTER_DRONE.movementSpeedViewportHeightPerSecond).toBe(0.18);
+    expect(HUNTER_DRONE.committedAttackSpeedViewportHeightPerSecond).toBe(0.26);
+    expect(HUNTER_DRONE.contactDamage).toBe(35);
+    expect(HUNTER_DRONE.playerDestructionReward).toBe(2);
+    expect(HUNTER_DRONE.escapePenalty).toBe(2);
   });
 
-  it('defines the shared player-projectile configuration', () => {
-    expect(PLAYER_PROJECTILE.speedViewportHeightPerSecond).toBe(1);
+  it('defines the shared player-projectile configuration (lifetime only)', () => {
     expect(PLAYER_PROJECTILE.maximumLifetimeSeconds).toBe(2);
     expect(CONTENT_CATALOGUE.projectile).toBe(PLAYER_PROJECTILE);
   });
@@ -79,7 +95,7 @@ describe('canonical content catalogue', () => {
     expect(INTERCEPTION_03.maximumSuccessPayout).toBe(51);
   });
 
-  it('matches the exact Interception 01 authored timeline (Epic §8.1)', () => {
+  it('matches the exact Interception 01 authored timeline and staging (Epic §8.1, V02-DEC-021)', () => {
     expect(INTERCEPTION_01.encounters.map((e) => e.timeSeconds)).toEqual([
       10, 55, 100, 140, 190,
     ]);
@@ -90,10 +106,47 @@ describe('canonical content catalogue', () => {
       'interception-01-e4',
       'interception-01-e5',
     ]);
+    // The three seeded encounters (e3/e4/e5) draw the mission-data stream in
+    // authored order; e1 is a fixed Top entry.
+    expect(INTERCEPTION_01.encounters[0]?.entry).toEqual({
+      kind: 'fixed',
+      region: 'top',
+    });
     expect(INTERCEPTION_01.encounters[2]?.entry).toEqual({
       kind: 'seeded',
       variants: ['upper-left', 'upper-right'],
     });
+    expect(INTERCEPTION_01.encounters[3]?.entry).toEqual({
+      kind: 'seeded',
+      variants: ['upper-left', 'upper-right'],
+    });
+    expect(INTERCEPTION_01.encounters[4]?.entry).toEqual({
+      kind: 'seeded',
+      variants: ['upper-left', 'upper-right'],
+    });
+    // Exact Arrival Groups (Epic §8.1.1): e2 carries +0 s Basics and a +2 s
+    // Ranged; e5 is one simultaneous spatial-stagger group.
+    const e2 = INTERCEPTION_01.encounters[1];
+    expect(e2?.staging?.map((group) => group.offsetSeconds)).toEqual([0, 2]);
+    expect(e2?.staging?.[0]?.members.map((member) => member.type)).toEqual([
+      'basic-drone',
+      'basic-drone',
+    ]);
+    expect(e2?.staging?.[1]?.members).toEqual([
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', fraction: 0.5 },
+      },
+    ]);
+    const e5 = INTERCEPTION_01.encounters[4];
+    expect(e5?.staging?.map((group) => group.offsetSeconds)).toEqual([0]);
+    expect(e5?.staging?.[0]?.members.map((member) => member.type)).toEqual([
+      'basic-drone',
+      'ranged-drone',
+      'basic-drone',
+      'basic-drone',
+      'hunter-drone',
+    ]);
     expect(derivedTotals(INTERCEPTION_01)).toEqual({
       basic: 12,
       ranged: 2,

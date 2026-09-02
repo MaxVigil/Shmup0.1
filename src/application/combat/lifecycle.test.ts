@@ -213,3 +213,171 @@ describe('S13 lifecycle: browser safety events', () => {
     expect(reduce(IDLE, 'combat-lifecycle/browser-safety-event')).toBe(IDLE);
   });
 });
+
+describe('V02-WI-04 C02: terminal-persistence recovery states', () => {
+  const SAVE_ERROR: CombatLifecycleState = {
+    running: false,
+    overlay: 'save-error',
+    debugRestoreOrigin: 'none',
+    browserSafetyLatched: false,
+  };
+  const SAVE_CONFLICT: CombatLifecycleState = {
+    running: false,
+    overlay: 'save-conflict',
+    debugRestoreOrigin: 'none',
+    browserSafetyLatched: false,
+  };
+
+  it('save-error opens a blocking Save Error from the terminal state', () => {
+    expect(reduce(RUNNING, 'combat-terminal/save-error')).toEqual(SAVE_ERROR);
+  });
+
+  it('save-conflict opens a blocking Save Conflict from the terminal state', () => {
+    expect(reduce(RUNNING, 'combat-terminal/save-conflict')).toEqual(
+      SAVE_CONFLICT,
+    );
+  });
+
+  it('repeated save-error/save-conflict outcomes stay idempotent', () => {
+    expect(reduce(SAVE_ERROR, 'combat-terminal/save-error')).toBe(SAVE_ERROR);
+    expect(reduce(SAVE_CONFLICT, 'combat-terminal/save-conflict')).toBe(
+      SAVE_CONFLICT,
+    );
+    // Save Conflict is Reload-only: a later Save Error outcome can never
+    // reopen retry on it.
+    expect(reduce(SAVE_CONFLICT, 'combat-terminal/save-error')).toBe(
+      SAVE_CONFLICT,
+    );
+  });
+
+  it('V02-WI-04 C03: an inert Retry after Save Error transitions immediately to Save Conflict', () => {
+    // The current C02 no-op left Retry Save available after this browser
+    // instance lost durable authority; a save-conflict outcome while Save
+    // Error is open must transition, never stay retryable.
+    expect(reduce(SAVE_ERROR, 'combat-terminal/save-conflict')).toEqual(
+      SAVE_CONFLICT,
+    );
+    // A latched Save Error keeps the latch across the authority-loss transition.
+    const latchedSaveError: CombatLifecycleState = {
+      ...SAVE_ERROR,
+      browserSafetyLatched: true,
+    };
+    expect(reduce(latchedSaveError, 'combat-terminal/save-conflict')).toEqual({
+      ...SAVE_CONFLICT,
+      browserSafetyLatched: true,
+    });
+  });
+
+  it('Save Error is blocking: Pause, Settings, and Debug cannot replace it', () => {
+    for (const action of [
+      'combat-lifecycle/open-pause',
+      'combat-lifecycle/open-settings',
+      'combat-lifecycle/open-debug',
+    ] as const) {
+      expect(reduce(SAVE_ERROR, action)).toBe(SAVE_ERROR);
+    }
+  });
+
+  it('Save Conflict is blocking: only a reload can leave it', () => {
+    for (const action of [
+      'combat-lifecycle/open-pause',
+      'combat-lifecycle/open-settings',
+      'combat-lifecycle/open-debug',
+      'combat-lifecycle/resume',
+    ] as const) {
+      expect(reduce(SAVE_CONFLICT, action)).toBe(SAVE_CONFLICT);
+    }
+    // Recover is inert on Save Conflict (Reload is the only continuation).
+    expect(reduce(SAVE_CONFLICT, 'combat-terminal/recover')).toBe(
+      SAVE_CONFLICT,
+    );
+  });
+
+  it('recover closes Save Error and resumes the committed exit', () => {
+    expect(reduce(SAVE_ERROR, 'combat-terminal/recover')).toEqual(RUNNING);
+  });
+
+  it('recover is inert everywhere except Save Error', () => {
+    expect(reduce(RUNNING, 'combat-terminal/recover')).toBe(RUNNING);
+    expect(reduce(PAUSED, 'combat-terminal/recover')).toBe(PAUSED);
+    expect(reduce(IDLE, 'combat-terminal/recover')).toBe(IDLE);
+  });
+});
+
+describe('V02-WI-04 C03: hidden-tab/focus safety during terminal recovery', () => {
+  const SAVE_ERROR: CombatLifecycleState = {
+    running: false,
+    overlay: 'save-error',
+    debugRestoreOrigin: 'none',
+    browserSafetyLatched: false,
+  };
+  const LATCHED_SAVE_ERROR: CombatLifecycleState = {
+    ...SAVE_ERROR,
+    browserSafetyLatched: true,
+  };
+  const TERMINAL_EXIT_PAUSE: CombatLifecycleState = {
+    running: false,
+    overlay: 'terminal-exit-pause',
+    debugRestoreOrigin: 'none',
+    browserSafetyLatched: true,
+  };
+
+  it('a browser-safety event while Save Error is open latches manual Resume without closing the Overlay', () => {
+    const latched = reduce(SAVE_ERROR, 'combat-lifecycle/browser-safety-event');
+    expect(latched).toEqual(LATCHED_SAVE_ERROR);
+    // Repeated events stay idempotent.
+    expect(reduce(latched, 'combat-lifecycle/browser-safety-event')).toEqual(
+      LATCHED_SAVE_ERROR,
+    );
+  });
+
+  it('recover while Save Error is latched closes Save Error into the terminal-exit Pause', () => {
+    expect(reduce(LATCHED_SAVE_ERROR, 'combat-terminal/recover')).toEqual(
+      TERMINAL_EXIT_PAUSE,
+    );
+  });
+
+  it('recover while Save Error is NOT latched still resumes the committed exit directly', () => {
+    expect(reduce(SAVE_ERROR, 'combat-terminal/recover')).toEqual(RUNNING);
+  });
+
+  it('the terminal-exit Pause is Resume-only after the immutable Success commit', () => {
+    for (const action of [
+      'combat-lifecycle/open-pause',
+      'combat-lifecycle/open-settings',
+      'combat-lifecycle/close-settings',
+      'combat-lifecycle/open-debug',
+      'combat-lifecycle/close-debug',
+      'combat-terminal/recover',
+      'combat-terminal/save-error',
+      'combat-terminal/save-conflict',
+      'combat-lifecycle/browser-safety-event',
+    ] as const) {
+      expect(reduce(TERMINAL_EXIT_PAUSE, action)).toBe(TERMINAL_EXIT_PAUSE);
+    }
+  });
+
+  it('only explicit Resume leaves the terminal-exit Pause and starts the committed Success exit', () => {
+    expect(reduce(TERMINAL_EXIT_PAUSE, 'combat-lifecycle/resume')).toEqual(
+      RUNNING,
+    );
+  });
+
+  it('Save Conflict remains Reload-only even when a safety latch is present', () => {
+    const latchedConflict: CombatLifecycleState = {
+      running: false,
+      overlay: 'save-conflict',
+      debugRestoreOrigin: 'none',
+      browserSafetyLatched: true,
+    };
+    for (const action of [
+      'combat-lifecycle/resume',
+      'combat-lifecycle/open-pause',
+      'combat-lifecycle/open-settings',
+      'combat-lifecycle/open-debug',
+      'combat-terminal/recover',
+    ] as const) {
+      expect(reduce(latchedConflict, action)).toBe(latchedConflict);
+    }
+  });
+});

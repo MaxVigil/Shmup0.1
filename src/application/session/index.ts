@@ -6,6 +6,7 @@ export { initializeSession } from './initialize-session';
 export type {
   BaseScreenId,
   CampaignRunStatus,
+  PresentedMissionResult,
   SessionState,
 } from './session-state';
 export { createSessionStore, sessionReducer } from './store';

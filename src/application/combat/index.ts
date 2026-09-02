@@ -1,15 +1,15 @@
 export {
   loadCombatSession,
-  resolveBasicDrone,
   resolveEquippedWeapon,
   resolveGermanFighter,
-  resolveMissionSchedule,
+  resolveMission,
   synchronizeSharedModeAfterToggle,
 } from './combat-session';
 export type {
   CombatSession,
   CombatSessionCreationGuard,
   CombatSessionInput,
+  TerminalCommitOutcome,
 } from './combat-session';
 export {
   createCombatSimulation,
@@ -17,8 +17,6 @@ export {
   stepCombatSimulation,
   submitCombatCommand,
   advanceSimulationFrames,
-  removeProjectileById,
-  forceFinalGroupSpawn,
   applyDebugCommand,
   FIXED_STEP_SECONDS,
   MAX_STEPS_PER_FRAME,
@@ -29,6 +27,7 @@ export type {
   CombatSimulationRuntime,
   CombatAircraftState,
   CombatBounds,
+  CombatBoundsSize,
   CombatPoint,
   SimulationFrameResult,
 } from './combat-simulation';
@@ -44,6 +43,21 @@ export type {
   DebugRestoreOrigin,
 } from './lifecycle';
 export {
+  EVIDENCE_MODE,
+  EVIDENCE_SCENARIOS_ENABLED,
+  EVIDENCE_COUNTERS_ENABLED,
+  createCollisionEvidenceSink,
+  createCombatEvidenceAccumulator,
+} from './evidence';
+export type {
+  CollisionEvidenceSink,
+  CollisionWorkTotals,
+  CombatEvidenceAccumulator,
+  CombatEvidenceRecord,
+  CombatEvidenceWindow,
+  LegacyBenchmarkIdentityWindow,
+} from './evidence';
+export {
   buildCombatObservability,
   isDebugCommandEligible,
 } from './debug-command';
@@ -54,55 +68,72 @@ export type {
   DebugEligibilityContext,
 } from './debug-command';
 export {
+  advanceEnemyProjectile,
   advanceProjectile,
+  isEnemyProjectileOutsideViewport,
   isProjectileOutsideViewport,
   isProjectileRemoved,
   projectileGeometry,
   projectileSpeedPxPerSecond,
+  rangedProjectileGeometry,
+  rangedProjectileSpeedPxPerSecond,
   resolveWeaponFireProfile,
   spawnProjectile,
+  spawnRangedProjectile,
   stepsPerShotFor,
   PROJECTILE_HEIGHT_RATIO,
   PROJECTILE_WIDTH_RATIO,
+  RANGED_PROJECTILE_DAMAGE,
+  RANGED_PROJECTILE_HEIGHT_RATIO,
+  RANGED_PROJECTILE_SPEED_VIEWPORT_HEIGHTS_PER_SECOND,
+  RANGED_PROJECTILE_WIDTH_RATIO,
 } from './projectiles';
 export type {
   CombatProjectile,
+  EnemyProjectile,
   ProjectileGeometry,
   WeaponFireProfile,
 } from './projectiles';
 export {
   isEnemyAnyPortionVisible,
+  isEnemyFullyInsideViewport,
   isEnemyFullyOutsideViewport,
-  moveEnemy,
-  selectEnemyEntryRegion,
-  spawnAxisFraction,
-  spawnEnemy,
-  waypointXFraction,
-  waypointYFraction,
+  spawnEnemyFromPlacement,
+  stepEnemy,
 } from './enemies';
-export type { CombatEnemy, EnemyEntryRegion } from './enemies';
-export { planEnemyGroups, spawnGroupDrones } from './spawn-schedule';
-export type { PlannedEnemy, PlannedEnemyGroup } from './spawn-schedule';
+export type {
+  BasicEnemyState,
+  CombatEnemy,
+  EnemyEntryRegion,
+  EnemyStepInput,
+  EnemyStepResult,
+  HunterEnemyState,
+  RangedEnemyState,
+} from './enemies';
 export {
   aircraftCollisionAabb,
-  droneCollisionAabb,
+  enemyCollisionAabb,
+  enemyProjectileCollisionAabb,
   projectileCollisionAabb,
   AIRCRAFT_HITBOX_HEIGHT_RATIO,
   AIRCRAFT_HITBOX_WIDTH_RATIO,
 } from './collision-geometry';
 export {
   resolveAircraftContacts,
+  resolveEnemyProjectileCollisions,
   resolveProjectileCollisions,
-  CONTACT_COOLDOWN_STEPS,
-  CONTACT_DAMAGE,
   AIRCRAFT_DAMAGE_FLASH_STEPS,
   DESTROYED_ENEMY_FLASH_STEPS,
   ENEMY_HIT_FLASH_STEPS,
+  PAIR_CONTACT_COOLDOWN_STEPS,
 } from './collision';
 export type {
   ContactCollisionInput,
   ContactCollisionResult,
   DestroyedEnemyFlash,
+  DestroyedEnemyInfo,
+  EnemyProjectileCollisionInput,
+  EnemyProjectileCollisionResult,
   ProjectileCollisionInput,
   ProjectileCollisionResult,
 } from './collision';

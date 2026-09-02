@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CONTENT_CATALOGUE } from '@content/index';
+import { successMissionResult } from '@test-support/session';
 import { initializeSession } from './initialize-session';
 import { createSessionStore, sessionReducer } from './store';
 import type { MissionSnapshot } from '../mission/snapshot';
@@ -410,15 +411,14 @@ describe('createSessionStore', () => {
     // N+1 (ordinal 1) starts running.
     store.dispatch({
       type: 'mission/result',
-      result: {
-        kind: 'success',
+      result: successMissionResult({
         missionInstanceOrdinal: 0,
         creditsAfter: 13,
         hullIntegrityAfter: 80,
         unlockedMissionIdsAfter: ['interception-01', 'interception-02'],
         completedMissionIdsAfter: ['interception-01'],
         creditsEarned: 8,
-      },
+      }),
     });
     store.dispatch({
       type: 'mission/result-consumed',

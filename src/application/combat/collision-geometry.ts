@@ -1,15 +1,18 @@
 import { createAabb } from '@domain/geometry';
 import type { Aabb } from '@domain/geometry';
 import type { CombatEnemy } from './enemies';
-import type { CombatProjectile } from './projectiles';
+import type { CombatProjectile, EnemyProjectile } from './projectiles';
 
 /**
- * S10/S11 collision geometry (Combat §8.6, AC-049): the player aircraft hitbox
- * is a centred box of `60%` of the rendered sprite width by `70%` of the
- * rendered sprite height; the Basic Drone hitbox is its full 4%-short-side
- * rendered square; the projectile hitbox is its full rendered bounds. AABB
+ * Collision geometry (Combat §8.6, AC-049; v0.2 §9/§11, V02-DEC-019): the
+ * player aircraft hitbox is a centred box of `60%` of the rendered sprite width
+ * by `70%` of the rendered sprite height; every regular enemy's hitbox is its
+ * FULL complete configured rendered bounds (never a superseded square or an
+ * alpha-pixel mask); the player projectile hitbox is its full rendered bounds;
+ * the Ranged projectile hitbox is its full `1.2% × 0.6%` rendered bounds. AABB
  * overlap uses the strict edge semantics of `@domain/geometry` (edge-only
- * contact is not overlap). The collision *pass* is owned by S11.
+ * contact is not overlap). The collision *pass* is owned by the collision
+ * module.
  */
 export const AIRCRAFT_HITBOX_WIDTH_RATIO = 0.6;
 export const AIRCRAFT_HITBOX_HEIGHT_RATIO = 0.7;
@@ -25,21 +28,17 @@ export function aircraftCollisionAabb(
   return createAabb(centerX - width / 2, centerY - height / 2, width, height);
 }
 
-/** The Basic Drone hitbox is its full 4%-short-side rendered square. */
-export function droneCollisionAabb(
-  enemy: CombatEnemy,
-  enemySize: number,
-): Aabb {
-  const half = enemySize / 2;
+/** The regular-enemy hitbox is its complete rendered bounds (V02-DEC-019). */
+export function enemyCollisionAabb(enemy: CombatEnemy): Aabb {
   return createAabb(
-    enemy.centerX - half,
-    enemy.centerY - half,
-    enemySize,
-    enemySize,
+    enemy.centerX - enemy.width / 2,
+    enemy.centerY - enemy.height / 2,
+    enemy.width,
+    enemy.height,
   );
 }
 
-/** The projectile hitbox is its full rendered bounds. */
+/** The player-projectile hitbox is its full rendered bounds. */
 export function projectileCollisionAabb(
   projectile: CombatProjectile,
   projectileWidth: number,
@@ -50,5 +49,17 @@ export function projectileCollisionAabb(
     projectile.centerY - projectileHeight / 2,
     projectileWidth,
     projectileHeight,
+  );
+}
+
+/** The Ranged-projectile hitbox is its full rendered bounds (v0.2 §9.2). */
+export function enemyProjectileCollisionAabb(
+  projectile: EnemyProjectile,
+): Aabb {
+  return createAabb(
+    projectile.centerX - projectile.width / 2,
+    projectile.centerY - projectile.height / 2,
+    projectile.width,
+    projectile.height,
   );
 }

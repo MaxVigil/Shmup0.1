@@ -27,7 +27,7 @@ describe('WeaponOption', () => {
     expect(screen.getByText('Damage')).toBeDefined();
     expect(screen.getByText('1')).toBeDefined();
     expect(screen.getByText('Fire Rate')).toBeDefined();
-    expect(screen.getByText('6 shots/s')).toBeDefined();
+    expect(screen.getByText('5 shots/s')).toBeDefined();
     expect(screen.getByText('Destroys Basic Drone')).toBeDefined();
     expect(screen.getByText('3 hits')).toBeDefined();
   });

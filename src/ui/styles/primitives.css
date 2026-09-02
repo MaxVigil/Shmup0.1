@@ -643,6 +643,38 @@
   background-color: var(--color-accent);
 }
 
+/* --- v0.2 Combat Countdown (Epic §15.2, DS §8.26): horizontally centred at
+ * --- space-4 from the top viewport edge, canonical text styling, updated
+ * --- imperatively by the CombatHudBridge each frame. --- */
+.ds-combat-countdown {
+  position: absolute;
+  left: 50%;
+  top: var(--space-4);
+  transform: translateX(-50%);
+  font-family: var(--font-family);
+  font-size: var(--text-body-size);
+  font-weight: var(--text-body-weight);
+  line-height: var(--text-body-line-height);
+  color: var(--color-text-primary);
+  pointer-events: none;
+}
+
+/* --- v0.2 CRITICAL HULL (Epic §15.3, DS §8.26): danger-tone Text directly
+ * --- below the Countdown with the canonical space-2 gap; visibility is owned
+ * --- by the one-shot simulation latch and applied imperatively. --- */
+.ds-combat-critical-hull {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--space-4) + var(--space-2));
+  transform: translateX(-50%);
+  font-family: var(--font-family);
+  font-size: var(--text-control-size);
+  font-weight: var(--text-control-weight);
+  line-height: var(--text-control-line-height);
+  color: var(--color-danger);
+  pointer-events: none;
+}
+
 .ds-boot-view {
   min-height: 100vh;
   display: flex;

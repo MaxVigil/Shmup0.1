@@ -457,7 +457,7 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
         0,
         startedA.snapshot.missionInstanceOrdinal,
       ),
-    ).toBe('inert');
+    ).toMatchObject({ outcome: 'inert' });
     expect(campaignStore.current?.missionInProgress).toEqual({
       missionId: SEAM_MISSION_ID,
       attemptId: 1,
@@ -480,16 +480,22 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
     expect(campaignStore.current?.hullIntegrity).toBe(100);
 
     // The CURRENT matching attempt (B, attempt id 1) still commits normally:
-    // the Success reward applies exactly once and the marker clears.
-    expect(
-      await commitMissionResult(
-        { store: storeB, campaignStore, content: CONTENT_CATALOGUE },
-        { kind: 'success' },
-        80,
-        1,
-        startedB.snapshot.missionInstanceOrdinal,
-      ),
-    ).toBe('committed');
+    // the Success reward applies exactly once and the marker clears. The
+    // returned result mirrors the entry's deferred session dispatch.
+    const committed = await commitMissionResult(
+      { store: storeB, campaignStore, content: CONTENT_CATALOGUE },
+      { kind: 'success' },
+      80,
+      1,
+      startedB.snapshot.missionInstanceOrdinal,
+    );
+    expect(committed.outcome).toBe('committed');
+    if (
+      committed.outcome === 'committed' &&
+      committed.result?.kind === 'success'
+    ) {
+      storeB.dispatch({ type: 'mission/result', result: committed.result });
+    }
     expect(campaignStore.current?.missionInProgress).toBeNull();
     expect(campaignStore.current?.credits).toBe(
       creditsAfterRecovery + INTERCEPTION_01.completionReward,
@@ -573,7 +579,7 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
         startedA.snapshot.missionAttemptId,
         startedA.snapshot.missionInstanceOrdinal,
       ),
-    ).toBe('inert');
+    ).toMatchObject({ outcome: 'inert' });
     expect(
       await commitMissionResult(
         { store: storeA, campaignStore, content: CONTENT_CATALOGUE },
@@ -582,7 +588,7 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
         startedA.snapshot.missionAttemptId,
         startedA.snapshot.missionInstanceOrdinal,
       ),
-    ).toBe('inert');
+    ).toMatchObject({ outcome: 'inert' });
     expect(
       await abortMission(
         { store: storeA, campaignStore },
@@ -610,7 +616,7 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
         startedB.snapshot.missionAttemptId,
         startedB.snapshot.missionInstanceOrdinal,
       ),
-    ).toBe('committed');
+    ).toMatchObject({ outcome: 'committed' });
     expect(campaignStore.current?.missionInProgress).toBeNull();
     expect(campaignStore.current?.credits).toBe(
       V02_STARTING_CREDITS + INTERCEPTION_01.completionReward,

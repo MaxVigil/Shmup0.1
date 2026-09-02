@@ -21,6 +21,16 @@ export const PILOT_SELECTION_ORDINAL = 0;
  *  changes the authoritative Combat spawn stream sequence. */
 export const MISSION_DATA_STREAM = 'mission-data';
 export const MISSION_DATA_ORDINAL = 0;
+/**
+ * Per-Ranged `ranged-fire` stream (Epic §9.2, V02-AC-006): each Ranged Drone
+ * owns an independent stream derived from the already-derived mission seed
+ * with its stable zero-based mission-member ordinal, so one Ranged's lifetime,
+ * firing, or destruction never shifts another Ranged's cadence. Stream name
+ * versioned under the existing `rng-v1` input version; the ordinal is never
+ * removal-sensitive or shared with the encounter-data or Combat streams.
+ */
+export const RANGED_FIRE_STREAM = 'ranged-fire';
+export const RANGED_FIRE_ORDINAL_BASE = 0;
 
 export function deriveStreamSeed(
   sessionSeed: number,
@@ -81,4 +91,15 @@ export function createCombatMissionStream(
  *  never read current Combat state (Epic §7.2, V02-AC-004). */
 export function createMissionDataStream(missionSeed: number): Mulberry32 {
   return createStream(missionSeed, MISSION_DATA_STREAM, MISSION_DATA_ORDINAL);
+}
+
+/** Independent per-Ranged fire stream (Epic §9.2, V02-AC-006): derives from the
+ *  already-derived mission seed with the Ranged's stable zero-based
+ *  mission-member ordinal. The stream is created once per mission instance and
+ *  consumed only by its owning Ranged in encounter/member order. */
+export function createRangedFireStream(
+  missionSeed: number,
+  memberOrdinal: number,
+): Mulberry32 {
+  return createStream(missionSeed, RANGED_FIRE_STREAM, memberOrdinal);
 }
