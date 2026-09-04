@@ -655,9 +655,10 @@ export function stepCombatSimulation(
     return state;
   }
   if (state.terminalResult !== null) {
-    // Epic §13.3: after a terminal result, gameplay stops. A Success continues
-    // only its immutable deterministic centre-and-up exit sequence; Defeat
-    // freezes (the v0.1 seam dispatches the result immediately).
+    // Epic §13.3/§13.5: after a terminal result, gameplay stops. A Success
+    // continues only its immutable deterministic centre-and-up exit sequence;
+    // Defeat freezes and its commitment/presentation is owned by the
+    // application terminal-save boundary (Epic §13.5, §13.7).
     return state.terminalResult.kind === 'success'
       ? stepSuccessExit(state, stepSeconds)
       : state;

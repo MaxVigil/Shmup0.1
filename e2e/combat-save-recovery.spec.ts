@@ -166,8 +166,8 @@ test('a failed terminal commit opens Save Error; repeated Retry keeps it open, a
   ).toBeVisible();
 
   // Restore the durable row and Retry: the commit now succeeds, the Defeat
-  // resolves immediately (v0.1 seam), and the Result Overlay is the only
-  // continuation point.
+  // resolves through the lifecycle boundary (no latch is set), and the paid
+  // full-Repair Result Overlay is the only continuation point.
   await writeCampaignRow(page, originalRow);
   await retry.click();
   await expect
@@ -180,7 +180,12 @@ test('a failed terminal commit opens Save Error; repeated Retry keeps it open, a
       },
       { timeout: 5000 },
     )
-    .toBe('Mission Failed');
+    .toBe('MISSION FAILED');
+  await expect(dialog.getByText('Repair cost')).toBeVisible();
+  await expect(dialog.getByText('-8 Credits')).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Save Error' })).toHaveCount(
+    0,
+  );
 
   expect(pageErrors).toEqual([]);
 });
@@ -313,6 +318,217 @@ test('a committed Success that resolves while the tab is hidden is held by the R
   await expect(
     page.getByRole('heading', { name: 'MISSION COMPLETE' }),
   ).toHaveCount(1);
+
+  expect(pageErrors).toEqual([]);
+});
+
+test('a committed Defeat that resolves under the browser-safety manual-resume latch is held by the Resume-only terminal-exit Pause (V02-WI-05 C03/C04, V02-AC-019/020)', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await startCombat(page);
+
+  // Open the dev Debug Overlay (the sim freezes) and set the manual-resume
+  // latch with a blur BEFORE the terminal write begins, so the write commits
+  // while the latch is set — the committed Defeat must NOT present/navigate
+  // automatically. The mid-write safety-event race (write started, then Pause
+  // opened, then blur) is exercised deterministically at the deferred-port
+  // application boundary in combat-presentation/terminal-save-pending.test.ts,
+  // which drives the same lifecycle reducer, terminal command, and boundary
+  // plan the Combat entry uses; this browser test proves the Resume-only
+  // presentation wiring end to end.
+  await page.keyboard.press('F1');
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.getByRole('button', { name: 'Lose Mission' }).click();
+
+  const dialog = page.getByRole('dialog');
+  // The committed Defeat is held behind the Resume-only terminal-exit Pause:
+  // no Result Overlay and no auto-presentation.
+  await expect(dialog.getByRole('heading', { name: 'Paused' })).toBeVisible({
+    timeout: 5000,
+  });
+  await expect(
+    dialog.getByText(
+      'Mission result saved. Combat remains paused — select Resume to finish.',
+    ),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole('heading', { name: 'MISSION FAILED' }),
+  ).toHaveCount(0);
+  const resume = dialog.getByRole('button', { name: 'Resume' });
+  await expect(resume).toBeFocused();
+  // Only Resume exists: no Return to Base, Settings, Debug, Retry, or Reload.
+  await expect(
+    dialog.getByRole('button', { name: 'Return to Base' }),
+  ).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Retry Save' })).toHaveCount(
+    0,
+  );
+  await expect(dialog.getByRole('button', { name: 'Reload' })).toHaveCount(0);
+
+  // Returning focus/visibility is NOT Resume and never auto-presents.
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(dialog.getByRole('heading', { name: 'Paused' })).toBeVisible();
+  await expect(
+    dialog.getByRole('heading', { name: 'MISSION FAILED' }),
+  ).toHaveCount(0);
+
+  // Only the explicit Resume presents the held paid-Repair Defeat exactly once.
+  await resume.click();
+  await expect
+    .poll(
+      async () => {
+        if ((await dialog.count()) === 0) {
+          return null;
+        }
+        return dialog.getByRole('heading').textContent();
+      },
+      { timeout: 8000 },
+    )
+    .toBe('MISSION FAILED');
+  await expect(dialog.getByText('Repair cost')).toBeVisible();
+  await expect(dialog.getByText('-8 Credits')).toBeVisible();
+
+  // The presentation never re-wrote or double-charged the Repair: Continue
+  // returns to Operations with the single committed 12 − 8 = 4 Credits.
+  await dialog.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await expect(page.getByText('Credits: 4')).toBeVisible();
+
+  expect(pageErrors).toEqual([]);
+});
+
+test('a committed Defeat whose Retry Save resolves while hidden is held, and Resume presents MISSION FAILED exactly once (V02-WI-05 C03, V02-AC-019/020)', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await startCombat(page);
+
+  // Freeze the sim in Debug, then delete the durable campaign record so the
+  // forced Defeat commit reports `failed` (opens Save Error with Retry).
+  await page.keyboard.press('F1');
+  const originalRow = await readCampaignRow(page);
+  expect(originalRow).not.toBeUndefined();
+  await deleteCampaignRow(page);
+
+  await page.getByRole('button', { name: 'Lose Mission' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(
+    dialog.getByRole('heading', { name: 'Save Error' }),
+  ).toBeVisible();
+
+  // A browser-safety event while Save Error is open latches manual Resume
+  // WITHOUT closing the Overlay; the retry commit may still resolve later.
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await expect(
+    dialog.getByRole('heading', { name: 'Save Error' }),
+  ).toBeVisible();
+  const retry = dialog.getByRole('button', { name: 'Retry Save' });
+  await expect(retry).toBeFocused();
+
+  // Restore the durable row and Retry Save: the Defeat commit now succeeds
+  // while the safety latch is set, so Save Error closes into the Resume-only
+  // terminal-exit Pause instead of presenting the result automatically.
+  await writeCampaignRow(page, originalRow);
+  await retry.click();
+  await expect(dialog.getByRole('heading', { name: 'Paused' })).toBeVisible({
+    timeout: 5000,
+  });
+  await expect(
+    dialog.getByText(
+      'Mission result saved. Combat remains paused — select Resume to finish.',
+    ),
+  ).toBeVisible();
+  const resume = dialog.getByRole('button', { name: 'Resume' });
+  await expect(resume).toBeFocused();
+
+  // No automatic presentation on focus restore.
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(dialog.getByRole('heading', { name: 'Paused' })).toBeVisible();
+
+  // Explicit Resume presents the single committed Defeat (MISSION FAILED with
+  // the -8 Credits Repair); no second write or economy recalculation occurs.
+  await resume.click();
+  await expect
+    .poll(
+      async () => {
+        if ((await dialog.count()) === 0) {
+          return null;
+        }
+        return dialog.getByRole('heading').textContent();
+      },
+      { timeout: 8000 },
+    )
+    .toBe('MISSION FAILED');
+  await expect(dialog.getByText('Repair cost')).toBeVisible();
+  await expect(dialog.getByText('-8 Credits')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'MISSION FAILED' }),
+  ).toHaveCount(1);
+
+  expect(pageErrors).toEqual([]);
+});
+
+test('an unaffordable Defeat opens the terminal Game Over Screen; only the confirmed New Game replaces the run (V02-AC-016/017)', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+
+  // Rewrite the persisted campaign so Credits are exactly 7 (Repair cost − 1),
+  // then reload so the hydrated session mirrors the durable balance.
+  const row = await readCampaignRow(page);
+  expect(row).not.toBeUndefined();
+  await writeCampaignRow(page, {
+    ...(row as object),
+    value: {
+      ...(row as { value: { credits: number } }).value,
+      credits: 7,
+    },
+  });
+  await page.reload();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await expect(page.getByText('Credits: 7')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Interception 01' }).click();
+  await page.getByRole('button', { name: 'Start Mission' }).click();
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
+
+  // Force Defeat: no partial Repair occurs and the terminal Game Over Screen
+  // opens instead of a Mission Result Overlay.
+  await page.keyboard.press('F1');
+  await page.getByRole('button', { name: 'Lose Mission' }).click();
+  await expect(page.getByTestId('game-over-screen')).toBeVisible({
+    timeout: 5000,
+  });
+  await expect(page.getByRole('heading', { name: 'Game Over' })).toBeVisible();
+  await expect(
+    page.getByText('The aircraft cannot be repaired.'),
+  ).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  // New Game opens the blocking destructive confirmation focused on Cancel;
+  // Cancel leaves the terminal Game Over Screen untouched.
+  await page.getByRole('button', { name: 'New Game' }).click();
+  const confirmation = page.getByRole('dialog');
+  await expect(
+    confirmation.getByText(
+      'Start a new game? Current run progress will be reset.',
+    ),
+  ).toBeVisible();
+  await expect(
+    confirmation.getByRole('button', { name: 'Cancel' }),
+  ).toBeFocused();
+  await confirmation.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByTestId('game-over-screen')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 
   expect(pageErrors).toEqual([]);
 });

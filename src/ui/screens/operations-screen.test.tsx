@@ -273,7 +273,12 @@ describe('OperationsScreen', () => {
     });
     store.dispatch({
       type: 'mission/start-failed',
+      // V02-DEC-031: the start-failure signal carries the full originating
+      // snapshot identity; a cross-mission id cannot clear the Active Mission
+      // or reopen a substituted Mission Details Overlay.
       missionId: 'interception-02',
+      missionAttemptId: 0,
+      missionInstanceOrdinal: 0,
     });
     const injected = contentCatalogueWith({
       missions: [INTERCEPTION_01, INTERCEPTION_03],

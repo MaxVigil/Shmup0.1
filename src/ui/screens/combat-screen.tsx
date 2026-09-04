@@ -16,8 +16,9 @@ import type {
 import {
   abortMission as abortMissionCommand,
   commitMissionResult as commitMissionResultCommand,
-  failMissionStart,
+  createMissionStartRecoveryController,
 } from '@application/mission';
+import type { MissionStartRecoveryController } from '@application/mission';
 import { mapCommitMissionOutcome } from '@combat-presentation/terminal-commit';
 import type {
   CombatTerminalResult,
@@ -27,6 +28,7 @@ import { useApplication } from '../application-context';
 import { SettingsButton } from '../components';
 import { useSessionState } from '../hooks';
 import {
+  MissionStartRecoveryErrorOverlay,
   PauseOverlay,
   SaveConflictOverlay,
   SaveErrorOverlay,
@@ -70,6 +72,9 @@ export function CombatScreen(): ReactElement | null {
   const session = useSessionState();
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<CombatSession | null>(null);
+  const recoveryControllerRef = useRef<MissionStartRecoveryController | null>(
+    null,
+  );
   const lifecycle = session.combatLifecycle;
 
   // WI-02 application command ports (bound at the composition root through the
@@ -202,29 +207,44 @@ export function CombatScreen(): ReactElement | null {
           );
         })
         .catch(() => {
-          if (!disposed) {
-            // Base AC-014 correction: the start persisted its missionInProgress
-            // marker before Combat entry; the initialization failure must
-            // atomically clear that exact marker before reconciling in-memory
-            // state, so the same-session retry works and a later reload can
-            // never turn the failed start into a paid Defeat (V02-AC-018/020).
-            // The rollback is bound to this snapshot's durable per-attempt
-            // identity so a delayed stale completion can never clear a newer
-            // attempt's marker. The command never rejects; this catch is an
-            // explicit guard so a contract violation can never leak an
-            // unhandled rejection into the page.
-            failMissionStart(
-              { store, campaignStore },
-              snapshot.missionAttemptId,
-            ).catch(() => {
-              // Guarded: the command handles persistence failures itself.
-            });
+          if (disposed) {
+            return;
           }
+          // V02-DEC-031 Mission Start Recovery Error (Epic §13.2,
+          // V02-AC-020): the start persisted its missionInProgress marker
+          // before Combat entry and the lazy Combat owner initialization
+          // rejected. The application-owned recovery controller atomically
+          // clears ONLY the originating snapshot's exact mission id plus
+          // durable attempt id; on a safe clear/absent marker/missing record
+          // it reconciles in-memory state (the same-session retry works and a
+          // reload can never turn the failed start into a paid Defeat), on a
+          // durable authority mismatch it opens the exact Save Conflict /
+          // Reload-only state, and when cleanup cannot be proven safe it keeps
+          // this frozen non-interactive Combat shell with the blocking Mission
+          // Start Recovery Error Overlay whose single `Retry Cleanup` re-runs
+          // the same originating cleanup. No partial Phaser/runtime/bridge DOM
+          // survives in the shell.
+          container.replaceChildren();
+          const controller = createMissionStartRecoveryController(
+            { store, campaignStore },
+            {
+              missionId: snapshot.missionId,
+              missionAttemptId: snapshot.missionAttemptId,
+              missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+            },
+          );
+          recoveryControllerRef.current = controller;
+          void controller.run();
         });
     });
     return () => {
       disposed = true;
       sessionRef.current = null;
+      // V02-DEC-031: a disposed Mission Start Recovery controller can no
+      // longer run Retry Cleanup; store identity guards keep any late Promise
+      // completion from reopening an Overlay or clearing another attempt.
+      recoveryControllerRef.current?.dispose();
+      recoveryControllerRef.current = null;
       owner?.dispose();
       owner = null;
     };
@@ -396,6 +416,12 @@ export function CombatScreen(): ReactElement | null {
     }
   };
 
+  const handleRetryCleanup = (): void => {
+    // V02-DEC-031: relay Retry Cleanup to the application-owned single-flight
+    // recovery controller; React never gates or runs cleanup itself.
+    recoveryControllerRef.current?.retry();
+  };
+
   return (
     <div data-testid="combat-screen" className="ds-combat-screen">
       <div ref={containerRef} className="ds-combat-canvas" />
@@ -443,12 +469,34 @@ export function CombatScreen(): ReactElement | null {
       ) : null}
       {lifecycle.overlay === 'save-conflict' ? (
         <SaveConflictOverlay
-          onReload={() => sessionRef.current?.reloadForSaveConflict()}
+          onReload={() => {
+            const owner = sessionRef.current;
+            if (owner !== null) {
+              owner.reloadForSaveConflict();
+              return;
+            }
+            // V02-DEC-031: a Save Conflict discovered by the Mission Start
+            // Recovery controller has no Combat owner created; Reload is
+            // browser navigation only.
+            window.location.reload();
+          }}
         />
       ) : null}
-      {/* V02-WI-04 C03: a committed Success that resolved while the tab was
-          hidden/blurred closes Save Error into this Resume-only terminal-exit
-          Pause. Only explicit Resume starts the committed exit. */}
+      {/* V02-DEC-031 Mission Start Recovery Error: Combat initialization failed
+          after the marker persisted and exact cleanup could not be proven
+          safe. This frozen non-interactive Combat shell (no Phaser/simulation
+          owner, no canvas) exposes only the single-flight Retry Cleanup
+          action; Esc/Scrim and all Combat utility/Debug/terminal actions are
+          inert behind the blocking Overlay. */}
+      {lifecycle.overlay === 'mission-start-recovery-error' ? (
+        <MissionStartRecoveryErrorOverlay onRetryCleanup={handleRetryCleanup} />
+      ) : null}
+      {/* V02-WI-04 C03 / V02-WI-05 C03: a committed terminal outcome that
+          resolved while the tab was hidden/blurred (initial pending write or
+          Retry) closes Save Error — and any Pause/Settings/Debug held under
+          the latch — into this Resume-only terminal-exit Pause. Explicit
+          Resume starts a committed Success/Evacuation exit or presents a held
+          Defeat/Game Over exactly once. */}
       {lifecycle.overlay === 'terminal-exit-pause' ? (
         <TerminalExitPauseOverlay onResume={dispatchResume} />
       ) : null}

@@ -26,10 +26,12 @@ import type {
  * whose authored entry is `seeded` (exactly `upper-left`, `upper-right`, Epic
  * §8). Draws come from the dedicated `mission-data` stream derived from the
  * already-derived mission seed, in strict authored encounter order — for Mission
- * 01 exactly the three Hunter draws `e3 → e4 → e5` (V02-AC-003). Top Placements
- * consume zero draws. Every seeded-side staging member resolves its side from
- * the same encounter-level draw, so consuming this contract never changes the
- * authoritative Combat spawn stream sequence (Technical Foundation §8).
+ * 01 exactly the three Hunter draws `e3 → e4 → e5` (V02-AC-003), and for
+ * Mission 02 exactly the three draws `e4 (delayed Basic flank) → e5 Hunter →
+ * e6 Hunter` (V02-DEC-026). Top Placements consume zero draws. Every
+ * seeded-side staging member resolves its side from the same encounter-level
+ * draw, so consuming this contract never changes the authoritative Combat
+ * spawn stream sequence (Technical Foundation §8).
  */
 
 export interface ResolvedArrivalGroupMember {
@@ -79,8 +81,8 @@ export interface ResolvedEncounter {
   readonly roleDelays: readonly RoleDelay[];
   /**
    * Resolved ordered Arrival Groups (Epic §8.1.1), or `null` when the authored
-   * mission carries no exact numeric staging (Missions 02/03 until their
-   * Product Owner staging decisions are recorded).
+   * mission carries no exact numeric staging (Mission 03 until its Product
+   * Owner staging decision is recorded; Missions 01 and 02 are fully staged).
    */
   readonly staging: readonly ResolvedArrivalGroup[] | null;
 }
@@ -149,11 +151,15 @@ export function resolveMissionEncounters(
   };
 }
 
-/** Resolves authored Arrival Groups into absolute-step groups (Epic §8.1.1).
- *  The seeded side of every `seeded-side` member comes from the encounter's
- *  single resolved entry draw (each Mission 01 seeded encounter carries exactly
- *  one Hunter), so staging consumes no additional RNG beyond that encounter
- *  draw and preserves the exact `e3 → e4 → e5` draw order. */
+/**
+ * Resolves authored Arrival Groups into absolute-step groups (Epic §8.1.1).
+ * The seeded side of every `seeded-side` member comes from the encounter's
+ * single resolved entry draw (each Mission 01/02 seeded encounter carries one
+ * binary side draw, and every seeded-side member in that encounter resolves
+ * from it), so staging consumes no additional RNG beyond that encounter draw
+ * and preserves the exact Mission 01 `e3 → e4 → e5` and Mission 02
+ * `e4 → e5 → e6` draw order.
+ */
 function resolveStaging(
   staging: readonly ArrivalGroup[] | undefined,
   entryRegion: EncounterEntryRegion | null,

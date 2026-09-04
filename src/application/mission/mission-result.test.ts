@@ -86,13 +86,16 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
       result: {
         kind: 'defeat',
         missionInstanceOrdinal: 0,
-        creditsAfter: V02_STARTING_CREDITS,
-        hullIntegrityAfter: 25,
+        creditsAfter: V02_STARTING_CREDITS - 8,
+        hullIntegrityAfter: 100,
+        runStatusAfter: 'active',
+        repairCostCredits: 8,
       },
     });
     const session = store.getState()!;
-    expect(session.credits).toBe(V02_STARTING_CREDITS);
-    expect(session.hullIntegrity).toBe(25);
+    expect(session.credits).toBe(V02_STARTING_CREDITS - 8);
+    expect(session.hullIntegrity).toBe(100);
+    expect(session.runStatus).toBe('active');
     expect(session.activeMission).toBe('none');
     expect(session.missionResult).toMatchObject({
       kind: 'defeat',
@@ -104,11 +107,120 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
       result: {
         kind: 'defeat',
         missionInstanceOrdinal: 0,
-        creditsAfter: V02_STARTING_CREDITS,
-        hullIntegrityAfter: 25,
+        creditsAfter: V02_STARTING_CREDITS - 8,
+        hullIntegrityAfter: 100,
+        runStatusAfter: 'active',
+        repairCostCredits: 8,
       },
     });
-    expect(store.getState()!.hullIntegrity).toBe(25);
+    expect(store.getState()!.hullIntegrity).toBe(100);
+  });
+
+  it('routes an unaffordable Defeat to the Game Over run status without a mission result (V02-AC-016/017)', () => {
+    const store = initializedStore();
+    startMissionIn(store);
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'defeat',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS,
+        hullIntegrityAfter: 100,
+        runStatusAfter: 'game-over',
+        repairCostCredits: 0,
+      },
+    });
+    const session = store.getState()!;
+    expect(session.runStatus).toBe('game-over');
+    expect(session.activeMission).toBe('none');
+    expect(session.missionResult).toBeNull();
+    // Duplicate Game Over signals stay inert (no duplicate marker clear).
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'defeat',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS,
+        hullIntegrityAfter: 100,
+        runStatusAfter: 'game-over',
+        repairCostCredits: 0,
+      },
+    });
+    expect(store.getState()!.runStatus).toBe('game-over');
+  });
+
+  it('commits an Evacuated result once with the retained Hull, floored payout, and unchanged progression (V02-AC-015)', () => {
+    const store = initializedStore();
+    startMissionIn(store);
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'evacuated',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS + 2,
+        hullIntegrityAfter: 70,
+        creditsEarned: 2,
+        combatRewards: 5,
+        escapePenalties: 1,
+        netCombatReward: 4,
+        destroyedCounts: {
+          'basic-drone': 3,
+          'ranged-drone': 0,
+          'hunter-drone': 0,
+          'elite-drone': 0,
+        },
+        escapedCounts: {
+          'basic-drone': 0,
+          'ranged-drone': 0,
+          'hunter-drone': 0,
+          'elite-drone': 0,
+        },
+        unlockedMissionIdsAfter: ['interception-01'],
+        completedMissionIdsAfter: [],
+      },
+    });
+    const session = store.getState()!;
+    expect(session.credits).toBe(V02_STARTING_CREDITS + 2);
+    expect(session.hullIntegrity).toBe(70);
+    expect(session.activeMission).toBe('none');
+    expect(session.missionResult).toMatchObject({
+      kind: 'evacuated',
+      missionInstanceOrdinal: 0,
+      creditsEarned: 2,
+      netCombatReward: 4,
+    });
+    // Evacuation never completes or unlocks a mission.
+    expect(session.unlockedMissionIds).toEqual(['interception-01']);
+    expect(session.completedMissionIds).toEqual([]);
+    // Duplicate terminal signals are strict no-ops.
+    store.dispatch({
+      type: 'mission/result',
+      result: {
+        kind: 'evacuated',
+        missionInstanceOrdinal: 0,
+        creditsAfter: V02_STARTING_CREDITS + 2,
+        hullIntegrityAfter: 70,
+        creditsEarned: 2,
+        combatRewards: 5,
+        escapePenalties: 1,
+        netCombatReward: 4,
+        destroyedCounts: {
+          'basic-drone': 3,
+          'ranged-drone': 0,
+          'hunter-drone': 0,
+          'elite-drone': 0,
+        },
+        escapedCounts: {
+          'basic-drone': 0,
+          'ranged-drone': 0,
+          'hunter-drone': 0,
+          'elite-drone': 0,
+        },
+        unlockedMissionIdsAfter: ['interception-01'],
+        completedMissionIdsAfter: [],
+      },
+    });
+    expect(store.getState()!.credits).toBe(V02_STARTING_CREDITS + 2);
   });
 
   it('ignores a result with invalid carried values (defensive boundary)', () => {
@@ -184,8 +296,10 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
       result: {
         kind: 'defeat',
         missionInstanceOrdinal: 0,
-        creditsAfter: V02_STARTING_CREDITS,
-        hullIntegrityAfter: 25,
+        creditsAfter: V02_STARTING_CREDITS - 8,
+        hullIntegrityAfter: 100,
+        runStatusAfter: 'active',
+        repairCostCredits: 8,
       },
     });
     expect(store.getState()!.missionResult).toMatchObject({

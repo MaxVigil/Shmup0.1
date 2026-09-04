@@ -72,11 +72,11 @@ export async function startMission(
   if (!session.unlockedMissionIds.includes(missionId)) {
     return { kind: 'rejected', reason: 'mission-not-available' };
   }
-  // V02-WI-04 bounded staging: only Mission 01 carries authored runtime
-  // Arrival Groups. An unlocked Mission 02/03 (reachable after Mission 01
-  // Success) is rejected before any mission-start transaction until the
-  // Product Owner records its exact staging; the runtime never infers
-  // geometry for a mission that has none.
+  // V02-WI-04/WI-05 bounded staging: Missions 01 and 02 carry their exact
+  // authored Arrival Groups (V02-DEC-021/026) and may start; an unlocked
+  // Mission 03 (reachable only after Mission 02 Success) is rejected before
+  // any mission-start transaction until the Product Owner records its exact
+  // staging — the runtime never infers geometry for a mission that has none.
   const hasRuntimeStaging = mission.encounters.some(
     (encounter) => (encounter.staging?.length ?? 0) > 0,
   );

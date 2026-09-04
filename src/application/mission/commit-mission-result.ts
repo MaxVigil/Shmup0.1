@@ -1,4 +1,9 @@
-import { applyMissionSuccess, applySeamDefeat } from '@domain/index';
+import {
+  applyMissionDefeat,
+  applyMissionEvacuation,
+  applyMissionSuccess,
+  V02_DEFEAT_REPAIR_COST_CREDITS,
+} from '@domain/index';
 import type { EnemyType } from '@domain/index';
 import type { ContentCatalogue } from '../content';
 import type { CampaignStorePort } from '../persistence';
@@ -42,11 +47,14 @@ export function emptyRoleCounts(): RoleCounts {
   return record;
 }
 
-/** Result of one terminal commitment: the typed pre-committed MissionResult
- *  is returned to the caller so the session dispatch can be deferred to the
- *  deterministic Success exit-sequence completion (Epic §13.3); Defeat keeps
- *  the immediate v0.1 seam dispatch. Persist-then-session ordering is preserved
- *  because the dispatch only ever follows a resolved `committed` outcome. */
+/** Result of one terminal commitment: the typed pre-committed MissionResult is
+ *  returned to the caller (the lifecycle/presentation boundary) for EVERY
+ *  outcome. Success/Evacuation defer their session dispatch to the
+ *  deterministic exit-sequence completion (Epic §13.3–13.4); a committed
+ *  Defeat/Game Over dispatches only after that boundary evaluates the
+ *  browser-safety manual-resume latch (Epic §13.5, §13.7, V02-AC-020).
+ *  Persist-then-session ordering is preserved because a session dispatch only
+ *  ever follows a resolved `committed` outcome. */
 export interface CommitMissionResultResult {
   readonly outcome: MissionCommitOutcome;
   readonly result: MissionResult | null;
@@ -72,9 +80,8 @@ export interface CommitMissionResultResult {
  * (V02-AC-002, V02-AC-020). A stale command for an older Mission Instance is
  * also inert at the session boundary.
  *
- * The temporary v0.1 Defeat rule (free 25-Hull emergency recovery) still runs
- * through the seam until V02-WI-05 replaces it with the paid full Repair /
- * Game Over economy.
+ * The canonical v0.2 Defeat economy (zero reward; paid full Repair / Game Over)
+ * applies in V02-WI-05; no v0.1 free-recovery seam remains.
  */
 export async function commitMissionResult(
   deps: CommitMissionResultDeps,
@@ -91,6 +98,12 @@ export async function commitMissionResult(
   if (session.activeMission.missionInstanceOrdinal !== missionInstanceOrdinal) {
     return { outcome: 'inert', result: null };
   }
+  // V02-WI-05 C04: the exact durable snapshot attempt identity must match too —
+  // a same-ordinal session is not enough because the ordinal restarts per
+  // session, while the campaign attempt id is globally unique and non-resetting.
+  if (session.activeMission.missionAttemptId !== missionAttemptId) {
+    return { outcome: 'inert', result: null };
+  }
   const { missionId } = session.activeMission;
   const creditsBefore = session.credits;
   const mission =
@@ -104,13 +117,22 @@ export async function commitMissionResult(
   // Newly-unlocked-mission detection from the authoritative pre-commit session
   // progression (Epic §15.4: the row shows only when a mission was newly
   // unlocked by this Success).
+  // Newly-unlocked-mission detection from the authoritative pre-commit session
+  // progression (Epic §15.4: the row shows only when a mission was newly
+  // unlocked by this Success).
   const newlyUnlockedMissionId =
     terminal.kind === 'success' &&
     mission!.unlocksMissionId !== null &&
     !session.unlockedMissionIds.includes(mission!.unlocksMissionId)
       ? mission!.unlocksMissionId
       : null;
-  const economy = terminal.kind === 'success' ? successEconomy : undefined;
+  // The pending-mission-economy relay is frozen at the commitment instant by
+  // the simulation for Success and a successful Evacuation; Defeat commits zero
+  // reward and consumes no relay.
+  const economy =
+    terminal.kind === 'success' || terminal.kind === 'evacuated'
+      ? successEconomy
+      : undefined;
   const outcome = await deps.campaignStore.update((current) => {
     if (terminal.kind === 'success') {
       return applyMissionSuccess(
@@ -124,7 +146,26 @@ export async function commitMissionResult(
         mission!.unlocksMissionId,
       );
     }
-    return applySeamDefeat(current, missionAttemptId);
+    if (terminal.kind === 'evacuated') {
+      // Canonical v0.2 Evacuation (Epic §12.3, §13.4, V02-AC-015): payout is
+      // `floor(max(0, rewards - penalties) × 0.5)`, the current Combat Hull is
+      // retained, no completion/unlock changes, and the marker is cleared.
+      return applyMissionEvacuation(
+        current,
+        missionAttemptId,
+        missionId,
+        combatHullIntegrity,
+        economy?.combatRewards ?? 0,
+        economy?.escapePenalties ?? 0,
+      );
+    }
+    // Canonical v0.2 Defeat (Epic §12.4, §13.5, V02-AC-016): zero reward; the
+    // atomic transition deducts the full Repair cost and restores Hull to 100
+    // when affordable, or enters Game Over without any partial deduction. The
+    // marker must carry the exact originating mission id AND the exact attempt
+    // id (V02-WI-05 C04), so a same-attempt marker of another mission can never
+    // be charged or cleared by this live Defeat.
+    return applyMissionDefeat(current, missionAttemptId, missionId);
   });
   if (outcome.kind === 'missing' || outcome.kind === 'invalid') {
     return { outcome: 'failed', result: null };
@@ -137,6 +178,10 @@ export async function commitMissionResult(
     // occurs.
     return { outcome: 'inert', result: null };
   }
+  const netCombatReward = Math.max(
+    0,
+    (economy?.combatRewards ?? 0) - (economy?.escapePenalties ?? 0),
+  );
   const result: MissionResult =
     terminal.kind === 'success'
       ? {
@@ -147,10 +192,7 @@ export async function commitMissionResult(
           creditsEarned: outcome.next.credits - creditsBefore,
           combatRewards: economy?.combatRewards ?? 0,
           escapePenalties: economy?.escapePenalties ?? 0,
-          netCombatReward: Math.max(
-            0,
-            (economy?.combatRewards ?? 0) - (economy?.escapePenalties ?? 0),
-          ),
+          netCombatReward,
           completionReward: mission!.completionReward,
           newlyUnlockedMissionId,
           destroyedCounts: economy?.destroyedCounts ?? emptyRoleCounts(),
@@ -158,19 +200,39 @@ export async function commitMissionResult(
           unlockedMissionIdsAfter: [...outcome.next.unlockedMissionIds],
           completedMissionIdsAfter: [...outcome.next.completedMissionIds],
         }
-      : {
-          kind: 'defeat',
-          missionInstanceOrdinal,
-          creditsAfter: outcome.next.credits,
-          hullIntegrityAfter: outcome.next.hullIntegrity,
-        };
-  // The v0.1 Defeat seam dispatches immediately (no exit sequence). A Success
-  // result is returned to the caller (the presentation entry) so its session
-  // dispatch can be deferred to the deterministic centre-and-up exit
-  // completion (Epic §13.3); the persist-then-session ordering is preserved
-  // because any dispatch only ever follows this committed outcome.
-  if (result.kind !== 'success') {
-    deps.store.dispatch({ type: 'mission/result', result });
-  }
+      : terminal.kind === 'evacuated'
+        ? {
+            kind: 'evacuated',
+            missionInstanceOrdinal,
+            creditsAfter: outcome.next.credits,
+            hullIntegrityAfter: outcome.next.hullIntegrity,
+            creditsEarned: outcome.next.credits - creditsBefore,
+            combatRewards: economy?.combatRewards ?? 0,
+            escapePenalties: economy?.escapePenalties ?? 0,
+            netCombatReward,
+            destroyedCounts: economy?.destroyedCounts ?? emptyRoleCounts(),
+            escapedCounts: economy?.escapedCounts ?? emptyRoleCounts(),
+            unlockedMissionIdsAfter: [...outcome.next.unlockedMissionIds],
+            completedMissionIdsAfter: [...outcome.next.completedMissionIds],
+          }
+        : {
+            kind: 'defeat',
+            missionInstanceOrdinal,
+            creditsAfter: outcome.next.credits,
+            hullIntegrityAfter: outcome.next.hullIntegrity,
+            runStatusAfter: outcome.next.runStatus,
+            repairCostCredits:
+              outcome.next.runStatus === 'game-over'
+                ? 0
+                : V02_DEFEAT_REPAIR_COST_CREDITS,
+          };
+  // V02-WI-05 C03: every committed terminal result — Success, Evacuated,
+  // affordable-Repair Defeat, and Game Over — is returned to the existing
+  // lifecycle/presentation boundary. No result navigates before that boundary
+  // evaluates the browser-safety latch: a Defeat that commits while the tab is
+  // hidden or focus is lost is held behind the explicit Resume-only
+  // continuation (Epic §13.5, §13.7), and a committed result is never retried
+  // merely because presentation awaits Resume. The session dispatch therefore
+  // only ever follows this resolved `committed` outcome.
   return { outcome: 'committed', result };
 }

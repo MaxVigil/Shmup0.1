@@ -15,11 +15,13 @@
  * escape penalties) so the v0.2 Success Result Overlay (Epic §15.4) presents
  * the committed run without mutating or re-computing any economy.
  */
-import type { EnemyType, MissionId } from '@domain/index';
+import type { CampaignRunStatus, EnemyType, MissionId } from '@domain/index';
 
 /** Authoritative terminal trigger emitted by the Combat simulation. */
 export type CombatTerminalResult =
-  { readonly kind: 'success' } | { readonly kind: 'defeat' };
+  | { readonly kind: 'success' }
+  | { readonly kind: 'defeat' }
+  | { readonly kind: 'evacuated' };
 
 /** Per-role destroyed/escaped counts relayed from the authoritative Combat
  *  simulation at the Success commitment instant. */
@@ -50,10 +52,36 @@ export type MissionResult =
       readonly completedMissionIdsAfter: readonly MissionId[];
     }
   | {
+      readonly kind: 'evacuated';
+      readonly missionInstanceOrdinal: number;
+      readonly creditsAfter: number;
+      readonly hullIntegrityAfter: number;
+      /** Total Credits earned by this Evacuation (`floor(netCombat × 0.5)`). */
+      readonly creditsEarned: number;
+      /** Pending combat rewards frozen at the successful Evacuation. */
+      readonly combatRewards: number;
+      /** Pending escape penalties frozen at the successful Evacuation. */
+      readonly escapePenalties: number;
+      /** `max(0, combatRewards - escapePenalties)` before the 50% retention. */
+      readonly netCombatReward: number;
+      readonly destroyedCounts: RoleCounts;
+      readonly escapedCounts: RoleCounts;
+      /** Durable mission progression (unchanged by Evacuation — V02-AC-015). */
+      readonly unlockedMissionIdsAfter: readonly MissionId[];
+      readonly completedMissionIdsAfter: readonly MissionId[];
+    }
+  | {
       readonly kind: 'defeat';
       readonly missionInstanceOrdinal: number;
       readonly creditsAfter: number;
       readonly hullIntegrityAfter: number;
+      /** Durable run status after the atomic Defeat commitment (V02-WI-05):
+       *  `active` after an affordable full Repair, `game-over` when Credits
+       *  were below the Repair cost. */
+      readonly runStatusAfter: CampaignRunStatus;
+      /** Credits deducted by the full Repair when affordable (`0` on
+       *  Game Over, where no partial deduction occurs). */
+      readonly repairCostCredits: number;
     }
   | {
       readonly kind: 'aborted';

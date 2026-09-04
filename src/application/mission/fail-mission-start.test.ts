@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CONTENT_CATALOGUE, INTERCEPTION_01 } from '@content/index';
+import { CONTENT_CATALOGUE } from '@content/index';
 import {
   V02_STARTING_CREDITS,
-  V02_DEFEAT_REPAIR_COST_CREDITS,
   applyDefeatRecoveryOrGameOver,
   type CampaignStateV1,
 } from '@domain/index';
@@ -18,19 +17,25 @@ import type {
   CampaignStorePort,
   CampaignUpdateOutcome,
 } from '@application/persistence';
+import type { CampaignTransitionResult, MissionId } from '@domain/index';
 import { buildNewGameCampaign } from '../persistence';
 import { createBootRunner } from '../session/boot';
 import { initializeSession } from '../session';
 import { createSessionStore } from '../session/store';
-import { abortMission } from './abort-mission';
+import {
+  createMissionStartRecoveryController,
+  failMissionStart,
+} from './fail-mission-start';
+import type {
+  FailMissionStartDeps,
+  MissionStartRecoveryIdentity,
+} from './fail-mission-start';
 import { SEAM_MISSION_ID } from './compatibility-seam';
-import { commitMissionResult } from './commit-mission-result';
-import { failMissionStart } from './fail-mission-start';
 import { startMission } from './start-mission';
 
-/** Campaign store whose `update` rejects exactly like an unavailable
- *  IndexedDB/Dexie adapter (infrastructure failure, no outcome returned). */
-class RejectingUpdateCampaignStore implements CampaignStorePort {
+/** Campaign store whose `update` rejects like an unavailable IndexedDB/Dexie
+ *  adapter (infrastructure failure, no outcome returned). */
+class ThrowingUpdateCampaignStore implements CampaignStorePort {
   constructor(private readonly delegate: InMemoryCampaignStore) {}
 
   async read(): Promise<CampaignReadResult> {
@@ -45,44 +50,193 @@ class RejectingUpdateCampaignStore implements CampaignStorePort {
     throw new Error('Simulated persistence infrastructure failure');
   }
 
-  async replace(): Promise<void> {
-    throw new Error('Simulated persistence infrastructure failure');
+  async replace(next: CampaignStateV1): Promise<void> {
+    return this.delegate.replace(next);
   }
 }
 
-describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
-  it('atomically clears the persisted marker and reconciles the session so a same-session retry succeeds', async () => {
+/** Campaign store whose `update` reports an unreadable campaign record. */
+class InvalidUpdateCampaignStore implements CampaignStorePort {
+  constructor(private readonly delegate: InMemoryCampaignStore) {}
+
+  async read(): Promise<CampaignReadResult> {
+    return this.delegate.read();
+  }
+
+  async update(): Promise<CampaignUpdateOutcome> {
+    return {
+      kind: 'invalid',
+      diagnostics: [{ path: 'credits', message: 'not a valid credit balance' }],
+    };
+  }
+
+  async startMission(): Promise<CampaignStartOutcome> {
+    throw new Error('Not used by this scenario.');
+  }
+
+  async replace(next: CampaignStateV1): Promise<void> {
+    return this.delegate.replace(next);
+  }
+}
+
+/** Campaign store whose record is missing (deleted externally). */
+class MissingRecordCampaignStore implements CampaignStorePort {
+  constructor(private readonly delegate: InMemoryCampaignStore) {}
+
+  async read(): Promise<CampaignReadResult> {
+    return this.delegate.read();
+  }
+
+  async update(): Promise<CampaignUpdateOutcome> {
+    return { kind: 'missing' };
+  }
+
+  async startMission(): Promise<CampaignStartOutcome> {
+    throw new Error('Not used by this scenario.');
+  }
+
+  async replace(next: CampaignStateV1): Promise<void> {
+    return this.delegate.replace(next);
+  }
+}
+/** Campaign store whose `update` throws for the first `failures` invocations,
+ *  then delegates to the real in-memory store (retry-success scenarios). */
+class FlakyUpdateCampaignStore implements CampaignStorePort {
+  private calls = 0;
+
+  constructor(
+    private readonly delegate: InMemoryCampaignStore,
+    private readonly failures: number,
+  ) {}
+
+  async read(): Promise<CampaignReadResult> {
+    return this.delegate.read();
+  }
+
+  async update(
+    transform: (current: CampaignStateV1) => CampaignTransitionResult,
+  ): Promise<CampaignUpdateOutcome> {
+    this.calls += 1;
+    if (this.calls <= this.failures) {
+      throw new Error('Simulated transient persistence infrastructure failure');
+    }
+    return this.delegate.update(transform);
+  }
+
+  async startMission(): Promise<CampaignStartOutcome> {
+    return this.delegate.startMission(SEAM_MISSION_ID);
+  }
+
+  async replace(next: CampaignStateV1): Promise<void> {
+    return this.delegate.replace(next);
+  }
+}
+
+/** Campaign store whose `update` is deferred until the test releases it. */
+class DeferredUpdateCampaignStore implements CampaignStorePort {
+  private pending:
+    | {
+        transform: (current: CampaignStateV1) => CampaignTransitionResult;
+        resolve: (outcome: CampaignUpdateOutcome) => void;
+      }
+    | undefined;
+
+  updates = 0;
+
+  constructor(private readonly delegate: InMemoryCampaignStore) {}
+
+  /** Applies the captured transform through the real store and resolves the
+   *  in-flight update. */
+  releaseWithApplied(): void {
+    const pending = this.pending;
+    if (pending === undefined) {
+      throw new Error('No update is in flight.');
+    }
+    this.pending = undefined;
+    const decision = pending.transform(this.delegate.current!);
+    if (decision.kind === 'rejected') {
+      pending.resolve({ kind: 'no-change', reason: decision.reason });
+      return;
+    }
+    this.delegate.seed(decision.campaign);
+    pending.resolve({ kind: 'applied', next: decision.campaign });
+  }
+
+  async read(): Promise<CampaignReadResult> {
+    return this.delegate.read();
+  }
+
+  async update(
+    transform: (current: CampaignStateV1) => CampaignTransitionResult,
+  ): Promise<CampaignUpdateOutcome> {
+    this.updates += 1;
+    return new Promise((resolve) => {
+      this.pending = { transform, resolve };
+    });
+  }
+
+  async startMission(): Promise<CampaignStartOutcome> {
+    return this.delegate.startMission(SEAM_MISSION_ID);
+  }
+
+  async replace(next: CampaignStateV1): Promise<void> {
+    return this.delegate.replace(next);
+  }
+}
+
+function identityOf(started: {
+  missionId: MissionId;
+  missionAttemptId: number;
+  missionInstanceOrdinal: number;
+}): MissionStartRecoveryIdentity {
+  return {
+    missionId: started.missionId,
+    missionAttemptId: started.missionAttemptId,
+    missionInstanceOrdinal: started.missionInstanceOrdinal,
+  };
+}
+
+async function startAccepted(
+  deps: FailMissionStartDeps,
+): Promise<MissionStartRecoveryIdentity> {
+  const started = await startMission(
+    { ...deps, content: CONTENT_CATALOGUE },
+    SEAM_MISSION_ID,
+  );
+  if (started.kind !== 'accepted') {
+    throw new Error('Expected the mission to start.');
+  }
+  return identityOf(started.snapshot);
+}
+describe('Mission Start Recovery Error (Base AC-014, V02-DEC-031, V02-AC-020)', () => {
+  it('applied cleanup clears only the exact mission + attempt marker and reconciles the session once; the same-session retry succeeds', async () => {
     const app = createInitializedTestApplication();
-    const started = await startMission(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
-    );
-    expect(started.kind).toBe('accepted');
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
     expect(app.campaignStore.current?.missionInProgress).toEqual({
       missionId: SEAM_MISSION_ID,
       attemptId: 0,
     });
 
-    const outcome = await failMissionStart(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-      },
-      0,
+    const controller = createMissionStartRecoveryController(
+      { store: app.store, campaignStore: app.campaignStore },
+      identity,
     );
-    expect(outcome).toBe('cleared');
-    // Durable marker cleared; in-memory session reconciled.
+    await expect(controller.run()).resolves.toBe('cleared');
     expect(app.campaignStore.current?.missionInProgress).toBeNull();
     expect(app.store.getState()?.activeMission).toBe('none');
     expect(app.store.getState()?.missionStartFailed).toBe(true);
+    expect(app.store.getState()?.missionStartFailedMissionId).toBe(
+      SEAM_MISSION_ID,
+    );
+    expect(app.store.getState()?.missionResult).toBeNull();
     expect(app.store.getState()?.credits).toBe(V02_STARTING_CREDITS);
+    expect(app.store.getState()?.hullIntegrity).toBe(100);
+    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS);
+    expect(app.campaignStore.current?.runStatus).toBe('active');
 
-    // The failure does not strand the same-session retry: the retry is a NEW
-    // attempt (ordinal 1) of the same mission id.
     const retry = await startMission(
       {
         store: app.store,
@@ -92,35 +246,28 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
       SEAM_MISSION_ID,
     );
     expect(retry.kind).toBe('accepted');
-    expect(app.campaignStore.current?.missionInProgress).toEqual({
-      missionId: SEAM_MISSION_ID,
-      attemptId: 1,
-    });
+    if (retry.kind === 'accepted') {
+      expect(retry.snapshot.missionInstanceOrdinal).toBe(1);
+      expect(app.campaignStore.current?.missionInProgress).toEqual({
+        missionId: SEAM_MISSION_ID,
+        attemptId: 1,
+      });
+    }
   });
 
-  it('never becomes a paid Defeat on reload after the failed start (no marker, no 8-Credit deduction)', async () => {
+  it('never becomes a paid Defeat on reload after a safe cleanup (no marker, no 8-Credit deduction)', async () => {
     const app = createInitializedTestApplication();
-    const started = await startMission(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
-    );
-    expect(started.kind).toBe('accepted');
-    await failMissionStart(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-      },
-      0,
-    );
-    // The post-failure campaign is the recovery authority on the next startup.
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
+    await createMissionStartRecoveryController(
+      { store: app.store, campaignStore: app.campaignStore },
+      identity,
+    ).run();
     const recovered = app.campaignStore.current!;
     expect(recovered.missionInProgress).toBeNull();
     expect(recovered.credits).toBe(V02_STARTING_CREDITS);
-    expect(recovered.runStatus).toBe('active');
 
     const store = createSessionStore();
     const campaignStore = new InMemoryCampaignStore(
@@ -140,181 +287,173 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
       userSettingsStore,
     }).run();
     expect(outcome.kind).toBe('ready');
-    // Exactly 12 Credits: the failed start never resolved as a paid Defeat.
     expect(store.getState()?.credits).toBe(V02_STARTING_CREDITS);
     expect(store.getState()?.activeMission).toBe('none');
   });
-
-  it('is inert for a stale duplicate failure after the marker is cleared', async () => {
+  it('an already-absent marker reconciles once while the session still owns the snapshot; a duplicate callback is inert', async () => {
     const app = createInitializedTestApplication();
-    await startMission(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-        content: CONTENT_CATALOGUE,
+    const session = app.store.getState()!;
+    app.store.dispatch({
+      type: 'mission/start',
+      snapshot: {
+        missionId: SEAM_MISSION_ID,
+        missionInstanceOrdinal: 0,
+        missionAttemptId: 0,
+        combatMissionSeed: 1234,
+        aircraftId: session.aircraftId,
+        hullIntegrity: session.hullIntegrity,
+        equippedWeapon: session.equippedWeapon,
+        pilot: session.pilot,
+        mouseMovementEnabled: session.mouseMovementEnabled,
       },
-      SEAM_MISSION_ID,
-    );
-    await failMissionStart(
+    });
+    expect(app.campaignStore.current?.missionInProgress).toBeNull();
+    const controller = createMissionStartRecoveryController(
+      { store: app.store, campaignStore: app.campaignStore },
       {
-        store: app.store,
-        campaignStore: app.campaignStore,
+        missionId: SEAM_MISSION_ID,
+        missionAttemptId: 0,
+        missionInstanceOrdinal: 0,
       },
-      0,
     );
-    // A second failure callback finds no active mission: strict no-op.
-    expect(
-      await failMissionStart(
-        {
-          store: app.store,
-          campaignStore: app.campaignStore,
-        },
-        0,
-      ),
-    ).toBe('inert');
-    expect(app.store.getState()?.missionResult).toBeNull();
+    await expect(controller.run()).resolves.toBe('absent');
+    expect(app.store.getState()?.activeMission).toBe('none');
+    expect(app.store.getState()?.missionStartFailed).toBe(true);
+    await expect(controller.retry()).resolves.toBe('inert');
+    expect(app.store.getState()?.missionStartFailed).toBe(true);
     expect(app.campaignStore.current?.missionInProgress).toBeNull();
   });
 
-  it('is inert when no mission was started at all', async () => {
+  it('a missing campaign record reconciles safely to Mission Details', async () => {
     const app = createInitializedTestApplication();
-    expect(
-      await failMissionStart(
-        {
-          store: app.store,
-          campaignStore: app.campaignStore,
-        },
-        0,
-      ),
-    ).toBe('inert');
-    expect(app.store.getState()?.missionStartFailed).toBe(false);
-  });
-
-  it('race regression: an older delayed failure completion never clears a newer attempt of the same mission', async () => {
-    const app = createInitializedTestApplication();
-    // Attempt 0 starts, then its initialization rejects and is rolled back.
-    await startMission(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
-    );
-    await failMissionStart(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-      },
-      0,
-    );
-    // A NEWER attempt of the SAME mission (same mission id, ordinal 1) starts
-    // and persists its own marker before the old failure callback completes.
-    const retry = await startMission(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
-    );
-    expect(retry.kind).toBe('accepted');
-    expect(app.campaignStore.current?.missionInProgress).toEqual({
-      missionId: SEAM_MISSION_ID,
-      attemptId: 1,
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
     });
-
-    // The DELAYED stale failure callback for attempt 0 arrives now. The atomic
-    // transition rejects as `attempt-does-not-match`, so the newer marker and
-    // session stay intact and no `mission/start-failed` reconciliation occurs.
-    const stale = await failMissionStart(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-      },
-      0,
-    );
-    expect(stale).toBe('inert');
-    expect(app.campaignStore.current?.missionInProgress).toEqual({
-      missionId: SEAM_MISSION_ID,
-      attemptId: 1,
-    });
-    expect(app.store.getState()?.activeMission).not.toBe('none');
-    expect(
-      (
-        app.store.getState()?.activeMission as {
-          missionInstanceOrdinal: number;
-        }
-      ).missionInstanceOrdinal,
-    ).toBe(1);
-    expect(app.store.getState()?.missionStartFailed).toBe(false);
-  });
-
-  it('a rejected durable update is handled explicitly: no unhandled rejection, no dispatch, and the session stays aligned with the still-present marker', async () => {
-    const app = createInitializedTestApplication();
-    await startMission(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
-    );
-    const rejectingStore = new RejectingUpdateCampaignStore(app.campaignStore);
-
-    // The command itself catches the rejection and returns `failed`.
+    const campaignStore = new MissingRecordCampaignStore(app.campaignStore);
     await expect(
-      failMissionStart(
-        {
-          store: app.store,
-          campaignStore: rejectingStore,
-        },
-        0,
-      ),
+      createMissionStartRecoveryController(
+        { store: app.store, campaignStore },
+        identity,
+      ).run(),
+    ).resolves.toBe('absent');
+    expect(app.store.getState()?.activeMission).toBe('none');
+    expect(app.store.getState()?.missionStartFailed).toBe(true);
+    expect(app.store.getState()?.credits).toBe(V02_STARTING_CREDITS);
+  });
+  it('a thrown durable update opens the blocking Mission Start Recovery Error without clearing or reconciling', async () => {
+    const app = createInitializedTestApplication();
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
+    const campaignStore = new ThrowingUpdateCampaignStore(app.campaignStore);
+    await expect(
+      createMissionStartRecoveryController(
+        { store: app.store, campaignStore },
+        identity,
+      ).run(),
     ).resolves.toBe('failed');
-
-    // No false claim of durable cleanup: the in-memory mission is NOT cleared,
-    // so the session mirrors the durable marker (no divergence) and the
-    // approved Return to Base recovery remains the escape.
+    expect(app.store.getState()?.combatLifecycle.overlay).toBe(
+      'mission-start-recovery-error',
+    );
+    expect(app.store.getState()?.combatLifecycle.running).toBe(false);
     expect(app.store.getState()?.activeMission).not.toBe('none');
+    expect(app.store.getState()?.missionStartFailed).toBe(false);
+    expect(app.store.getState()?.missionResult).toBeNull();
     expect(app.campaignStore.current?.missionInProgress).toEqual({
       missionId: SEAM_MISSION_ID,
       attemptId: 0,
     });
+    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS);
   });
 
-  it('an unreadable record is reported as failed without clearing the in-memory mission', async () => {
+  it('an unreadable campaign record opens the blocking Mission Start Recovery Error (never overwrites)', async () => {
     const app = createInitializedTestApplication();
-    await startMission(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
+    const campaignStore = new InvalidUpdateCampaignStore(app.campaignStore);
+    await expect(
+      createMissionStartRecoveryController(
+        { store: app.store, campaignStore },
+        identity,
+      ).run(),
+    ).resolves.toBe('failed');
+    expect(app.store.getState()?.combatLifecycle.overlay).toBe(
+      'mission-start-recovery-error',
     );
-    // Corrupt the stored record after the marker was written.
-    app.campaignStore.seed({
-      ...(app.campaignStore.current as CampaignStateV1),
-      credits: -5,
-    } as CampaignStateV1);
-
-    const outcome = await failMissionStart(
-      {
-        store: app.store,
-        campaignStore: app.campaignStore,
-      },
-      0,
-    );
-    expect(outcome).toBe('failed');
-    // The unreadable marker state is not silently reconciled away.
     expect(app.store.getState()?.activeMission).not.toBe('none');
+    expect(app.campaignStore.current?.missionInProgress).not.toBeNull();
   });
 
-  it('cross-instance regression: an older instance\u2019s delayed failure callback never clears a newer attempt started by another instance sharing the campaign (both sessions restart at ordinal 0)', async () => {
-    // One shared campaign store, two independent application instances. Their
-    // session-local ordinals both start at 0 — the identity collision that
-    // made the session-local identity unsafe (V02-WI-02 correction C03).
+  it('repeated failure stays on the Mission Start Recovery Error and a later Retry Cleanup of the SAME identity succeeds', async () => {
+    const app = createInitializedTestApplication();
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
+    const campaignStore = new FlakyUpdateCampaignStore(app.campaignStore, 2);
+    const controller = createMissionStartRecoveryController(
+      { store: app.store, campaignStore },
+      identity,
+    );
+    await expect(controller.run()).resolves.toBe('failed');
+    await expect(controller.retry()).resolves.toBe('failed');
+    expect(app.store.getState()?.combatLifecycle.overlay).toBe(
+      'mission-start-recovery-error',
+    );
+    expect(app.campaignStore.current?.missionInProgress).not.toBeNull();
+
+    await expect(controller.retry()).resolves.toBe('cleared');
+    expect(app.campaignStore.current?.missionInProgress).toBeNull();
+    expect(app.store.getState()?.activeMission).toBe('none');
+    expect(app.store.getState()?.missionStartFailed).toBe(true);
+    expect(app.store.getState()?.missionResult).toBeNull();
+  });
+  it('Retry Cleanup is single-flight: an activation while one cleanup is pending is busy and never starts a second update', async () => {
+    const app = createInitializedTestApplication();
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
+    const campaignStore = new DeferredUpdateCampaignStore(app.campaignStore);
+    const controller = createMissionStartRecoveryController(
+      { store: app.store, campaignStore },
+      identity,
+    );
+    const first = controller.run();
+    await expect(controller.retry()).resolves.toBe('busy');
+    await expect(controller.retry()).resolves.toBe('busy');
+    expect(campaignStore.updates).toBe(1);
+    campaignStore.releaseWithApplied();
+    await expect(first).resolves.toBe('cleared');
+    expect(app.store.getState()?.activeMission).toBe('none');
+    expect(app.campaignStore.current?.missionInProgress).toBeNull();
+  });
+
+  it('a disposed controller can never apply a late cleanup completion (no reopen or clear)', async () => {
+    const app = createInitializedTestApplication();
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
+    const campaignStore = new DeferredUpdateCampaignStore(app.campaignStore);
+    const controller = createMissionStartRecoveryController(
+      { store: app.store, campaignStore },
+      identity,
+    );
+    const pending = controller.run();
+    controller.dispose();
+    campaignStore.releaseWithApplied();
+    await expect(pending).resolves.toBe('cleared');
+    expect(app.campaignStore.current?.missionInProgress).toBeNull();
+    expect(app.store.getState()?.activeMission).not.toBe('none');
+    expect(app.store.getState()?.missionStartFailed).toBe(false);
+    expect(app.store.getState()?.combatLifecycle.overlay).toBe('none');
+  });
+  it('durable authority mismatch while the session still owns the originating snapshot is the exact Save Conflict state (same ordinal, another attempt)', async () => {
     const campaignStore = new InMemoryCampaignStore(
       campaignSchemaContext(CONTENT_CATALOGUE),
     );
@@ -324,303 +463,179 @@ describe('failMissionStart (Base AC-014 correction, V02-AC-018/020)', () => {
       type: 'session/initialized',
       session: initializeSession(111, CONTENT_CATALOGUE),
     });
+    const identityA = await startAccepted({ store: storeA, campaignStore });
+    expect(identityA.missionInstanceOrdinal).toBe(0);
+    expect(identityA.missionAttemptId).toBe(0);
+
+    // Another application instance B boots, resolves A's marker as Defeat
+    // (startup recovery), and starts the SAME mission: durable attempt id 1,
+    // while B's session ordinal also restarts at 0.
+    const recovery = applyDefeatRecoveryOrGameOver(campaignStore.current!);
+    if (recovery.kind !== 'recovered') {
+      throw new Error('Expected the persisted marker to recover as Defeat.');
+    }
+    await campaignStore.replace(recovery.campaign);
     const storeB = createSessionStore();
     storeB.dispatch({
       type: 'session/initialized',
       session: initializeSession(222, CONTENT_CATALOGUE),
     });
+    const identityB = await startAccepted({ store: storeB, campaignStore });
+    expect(identityB.missionInstanceOrdinal).toBe(0);
+    expect(identityB.missionAttemptId).toBe(1);
 
-    // Instance A starts the mission: campaign attempt id 0.
-    const startedA = await startMission(
-      {
-        store: storeA,
-        campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
+    // A's delayed cleanup callback still owns ITS originating snapshot in
+    // memory, but durable authority now belongs to B's marker: cleanup is not
+    // attempted or claimed and A transitions to the blocking Save Conflict.
+    const controllerA = createMissionStartRecoveryController(
+      { store: storeA, campaignStore },
+      identityA,
     );
-    expect(startedA.kind).toBe('accepted');
-    if (startedA.kind !== 'accepted') {
-      throw new Error('Expected instance A to start.');
-    }
-    expect(startedA.snapshot.missionAttemptId).toBe(0);
-
-    // Instance B boots while A's marker is persisted: startup recovery resolves
-    // A's marker exactly once as Defeat (V02-AC-018) and B's fresh session
-    // also starts its ordinal counter at 0.
-    const recovery = applyDefeatRecoveryOrGameOver(campaignStore.current!);
-    if (recovery.kind !== 'recovered') {
-      throw new Error('Expected the persisted marker to recover as Defeat.');
-    }
-    await campaignStore.replace(recovery.campaign);
-
-    // Instance B starts the SAME mission: the campaign allocates the NEXT
-    // attempt id (1), never reusing the session-restarted ordinal.
-    const startedB = await startMission(
-      {
-        store: storeB,
-        campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
-    );
-    expect(startedB.kind).toBe('accepted');
-    if (startedB.kind !== 'accepted') {
-      throw new Error('Expected instance B to start.');
-    }
-    expect(startedB.snapshot.missionAttemptId).toBe(1);
-    // Both sessions carry the identical session-local ordinal 0.
-    expect(startedB.snapshot.missionInstanceOrdinal).toBe(
-      startedA.snapshot.missionInstanceOrdinal,
-    );
-
-    // The DELAYED stale failure callback from instance A arrives now. Its
-    // session-local ordinal matches B's restarted ordinal, but the durable
-    // campaign attempt id 0 does not match B's marker (attempt id 1), so the
-    // callback is inert and B's marker and session stay intact.
-    const stale = await failMissionStart({ store: storeA, campaignStore }, 0);
-    expect(stale).toBe('inert');
-    expect(campaignStore.current?.missionInProgress).toEqual({
-      missionId: SEAM_MISSION_ID,
-      attemptId: 1,
-    });
+    await expect(controllerA.run()).resolves.toBe('conflict');
     expect(storeA.getState()?.activeMission).not.toBe('none');
+    expect(storeA.getState()?.combatLifecycle.overlay).toBe('save-conflict');
+    expect(storeA.getState()?.missionStartFailed).toBe(false);
+    expect(storeA.getState()?.missionResult).toBeNull();
+    expect(campaignStore.current?.missionInProgress).toEqual({
+      missionId: SEAM_MISSION_ID,
+      attemptId: 1,
+    });
+    expect(campaignStore.current?.credits).toBe(V02_STARTING_CREDITS - 8);
     expect(storeB.getState()?.activeMission).not.toBe('none');
-    expect(
-      (storeB.getState()?.activeMission as { missionAttemptId: number })
-        .missionAttemptId,
-    ).toBe(1);
+  });
+  it('a schema-valid cross-mission marker is never cleared and opens Save Conflict while the snapshot is still current', async () => {
+    const app = createInitializedTestApplication();
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
+    const current = app.campaignStore.current!;
+    await app.campaignStore.replace({
+      ...current,
+      unlockedMissionIds: ['interception-01', 'interception-02'],
+      missionInProgress: { missionId: 'interception-02', attemptId: 99 },
+    });
+    await expect(
+      createMissionStartRecoveryController(
+        { store: app.store, campaignStore: app.campaignStore },
+        identity,
+      ).run(),
+    ).resolves.toBe('conflict');
+    expect(app.campaignStore.current?.missionInProgress).toEqual({
+      missionId: 'interception-02',
+      attemptId: 99,
+    });
+    expect(app.store.getState()?.combatLifecycle.overlay).toBe('save-conflict');
+    expect(app.store.getState()?.activeMission).not.toBe('none');
+    expect(app.store.getState()?.missionStartFailed).toBe(false);
+    expect(app.store.getState()?.credits).toBe(V02_STARTING_CREDITS);
   });
 
-  it('cross-instance regression: stale terminal result and abort callbacks from an older instance stay inert while the current matching attempt still commits normally', async () => {
-    const campaignStore = new InMemoryCampaignStore(
-      campaignSchemaContext(CONTENT_CATALOGUE),
+  it('a Retry Cleanup that discovers a durable authority mismatch transitions to the same Save Conflict state', async () => {
+    const app = createInitializedTestApplication();
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
+    // Initial cleanup cannot be proven safe: the recovery shell opens.
+    const flaky = new FlakyUpdateCampaignStore(app.campaignStore, 1);
+    const controller = createMissionStartRecoveryController(
+      { store: app.store, campaignStore: flaky },
+      identity,
     );
-    await campaignStore.replace(buildNewGameCampaign(CONTENT_CATALOGUE, 333));
-    const storeA = createSessionStore();
-    storeA.dispatch({
-      type: 'session/initialized',
-      session: initializeSession(333, CONTENT_CATALOGUE),
-    });
-    const storeB = createSessionStore();
-    storeB.dispatch({
-      type: 'session/initialized',
-      session: initializeSession(444, CONTENT_CATALOGUE),
-    });
-
-    const startedA = await startMission(
-      {
-        store: storeA,
-        campaignStore,
-        content: CONTENT_CATALOGUE,
+    await expect(controller.run()).resolves.toBe('failed');
+    expect(app.store.getState()?.combatLifecycle.overlay).toBe(
+      'mission-start-recovery-error',
+    );
+    // Durable authority moves to another attempt while this session still
+    // owns the originating snapshot. The retry makes the exact Save Conflict
+    // transition instead of claiming or attempting a cleanup.
+    const current = app.campaignStore.current!;
+    await app.campaignStore.replace({
+      ...current,
+      missionInProgress: {
+        missionId: SEAM_MISSION_ID,
+        attemptId: identity.missionAttemptId + 1,
       },
-      SEAM_MISSION_ID,
-    );
-    expect(startedA.kind).toBe('accepted');
-    if (startedA.kind !== 'accepted') {
-      throw new Error('Expected instance A to start.');
-    }
-    expect(startedA.snapshot.missionAttemptId).toBe(0);
-
-    // Instance B boots (resolves A's marker as Defeat) and starts the next
-    // attempt (campaign attempt id 1).
-    const recovery = applyDefeatRecoveryOrGameOver(campaignStore.current!);
-    if (recovery.kind !== 'recovered') {
-      throw new Error('Expected the persisted marker to recover as Defeat.');
-    }
-    await campaignStore.replace(recovery.campaign);
-    const creditsAfterRecovery =
-      V02_STARTING_CREDITS - V02_DEFEAT_REPAIR_COST_CREDITS;
-    expect(campaignStore.current?.credits).toBe(creditsAfterRecovery);
-
-    const startedB = await startMission(
-      {
-        store: storeB,
-        campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
-    );
-    expect(startedB.kind).toBe('accepted');
-    if (startedB.kind !== 'accepted') {
-      throw new Error('Expected instance B to start.');
-    }
-    expect(startedB.snapshot.missionAttemptId).toBe(1);
-
-    // Stale SUCCESS from instance A (attempt id 0): the durable transition
-    // rejects before any reward or Hull change.
-    expect(
-      await commitMissionResult(
-        { store: storeA, campaignStore, content: CONTENT_CATALOGUE },
-        { kind: 'success' },
-        80,
-        0,
-        startedA.snapshot.missionInstanceOrdinal,
-      ),
-    ).toMatchObject({ outcome: 'inert' });
-    expect(campaignStore.current?.missionInProgress).toEqual({
-      missionId: SEAM_MISSION_ID,
-      attemptId: 1,
     });
-    expect(campaignStore.current?.credits).toBe(creditsAfterRecovery);
-
-    // Stale Aborted from instance A (attempt id 0): inert, no Hull change.
-    expect(
-      await abortMission(
-        { store: storeA, campaignStore },
-        55,
-        0,
-        startedA.snapshot.missionInstanceOrdinal,
-      ),
-    ).toBe('inert');
-    expect(campaignStore.current?.missionInProgress).toEqual({
+    await expect(controller.retry()).resolves.toBe('conflict');
+    expect(app.store.getState()?.combatLifecycle.overlay).toBe('save-conflict');
+    expect(app.store.getState()?.activeMission).not.toBe('none');
+    expect(app.store.getState()?.missionResult).toBeNull();
+    expect(app.campaignStore.current?.missionInProgress).toEqual({
       missionId: SEAM_MISSION_ID,
-      attemptId: 1,
+      attemptId: identity.missionAttemptId + 1,
     });
-    expect(campaignStore.current?.hullIntegrity).toBe(100);
-
-    // The CURRENT matching attempt (B, attempt id 1) still commits normally:
-    // the Success reward applies exactly once and the marker clears. The
-    // returned result mirrors the entry's deferred session dispatch.
-    const committed = await commitMissionResult(
-      { store: storeB, campaignStore, content: CONTENT_CATALOGUE },
-      { kind: 'success' },
-      80,
-      1,
-      startedB.snapshot.missionInstanceOrdinal,
-    );
-    expect(committed.outcome).toBe('committed');
-    if (
-      committed.outcome === 'committed' &&
-      committed.result?.kind === 'success'
-    ) {
-      storeB.dispatch({ type: 'mission/result', result: committed.result });
-    }
-    expect(campaignStore.current?.missionInProgress).toBeNull();
-    expect(campaignStore.current?.credits).toBe(
-      creditsAfterRecovery + INTERCEPTION_01.completionReward,
-    );
-    expect(campaignStore.current?.hullIntegrity).toBe(80);
-    expect(storeB.getState()?.activeMission).toBe('none');
+    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS);
   });
 
-  it('cross-run regression: confirmed New Game replaces the campaign without resetting the allocator, so attempt B never equals A and every stale callback for A stays inert while B commits normally', async () => {
-    const campaignStore = new InMemoryCampaignStore(
-      campaignSchemaContext(CONTENT_CATALOGUE),
-    );
-    await campaignStore.replace(buildNewGameCampaign(CONTENT_CATALOGUE, 555));
-    const storeA = createSessionStore();
-    storeA.dispatch({
-      type: 'session/initialized',
-      session: initializeSession(555, CONTENT_CATALOGUE),
+  it('a stale failure callback after a NEWER local mission/run is inert and can never clear or signal it', async () => {
+    const app = createInitializedTestApplication();
+    const identityA = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
     });
-
-    // Old run: instance A starts attempt A (campaign attempt id 0).
-    const startedA = await startMission(
-      {
-        store: storeA,
-        campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
-    );
-    expect(startedA.kind).toBe('accepted');
-    if (startedA.kind !== 'accepted') {
-      throw new Error('Expected instance A to start.');
-    }
-    expect(startedA.snapshot.missionAttemptId).toBe(0);
-
-    // Confirmed New Game replaces the campaign record entirely (fresh run,
-    // credits 12, no marker). The dedicated allocator is NOT reset.
-    await campaignStore.replace(buildNewGameCampaign(CONTENT_CATALOGUE, 777));
-
-    // Fresh application instance B (session ordinal restarts at 0) starts the
-    // SAME mission.
-    const storeB = createSessionStore();
-    storeB.dispatch({
-      type: 'session/initialized',
-      session: initializeSession(777, CONTENT_CATALOGUE),
+    await createMissionStartRecoveryController(
+      { store: app.store, campaignStore: app.campaignStore },
+      identityA,
+    ).run();
+    expect(app.store.getState()?.activeMission).toBe('none');
+    const identityB = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
     });
-    const startedB = await startMission(
-      {
-        store: storeB,
-        campaignStore,
-        content: CONTENT_CATALOGUE,
-      },
-      SEAM_MISSION_ID,
-    );
-    expect(startedB.kind).toBe('accepted');
-    if (startedB.kind !== 'accepted') {
-      throw new Error('Expected instance B to start.');
-    }
-    // The allocator survived the replacement: B never equals A even though
-    // both session-local ordinals restart at zero.
-    expect(startedB.snapshot.missionAttemptId).toBe(1);
-    expect(startedB.snapshot.missionAttemptId).not.toBe(
-      startedA.snapshot.missionAttemptId,
-    );
-    expect(startedB.snapshot.missionInstanceOrdinal).toBe(
-      startedA.snapshot.missionInstanceOrdinal,
-    );
+    expect(identityB.missionInstanceOrdinal).toBe(1);
+    expect(identityB.missionAttemptId).toBe(1);
 
-    // Every stale callback for A (failure, Success, Defeat, Aborted) is inert
-    // against B's marker even though A's session ordinal collides with B's.
-    expect(
-      await failMissionStart(
-        { store: storeA, campaignStore },
-        startedA.snapshot.missionAttemptId,
-      ),
-    ).toBe('inert');
-    expect(
-      await commitMissionResult(
-        { store: storeA, campaignStore, content: CONTENT_CATALOGUE },
-        { kind: 'success' },
-        80,
-        startedA.snapshot.missionAttemptId,
-        startedA.snapshot.missionInstanceOrdinal,
-      ),
-    ).toMatchObject({ outcome: 'inert' });
-    expect(
-      await commitMissionResult(
-        { store: storeA, campaignStore, content: CONTENT_CATALOGUE },
-        { kind: 'defeat' },
-        0,
-        startedA.snapshot.missionAttemptId,
-        startedA.snapshot.missionInstanceOrdinal,
-      ),
-    ).toMatchObject({ outcome: 'inert' });
-    expect(
-      await abortMission(
-        { store: storeA, campaignStore },
-        55,
-        startedA.snapshot.missionAttemptId,
-        startedA.snapshot.missionInstanceOrdinal,
-      ),
-    ).toBe('inert');
-
-    // B's marker/session/economy remain unchanged.
-    expect(campaignStore.current?.missionInProgress).toEqual({
+    await expect(
+      createMissionStartRecoveryController(
+        { store: app.store, campaignStore: app.campaignStore },
+        identityA,
+      ).run(),
+    ).resolves.toBe('inert');
+    expect(app.store.getState()?.activeMission).not.toBe('none');
+    expect(app.store.getState()?.combatLifecycle.overlay).toBe('none');
+    expect(app.store.getState()?.missionStartFailed).toBe(false);
+    expect(app.campaignStore.current?.missionInProgress).toEqual({
       missionId: SEAM_MISSION_ID,
       attemptId: 1,
     });
-    expect(campaignStore.current?.credits).toBe(V02_STARTING_CREDITS);
-    expect(campaignStore.current?.hullIntegrity).toBe(100);
-    expect(storeB.getState()?.activeMission).not.toBe('none');
-
-    // B still commits normally (Success reward applied exactly once).
-    expect(
-      await commitMissionResult(
-        { store: storeB, campaignStore, content: CONTENT_CATALOGUE },
-        { kind: 'success' },
-        80,
-        startedB.snapshot.missionAttemptId,
-        startedB.snapshot.missionInstanceOrdinal,
+    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS);
+  });
+  it('is inert when no originating mission was started at all', async () => {
+    const app = createInitializedTestApplication();
+    await expect(
+      failMissionStart(
+        { store: app.store, campaignStore: app.campaignStore },
+        {
+          missionId: SEAM_MISSION_ID,
+          missionAttemptId: 0,
+          missionInstanceOrdinal: 0,
+        },
       ),
-    ).toMatchObject({ outcome: 'committed' });
-    expect(campaignStore.current?.missionInProgress).toBeNull();
-    expect(campaignStore.current?.credits).toBe(
-      V02_STARTING_CREDITS + INTERCEPTION_01.completionReward,
-    );
-    expect(campaignStore.current?.hullIntegrity).toBe(80);
+    ).resolves.toBe('inert');
+    expect(app.store.getState()?.missionStartFailed).toBe(false);
+    expect(app.store.getState()?.combatLifecycle.overlay).toBe('none');
+  });
+
+  it('cleanup never runs a result, Repair, reward, penalty, unlock, abort, or startup-Defeat path', async () => {
+    const app = createInitializedTestApplication();
+    const identity = await startAccepted({
+      store: app.store,
+      campaignStore: app.campaignStore,
+    });
+    await createMissionStartRecoveryController(
+      { store: app.store, campaignStore: app.campaignStore },
+      identity,
+    ).run();
+    const state = app.store.getState()!;
+    expect(state.missionResult).toBeNull();
+    expect(state.runStatus).toBe('active');
+    expect(state.credits).toBe(V02_STARTING_CREDITS);
+    expect(state.hullIntegrity).toBe(100);
+    expect(state.completedMissionIds).toEqual([]);
+    expect(state.unlockedMissionIds).toEqual(['interception-01']);
+    expect(app.campaignStore.current?.runStatus).toBe('active');
+    expect(app.campaignStore.current?.completedMissionIds).toEqual([]);
   });
 });

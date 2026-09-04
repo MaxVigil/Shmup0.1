@@ -1,5 +1,6 @@
 import type { MissionResult } from '@application/mission';
 import type { TerminalCommitOutcome } from '@application/combat';
+import type { SessionState } from '@application/session';
 import type {
   CommitMissionResultResult,
   SuccessEconomyRelay,
@@ -25,14 +26,14 @@ export function mapCommitMissionOutcome(
 }
 
 /**
- * V02-WI-04 C02 pure terminal-persistence outcome disposition.
+ * V02-WI-04 C02 / V02-WI-05 C03 pure terminal-persistence outcome disposition.
  *
  * The typed campaign-transaction outcome maps to exactly one presentation
  * action:
- * - a committed Success authorizes the deterministic exit and closes any
- *   Save Error recovery state;
- * - a committed Defeat already dispatched its result through the v0.1 seam and
- *   only closes any Save Error recovery state;
+ * - a committed Success/Evacuation authorizes the deterministic exit;
+ * - a committed Defeat/Game Over returns the immutable result to the boundary,
+ *   which dispatches it only when presentation is safe or holds it behind the
+ *   explicit Resume-only continuation when the browser-safety latch is set;
  * - `inert` opens Save Conflict (Reload is the only continuation);
  * - `failed`/`rejected` open Save Error (Retry Save is the only continuation).
  *
@@ -40,8 +41,8 @@ export function mapCommitMissionOutcome(
  * unit-testable without a Phaser runtime.
  */
 export type TerminalCommitDisposition =
-  | { readonly kind: 'authorize-success'; readonly result: MissionResult }
-  | { readonly kind: 'recover' }
+  | { readonly kind: 'authorize-exit'; readonly result: MissionResult }
+  | { readonly kind: 'present-defeat'; readonly result: MissionResult }
   | { readonly kind: 'save-error' }
   | { readonly kind: 'save-conflict' };
 
@@ -49,9 +50,15 @@ export function terminalCommitDisposition(
   outcome: TerminalCommitOutcome,
 ): TerminalCommitDisposition {
   if (outcome.status === 'committed') {
-    return outcome.result.kind === 'success'
-      ? { kind: 'authorize-success', result: outcome.result }
-      : { kind: 'recover' };
+    // Success and Evacuation share the deterministic bounded centre-and-up
+    // exit sequence (Epic §13.3–13.4): the committed outcome authorizes it and
+    // the session dispatch is deferred until the exit completes. Defeat has no
+    // exit sequence (Epic §13.5); its committed result is returned so the
+    // lifecycle boundary can evaluate the browser-safety latch before any
+    // Result/Game Over presentation (Epic §13.7).
+    return outcome.result.kind === 'defeat'
+      ? { kind: 'present-defeat', result: outcome.result }
+      : { kind: 'authorize-exit', result: outcome.result };
   }
   return outcome.status === 'inert'
     ? { kind: 'save-conflict' }
@@ -108,4 +115,91 @@ export function createFrozenTerminalPayload(): FrozenTerminalPayload {
       return frozen;
     },
   };
+}
+
+/**
+ * V02-WI-05 C04 exact originating snapshot identity used at the terminal
+ * commitment/presentation boundary. The session ordinal restarts per session
+ * and is never durable attempt authority: the persisted mission id plus the
+ * globally unique, non-resetting campaign attempt id are required too.
+ */
+export interface TerminalSnapshotIdentity {
+  readonly missionId: string;
+  readonly missionAttemptId: number;
+  readonly missionInstanceOrdinal: number;
+}
+
+/** True while the session still owns the exact originating Mission Snapshot. */
+export function ownsTerminalSnapshot(
+  session: SessionState | null,
+  identity: TerminalSnapshotIdentity,
+): boolean {
+  return (
+    session !== null &&
+    session.activeMission !== 'none' &&
+    session.activeMission.missionId === identity.missionId &&
+    session.activeMission.missionAttemptId === identity.missionAttemptId &&
+    session.activeMission.missionInstanceOrdinal ===
+      identity.missionInstanceOrdinal
+  );
+}
+
+/**
+ * One boundary action for a resolved terminal commitment (V02-WI-05 C03/C04).
+ * This is the exact decision the Combat presentation entry applies:
+ * - committed Success/Evacuation authorizes the deterministic exit;
+ * - a committed Defeat/Game Over is presented immediately only when no
+ *   browser-safety latch is set; under the latch it is HELD frozen behind the
+ *   explicit Resume-only continuation and is never re-written/retried;
+ * - failed/rejected and inert outcomes open Save Error / Save Conflict;
+ * - a completion that no longer owns the exact snapshot is stale and inert.
+ */
+export type TerminalCommitBoundaryPlan =
+  | { readonly kind: 'authorize-exit'; readonly result: MissionResult }
+  | { readonly kind: 'present'; readonly result: MissionResult }
+  | { readonly kind: 'hold'; readonly result: MissionResult }
+  | { readonly kind: 'save-error' }
+  | { readonly kind: 'save-conflict' }
+  | { readonly kind: 'stale' };
+
+export function planCommittedTerminal(
+  outcome: TerminalCommitOutcome,
+  session: SessionState | null,
+  identity: TerminalSnapshotIdentity,
+): TerminalCommitBoundaryPlan {
+  if (!ownsTerminalSnapshot(session, identity)) {
+    return { kind: 'stale' };
+  }
+  // The committed payload itself must carry the originating instance ordinal;
+  // a result bound to another instance can never be presented by this owner.
+  if (
+    outcome.status === 'committed' &&
+    (outcome.result === null ||
+      outcome.result.missionInstanceOrdinal !== identity.missionInstanceOrdinal)
+  ) {
+    return { kind: 'stale' };
+  }
+  const disposition = terminalCommitDisposition(outcome);
+  if (disposition.kind === 'authorize-exit') {
+    return { kind: 'authorize-exit', result: disposition.result };
+  }
+  if (disposition.kind === 'present-defeat') {
+    return session!.combatLifecycle.browserSafetyLatched
+      ? { kind: 'hold', result: disposition.result }
+      : { kind: 'present', result: disposition.result };
+  }
+  return disposition;
+}
+
+/** Pure eligibility gate for presenting one held committed Defeat/Game Over
+ *  after an explicit Resume (running with no blocking Overlay, exact snapshot). */
+export function mayPresentHeldDefeat(
+  session: SessionState | null,
+  identity: TerminalSnapshotIdentity,
+): boolean {
+  return (
+    ownsTerminalSnapshot(session, identity) &&
+    session!.combatLifecycle.running &&
+    session!.combatLifecycle.overlay === 'none'
+  );
 }

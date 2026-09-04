@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { CONTENT_CATALOGUE, INTERCEPTION_01 } from '@content/index';
-import { V02_STARTING_CREDITS } from '@domain/index';
+import {
+  V02_DEFEAT_REPAIR_COST_CREDITS,
+  V02_STARTING_CREDITS,
+} from '@domain/index';
 import { createInitializedTestApplication } from '@test-support/persistence';
 import type { InitializedTestApplication } from '@test-support/persistence';
 import { SEAM_MISSION_ID } from './compatibility-seam';
@@ -124,7 +127,7 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
     expect(app.campaignStore.current?.missionInProgress).toBeNull();
   });
 
-  it('commits Defeat with zero reward through the seam', async () => {
+  it('commits Defeat with zero reward and the paid full Repair (V02-AC-016)', async () => {
     const app = createInitializedTestApplication();
     await startMissionIn(app);
     const outcome = await commitMissionResult(
@@ -139,14 +142,105 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
       0,
     );
     expect(outcome.outcome).toBe('committed');
-    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS);
-    expect(app.campaignStore.current?.hullIntegrity).toBe(25);
+    // V02-WI-05 C03: the atomic transaction returns the committed immutable
+    // result to the lifecycle boundary; it no longer dispatches/navigates.
+    if (outcome.outcome === 'committed' && outcome.result?.kind === 'defeat') {
+      expect(outcome.result).toMatchObject({
+        missionInstanceOrdinal: 0,
+        repairCostCredits: 8,
+        runStatusAfter: 'active',
+      });
+    }
+    // 12 starting Credits − 8 Repair cost; Hull fully restored; run stays
+    // active; the marker is cleared.
+    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS - 8);
+    expect(app.campaignStore.current?.hullIntegrity).toBe(100);
+    expect(app.campaignStore.current?.runStatus).toBe('active');
     expect(app.campaignStore.current?.missionInProgress).toBeNull();
+    // Mirror the entry's boundary dispatch of the committed result (the
+    // command itself stays inert at the session boundary): the failure result
+    // is then presented exactly once.
+    if (outcome.outcome === 'committed' && outcome.result?.kind === 'defeat') {
+      app.store.dispatch({ type: 'mission/result', result: outcome.result });
+    }
     expect(app.store.getState()?.missionResult).toEqual({
       kind: 'defeat',
       missionInstanceOrdinal: 0,
       creditsEarned: 0,
+      repairCostCredits: 8,
     });
+  });
+
+  it('does not navigate before the lifecycle boundary evaluates browser safety (V02-WI-05 C03)', async () => {
+    const app = createInitializedTestApplication();
+    await startMissionIn(app);
+    const outcome = await commitMissionResult(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      { kind: 'defeat' },
+      0,
+      0,
+      0,
+    );
+    expect(outcome.outcome).toBe('committed');
+    // The durable transaction committed (Repair deducted, marker cleared)…
+    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS - 8);
+    expect(app.campaignStore.current?.missionInProgress).toBeNull();
+    // …but the session was NOT navigated, rewarded, or cleared by the command:
+    // Defeat presentation stays behind the boundary that evaluates the
+    // browser-safety latch and holds committed results for explicit Resume.
+    const session = app.store.getState();
+    expect(session?.activeMission).not.toBe('none');
+    expect(session?.missionResult).toBeNull();
+    expect(session?.credits).toBe(V02_STARTING_CREDITS);
+    expect(session?.combatLifecycle.running).toBe(true);
+  });
+
+  it('commits Game Over without any partial deduction when Credits are below the Repair cost (V02-AC-016)', async () => {
+    const app = createInitializedTestApplication();
+    const campaign = app.campaignStore.current;
+    if (campaign === null) {
+      throw new Error('Expected a seeded campaign.');
+    }
+    // Credits 7 = Repair cost − 1: the exact unaffordable boundary.
+    app.campaignStore.seed({
+      ...campaign,
+      credits: V02_DEFEAT_REPAIR_COST_CREDITS - 1,
+    });
+    await startMissionIn(app);
+    const outcome = await commitMissionResult(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      { kind: 'defeat' },
+      0,
+      0,
+      0,
+    );
+    expect(outcome.outcome).toBe('committed');
+    expect(app.campaignStore.current?.runStatus).toBe('game-over');
+    expect(app.campaignStore.current?.credits).toBe(
+      V02_DEFEAT_REPAIR_COST_CREDITS - 1,
+    );
+    expect(app.campaignStore.current?.missionInProgress).toBeNull();
+    // Mirror the boundary dispatch: Game Over presents no Mission Result — the
+    // Session Router opens the terminal Game Over Screen instead.
+    if (outcome.outcome === 'committed' && outcome.result?.kind === 'defeat') {
+      expect(outcome.result).toMatchObject({
+        runStatusAfter: 'game-over',
+        repairCostCredits: 0,
+      });
+      app.store.dispatch({ type: 'mission/result', result: outcome.result });
+    }
+    const session = app.store.getState();
+    expect(session?.runStatus).toBe('game-over');
+    expect(session?.missionResult).toBeNull();
+    expect(session?.activeMission).toBe('none');
   });
 
   it('a stale terminal for an older Mission Instance is inert', async () => {
@@ -247,5 +341,94 @@ describe('abortMission (temporary v0.1 Return to Base seam)', () => {
       ),
     ).toBe('inert');
     expect(app.store.getState()?.hullIntegrity).toBe(55);
+  });
+});
+
+describe('V02-WI-05 C04 exact mission + attempt identity regressions', () => {
+  it('live Defeat rejects a persisted marker of another mission carrying the same attempt id (V02-AC-020)', async () => {
+    const app = createInitializedTestApplication();
+    await startMissionIn(app); // session + marker: interception-01, attempt 0
+    const campaign = app.campaignStore.current;
+    if (campaign === null) {
+      throw new Error('Expected a seeded campaign.');
+    }
+    // Reviewer counterexample: the durable marker was replaced by an otherwise
+    // valid unlocked Mission 02 marker with the SAME attempt id while this
+    // browser session still runs Mission 01 (ordinal 0).
+    app.campaignStore.seed({
+      ...campaign,
+      unlockedMissionIds: ['interception-01', 'interception-02'],
+      missionInProgress: { missionId: 'interception-02', attemptId: 0 },
+    });
+    const outcome = await commitMissionResult(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      { kind: 'defeat' },
+      0,
+      0,
+      0,
+    );
+    // The atomic transition rejected before any Credits/Hull/marker change,
+    // so the command reports inert (the boundary maps it to Save Conflict).
+    expect(outcome.outcome).toBe('inert');
+    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS);
+    expect(app.campaignStore.current?.hullIntegrity).toBe(100);
+    expect(app.campaignStore.current?.missionInProgress).toEqual({
+      missionId: 'interception-02',
+      attemptId: 0,
+    });
+    // The session was not navigated or charged.
+    const session = app.store.getState();
+    expect(session?.activeMission).not.toBe('none');
+    expect(session?.credits).toBe(V02_STARTING_CREDITS);
+    expect(session?.missionResult).toBeNull();
+
+    // The matching originating identity (Mission 01 marker, attempt 0) still
+    // commits through the same atomic transaction.
+    app.campaignStore.seed({
+      ...app.campaignStore.current!,
+      missionInProgress: { missionId: SEAM_MISSION_ID, attemptId: 0 },
+    });
+    const matching = await commitMissionResult(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      { kind: 'defeat' },
+      0,
+      0,
+      0,
+    );
+    expect(matching.outcome).toBe('committed');
+    expect(app.campaignStore.current?.credits).toBe(
+      V02_STARTING_CREDITS - V02_DEFEAT_REPAIR_COST_CREDITS,
+    );
+  });
+
+  it('a same-ordinal completion with a different durable attempt id is inert before mutation (V02-AC-020)', async () => {
+    const app = createInitializedTestApplication();
+    await startMissionIn(app); // session snapshot attempt 0, ordinal 0
+    const outcome = await commitMissionResult(
+      {
+        store: app.store,
+        campaignStore: app.campaignStore,
+        content: CONTENT_CATALOGUE,
+      },
+      { kind: 'defeat' },
+      0,
+      1, // stale caller supplies a different durable attempt id
+      0,
+    );
+    expect(outcome.outcome).toBe('inert');
+    expect(app.campaignStore.current?.missionInProgress).toEqual({
+      missionId: SEAM_MISSION_ID,
+      attemptId: 0,
+    });
+    expect(app.campaignStore.current?.credits).toBe(V02_STARTING_CREDITS);
+    expect(app.store.getState()?.activeMission).not.toBe('none');
   });
 });

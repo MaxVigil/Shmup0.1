@@ -121,7 +121,7 @@ const MISSION_02_ENCOUNTERS: readonly EncounterEvidence[] = [
     id: 'interception-02-e4',
     timeSeconds: 150,
     composition: [{ type: 'basic-drone', count: 4 }],
-    entry: { kind: 'unspecified' },
+    entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
     formation: 'front-group-plus-delayed-flank',
   },
   {
@@ -132,7 +132,7 @@ const MISSION_02_ENCOUNTERS: readonly EncounterEvidence[] = [
       { type: 'ranged-drone', count: 1 },
       { type: 'hunter-drone', count: 1 },
     ],
-    entry: { kind: 'unspecified' },
+    entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
     formation: 'authored-stagger',
   },
   {
@@ -142,7 +142,7 @@ const MISSION_02_ENCOUNTERS: readonly EncounterEvidence[] = [
       { type: 'basic-drone', count: 2 },
       { type: 'hunter-drone', count: 1 },
     ],
-    entry: { kind: 'unspecified' },
+    entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
     formation: 'asymmetric',
   },
 ];
@@ -704,10 +704,10 @@ describe('exhaustive Mission 01 Arrival Group evidence (Epic §8.1.1, V02-DEC-02
     );
   });
 
-  it('V02-WI-04 C03: Mission 02/03 runtime staging remains rejected by the production validator', () => {
+  it('V02-WI-05: Mission 03 runtime staging remains rejected by the production validator (Epic §23.1)', () => {
     const invented: MissionDefinition = {
-      ...INTERCEPTION_02,
-      encounters: INTERCEPTION_02.encounters.map((encounter, index) =>
+      ...INTERCEPTION_03,
+      encounters: INTERCEPTION_03.encounters.map((encounter, index) =>
         index === 0
           ? ({
               ...encounter,
@@ -727,14 +727,279 @@ describe('exhaustive Mission 01 Arrival Group evidence (Epic §8.1.1, V02-DEC-02
       ),
     };
     const catalogue = contentCatalogueWith({
-      missions: [INTERCEPTION_01, invented, INTERCEPTION_03],
+      missions: [INTERCEPTION_01, INTERCEPTION_02, invented],
     });
     expect(isContentCatalogue(catalogue)).toBe(false);
     const issues = validateCatalogue(catalogue);
     expect(
       issues.some((issue: ContentValidationIssue) =>
-        issue.path.startsWith('missions[1].encounters'),
+        issue.path.startsWith('missions[2].encounters'),
       ),
     ).toBe(true);
+  });
+});
+
+/**
+ * V02-WI-05 exact Mission 02 Arrival Group evidence (Epic §8.2.1,
+ * V02-DEC-026): the exhaustive authored staging for every Interception 02
+ * encounter and the path-qualified production-validator regressions that
+ * reject any drift from the canonical projection.
+ */
+describe('exhaustive Mission 02 Arrival Group evidence (Epic §8.2.1, V02-DEC-026, V02-WI-05)', () => {
+  interface StagingGroupEvidence {
+    readonly offsetSeconds: number;
+    readonly members: readonly {
+      readonly type: string;
+      readonly placement: unknown;
+    }[];
+  }
+  /** The exact authored staging for every Interception 02 encounter. */
+  const MISSION_02_STAGING: readonly (readonly StagingGroupEvidence[])[] = [
+    [
+      // e1 (+0 s): 3 offset-Top Basics at 0.15/0.45/0.75.
+      {
+        offsetSeconds: 0,
+        members: [
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.15 } },
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.45 } },
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.75 } },
+        ],
+      },
+    ],
+    [
+      // e2: +0 s three Basics (0.25/0.5/0.75), +2 s the Ranged at 0.5.
+      {
+        offsetSeconds: 0,
+        members: [
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.25 } },
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.5 } },
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.75 } },
+        ],
+      },
+      {
+        offsetSeconds: 2,
+        members: [
+          { type: 'ranged-drone', placement: { kind: 'top', fraction: 0.5 } },
+        ],
+      },
+    ],
+    [
+      // e3 (+0 s): Basic 0.2, Ranged 0.3, Ranged 0.7, Basic 0.8.
+      {
+        offsetSeconds: 0,
+        members: [
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.2 } },
+          { type: 'ranged-drone', placement: { kind: 'top', fraction: 0.3 } },
+          { type: 'ranged-drone', placement: { kind: 'top', fraction: 0.7 } },
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.8 } },
+        ],
+      },
+    ],
+    [
+      // e4: +0 s three Basics (0.25/0.5/0.75), +2 s the seeded-side Basic
+      // flank at 25% VH (mission-data draw 0 of Mission 02).
+      {
+        offsetSeconds: 0,
+        members: [
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.25 } },
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.5 } },
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.75 } },
+        ],
+      },
+      {
+        offsetSeconds: 2,
+        members: [
+          {
+            type: 'basic-drone',
+            placement: { kind: 'seeded-side', yViewportFraction: 0.25 },
+          },
+        ],
+      },
+    ],
+    [
+      // e5: +0 s Basic 0.25, +1 s Ranged 0.55, +2 s seeded-side Hunter at
+      // 20% VH (mission-data draw 1).
+      {
+        offsetSeconds: 0,
+        members: [
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.25 } },
+        ],
+      },
+      {
+        offsetSeconds: 1,
+        members: [
+          { type: 'ranged-drone', placement: { kind: 'top', fraction: 0.55 } },
+        ],
+      },
+      {
+        offsetSeconds: 2,
+        members: [
+          {
+            type: 'hunter-drone',
+            placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+          },
+        ],
+      },
+    ],
+    [
+      // e6 (+0 s, the single 04:20 creation step): Basic 0.35, Basic 0.65,
+      // seeded-side Hunter at 20% VH (mission-data draw 2).
+      {
+        offsetSeconds: 0,
+        members: [
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.35 } },
+          { type: 'basic-drone', placement: { kind: 'top', fraction: 0.65 } },
+          {
+            type: 'hunter-drone',
+            placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+          },
+        ],
+      },
+    ],
+  ];
+
+  it('matches the exhaustive Mission 02 Arrival Groups exactly (offsets, member order, roles, placements, fractions, Side Y)', () => {
+    expect(
+      MISSIONS[1]?.encounters.map((encounter) => encounter.staging),
+    ).toStrictEqual(MISSION_02_STAGING);
+  });
+
+  function mutateStaging(
+    mission: MissionDefinition,
+    mutate: (staging: EncounterDefinition['staging'], index: number) => unknown,
+  ): MissionDefinition {
+    return {
+      ...mission,
+      encounters: mission.encounters.map((encounter, index) => ({
+        ...encounter,
+        ...(encounter.staging === undefined
+          ? {}
+          : {
+              staging: mutate(
+                encounter.staging,
+                index,
+              ) as typeof encounter.staging,
+            }),
+      })),
+    };
+  }
+
+  function expectProductionValidatorRejects(
+    mutated: MissionDefinition,
+    expectedPathPrefix: string,
+  ): void {
+    const catalogue = contentCatalogueWith({
+      missions: [INTERCEPTION_01, mutated, INTERCEPTION_03],
+    });
+    expect(isContentCatalogue(catalogue)).toBe(false);
+    const issues = validateCatalogue(catalogue);
+    const matching = issues.filter((issue) =>
+      issue.path.startsWith(expectedPathPrefix),
+    );
+    expect(matching.length).toBeGreaterThan(0);
+  }
+
+  it('V02-WI-05: the production validator rejects a Mission 02 encounter losing its staging', () => {
+    const mutated: MissionDefinition = {
+      ...INTERCEPTION_02,
+      encounters: INTERCEPTION_02.encounters.map((encounter, index) =>
+        index === 3
+          ? encounter.staging === undefined
+            ? encounter
+            : ({
+                ...encounter,
+                staging: undefined,
+              } as unknown as EncounterDefinition)
+          : encounter,
+      ),
+    };
+    expectProductionValidatorRejects(mutated, 'missions[1].encounters');
+  });
+
+  it('V02-WI-05: the production validator rejects a Mission 02 Arrival Group count change', () => {
+    const mutated = mutateStaging(INTERCEPTION_02, (staging, index) =>
+      index === 3 && staging !== undefined
+        ? [staging[0]!] // drop the delayed seeded-side Basic flank
+        : staging,
+    );
+    expectProductionValidatorRejects(
+      mutated,
+      'missions[1].encounters[3].staging',
+    );
+  });
+
+  it('V02-WI-05: the production validator rejects a Mission 02 offset change', () => {
+    const mutated = mutateStaging(INTERCEPTION_02, (staging, index) =>
+      index === 4 && staging !== undefined
+        ? staging.map((group, groupIndex) =>
+            groupIndex === 2 ? { ...group, offsetSeconds: 3 } : group,
+          )
+        : staging,
+    );
+    expectProductionValidatorRejects(
+      mutated,
+      'missions[1].encounters[4].staging[2].offsetSeconds',
+    );
+  });
+
+  it('V02-WI-05: the production validator rejects a Mission 02 Top fraction change', () => {
+    const mutated = mutateStaging(INTERCEPTION_02, (staging, index) =>
+      index === 5 && staging !== undefined
+        ? [
+            {
+              ...staging[0]!,
+              members: [
+                {
+                  ...staging[0]!.members[0]!,
+                  placement: { kind: 'top', fraction: 0.4 },
+                },
+                ...staging[0]!.members.slice(1),
+              ],
+            },
+          ]
+        : staging,
+    );
+    expectProductionValidatorRejects(
+      mutated,
+      'missions[1].encounters[5].staging[0].members[0].placement.fraction',
+    );
+  });
+
+  it('V02-WI-05: the production validator rejects a Mission 02 Side Y fraction change', () => {
+    const mutated = mutateStaging(INTERCEPTION_02, (staging, index) =>
+      index === 5 && staging !== undefined
+        ? [
+            {
+              ...staging[0]!,
+              members: [
+                ...staging[0]!.members.slice(0, 2),
+                {
+                  ...staging[0]!.members[2]!,
+                  placement: { kind: 'seeded-side', yViewportFraction: 0.3 },
+                },
+              ],
+            },
+          ]
+        : staging,
+    );
+    expectProductionValidatorRejects(
+      mutated,
+      'missions[1].encounters[5].staging[0].members[2].placement.yViewportFraction',
+    );
+  });
+
+  it('V02-WI-05: the production validator rejects a Mission 02 seeded-side member losing its seeded encounter entry', () => {
+    const mutated: MissionDefinition = {
+      ...INTERCEPTION_02,
+      encounters: INTERCEPTION_02.encounters.map((encounter, index) =>
+        index === 3
+          ? { ...encounter, entry: { kind: 'unspecified' } }
+          : encounter,
+      ),
+    };
+    expectProductionValidatorRejects(
+      mutated,
+      'missions[1].encounters[3].staging[1].members[0].placement',
+    );
   });
 });

@@ -12,14 +12,60 @@ import { createSessionStore, initializeSession } from '@application/session';
 import type { SessionStore } from '@application/session';
 import type { MissionSnapshot } from '@application/mission';
 import type { AssetPreloadResult } from '@application/ports';
+import type {
+  CampaignReadResult,
+  CampaignStartOutcome,
+  CampaignStorePort,
+  CampaignUpdateOutcome,
+} from '@application/persistence';
+import type { CampaignStateV1, MissionId } from '@domain/index';
+import type { CampaignTransitionResult } from '@domain/index';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import {
   ALL_ICONS_READY,
   createApplicationContextValue,
 } from '@test-support/ui/application-provider';
 import { buildNewGameCampaign } from '@application/persistence';
+import {
+  InMemoryCampaignStore,
+  campaignSchemaContext,
+} from '@test-support/persistence';
 import { ApplicationContext } from '../application-context';
 import { CombatScreen } from './combat-screen';
+
+/**
+ * V02-DEC-031 DOM helper: a campaign store whose `update` throws for the first
+ * invocation and then delegates to the real in-memory store, so a Combat
+ * initialization failure can be exercised through the real recovery shell and
+ * a later Retry Cleanup can succeed against the restored durable state.
+ */
+class FailFirstUpdateCampaignStore implements CampaignStorePort {
+  failing = true;
+
+  constructor(private readonly delegate: InMemoryCampaignStore) {}
+
+  async read(): Promise<CampaignReadResult> {
+    return this.delegate.read();
+  }
+
+  async update(
+    transform: (current: CampaignStateV1) => CampaignTransitionResult,
+  ): Promise<CampaignUpdateOutcome> {
+    if (this.failing) {
+      this.failing = false;
+      throw new Error('Simulated persistence infrastructure failure');
+    }
+    return this.delegate.update(transform);
+  }
+
+  async startMission(): Promise<CampaignStartOutcome> {
+    return this.delegate.startMission('interception-01' as MissionId);
+  }
+
+  async replace(next: CampaignStateV1): Promise<void> {
+    return this.delegate.replace(next);
+  }
+}
 
 vi.mock('@application/combat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@application/combat')>();
@@ -372,5 +418,92 @@ describe('CombatScreen', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
     expect(store.getState()?.combatLifecycle.overlay).toBe('pause');
+  });
+
+  it('a rejected Combat initialization whose exact cleanup cannot be proven safe opens the blocking Mission Start Recovery Error shell; Retry Cleanup reconciles once the durable store recovers (V02-DEC-031)', async () => {
+    const store = storeWithActiveMission();
+    const session = store.getState();
+    if (session === null || session.activeMission === 'none') {
+      throw new Error('Expected an Active Mission.');
+    }
+    const delegate = new InMemoryCampaignStore(
+      campaignSchemaContext(CONTENT_CATALOGUE),
+    );
+    const campaignStore = new FailFirstUpdateCampaignStore(delegate);
+    await campaignStore.replace({
+      ...buildNewGameCampaign(CONTENT_CATALOGUE, session.sessionSeed),
+      missionInProgress: {
+        missionId: session.activeMission.missionId,
+        attemptId: session.activeMission.missionAttemptId,
+      },
+    });
+    (loadCombatSession as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Combat initialization failed'),
+    );
+    const preparedAssets: AssetPreloadResult = [];
+    const value = createApplicationContextValue({
+      store,
+      preparedAssets,
+      content: CONTENT_CATALOGUE,
+      campaignStore,
+    });
+    const { unmount } = render(
+      <ApplicationContext.Provider value={value}>
+        <CombatScreen />
+      </ApplicationContext.Provider>,
+    );
+    await act(async () => {});
+
+    // Frozen non-interactive Combat shell with exactly the blocking Overlay.
+    expect(
+      screen.getByRole('heading', { name: 'Mission Start Recovery Error' }),
+    ).toBeDefined();
+    expect(
+      screen.getByText('Retry cleanup to return to Mission Details.'),
+    ).toBeDefined();
+    expect(store.getState()?.combatLifecycle.overlay).toBe(
+      'mission-start-recovery-error',
+    );
+    expect(store.getState()?.combatLifecycle.running).toBe(false);
+    expect(store.getState()?.activeMission).not.toBe('none');
+    expect(store.getState()?.missionStartFailed).toBe(false);
+    expect(store.getState()?.missionResult).toBeNull();
+    // No Phaser/simulation owner or canvas exists in the shell.
+    expect(
+      screen.getByTestId('combat-screen').querySelector('canvas'),
+    ).toBeNull();
+    // Combat utility controls are disabled behind the blocking Overlay.
+    expect(
+      (screen.getByRole('button', { name: 'Pause' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: 'Settings' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    // Esc, P, and blur cannot close or replace the blocking Overlay.
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    fireEvent.keyDown(window, { code: 'KeyP' });
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+    expect(store.getState()?.combatLifecycle.overlay).toBe(
+      'mission-start-recovery-error',
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Mission Start Recovery Error' }),
+    ).toBeDefined();
+
+    // Retry Cleanup re-runs the SAME originating cleanup; the durable store
+    // has recovered, so the exact marker is cleared and the session
+    // reconciles to Mission Details with `Unable to start mission.`.
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Cleanup' }));
+    await act(async () => {});
+    expect(store.getState()?.activeMission).toBe('none');
+    expect(store.getState()?.missionStartFailed).toBe(true);
+    expect(store.getState()?.combatLifecycle.overlay).toBe('none');
+    expect(store.getState()?.credits).toBe(12);
+    expect(store.getState()?.hullIntegrity).toBe(100);
+    unmount();
   });
 });

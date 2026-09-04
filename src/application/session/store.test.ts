@@ -254,10 +254,13 @@ describe('createSessionStore', () => {
 
   it('clears the active mission and signals the failure on Combat initialization failure (Base AC-014)', () => {
     const store = initializedStore();
-    store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+    const snapshot = snapshotFor(store);
+    store.dispatch({ type: 'mission/start', snapshot });
     store.dispatch({
       type: 'mission/start-failed',
-      missionId: 'interception-01',
+      missionId: snapshot.missionId,
+      missionAttemptId: snapshot.missionAttemptId,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
     });
     expect(store.getState()?.activeMission).toBe('none');
     expect(store.getState()?.missionStartFailed).toBe(true);
@@ -269,12 +272,40 @@ describe('createSessionStore', () => {
     expect(store.getState()?.hullIntegrity).toBe(100);
   });
 
-  it('clears the failure signal once Base has reopened Mission Details', () => {
+  it('ignores a start-failure whose originating snapshot identity does not exactly match the Active Mission (V02-DEC-031)', () => {
     const store = initializedStore();
-    store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
+    const snapshot = snapshotFor(store);
+    store.dispatch({ type: 'mission/start', snapshot });
+    // The stale failure belongs to an older ordinal/attempt of the same
+    // mission: it must never clear the current Active Mission or signal a
+    // failure for it.
     store.dispatch({
       type: 'mission/start-failed',
-      missionId: 'interception-01',
+      missionId: snapshot.missionId,
+      missionAttemptId: snapshot.missionAttemptId + 1,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal + 1,
+    });
+    expect(store.getState()?.activeMission).not.toBe('none');
+    expect(store.getState()?.missionStartFailed).toBe(false);
+    store.dispatch({
+      type: 'mission/start-failed',
+      missionId: snapshot.missionId,
+      missionAttemptId: snapshot.missionAttemptId,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+    });
+    expect(store.getState()?.activeMission).toBe('none');
+    expect(store.getState()?.missionStartFailed).toBe(true);
+  });
+
+  it('clears the failure signal once Base has reopened Mission Details', () => {
+    const store = initializedStore();
+    const snapshot = snapshotFor(store);
+    store.dispatch({ type: 'mission/start', snapshot });
+    store.dispatch({
+      type: 'mission/start-failed',
+      missionId: snapshot.missionId,
+      missionAttemptId: snapshot.missionAttemptId,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
     });
     store.dispatch({ type: 'mission/start-failure-consumed' });
     expect(store.getState()?.missionStartFailed).toBe(false);
@@ -289,6 +320,7 @@ describe('createSessionStore', () => {
       overlay: 'none',
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
+      terminalSavePending: false,
     });
     store.dispatch({ type: 'mission/start', snapshot: snapshotFor(store) });
     expect(store.getState()?.combatLifecycle).toEqual({
@@ -296,6 +328,7 @@ describe('createSessionStore', () => {
       overlay: 'none',
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
+      terminalSavePending: false,
     });
   });
 
@@ -330,6 +363,7 @@ describe('createSessionStore', () => {
       overlay: 'none',
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
+      terminalSavePending: false,
     });
     store.dispatch({
       type: 'combat-lifecycle/browser-safety-event',
@@ -350,8 +384,10 @@ describe('createSessionStore', () => {
       result: {
         kind: 'defeat',
         missionInstanceOrdinal: 0,
-        creditsAfter: 12,
-        hullIntegrityAfter: 25,
+        creditsAfter: 4,
+        hullIntegrityAfter: 100,
+        runStatusAfter: 'active',
+        repairCostCredits: 8,
       },
     });
     const committed = store.getState();

@@ -98,6 +98,8 @@ describe('SessionRouter', () => {
       store.dispatch({
         type: 'mission/start-failed',
         missionId: 'interception-01',
+        missionAttemptId: 0,
+        missionInstanceOrdinal: 0,
       });
     });
     expect(screen.getByTestId('operations-screen')).toBeDefined();

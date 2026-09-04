@@ -236,7 +236,8 @@ describe('S13 Debug: forced results reuse the S12 terminal path (Combat §11.6)'
     const lost = debug(god, { type: 'combat-debug/lose-mission' });
     expect(lost.godModeEnabled).toBe(false);
     // S13-WI01: the authoritative player Hull is 0 before the normal Defeat
-    // relay; emergency recovery to 25 stays owned by the S12 session reducer.
+    // relay; the v0.2 paid full-Repair/Game Over economy is owned by the domain
+    // campaign transition and the terminal-save application boundary.
     expect(lost.playerHullIntegrity).toBe(0);
     expect(lost.terminalResult).toEqual({ kind: 'defeat' });
     // Repeated or racing commands after the first terminal are strict no-ops.

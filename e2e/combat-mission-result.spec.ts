@@ -3,15 +3,20 @@ import type { Page } from '@playwright/test';
 
 /**
  * S12 Mission Resolution and Return Loop — minimal wiring-level browser
- * evidence (Base §9.5, AC-032/033, MASTER-AC-005). V02-WI-04 authored M01
- * staging (first arrival at 10 s) removes the legacy natural early-Defeat
- * seed; the deterministic dev-only Debug `Lose Mission` action enters the same
- * accepted v0.1 Defeat seam the WI-05 contract replaces. The test proves the
- * Defeat Mission Result Overlay opens and blocks, Continue returns to
- * Operations with the committed state (Hull 25, Credits unchanged) and permits
- * another mission with a fresh runtime, and there are no page errors or
- * duplicate canvases. Exact result precedence, one-time commitment, Credit/Hull
- * effects, and duplicate-signal resistance are unit-covered.
+ * evidence (Base §9.5, AC-032/033, MASTER-AC-005; v0.2 §12.4/§13.5/§15.4,
+ * V02-AC-016/020). V02-WI-04 authored M01 staging (first arrival at 10 s)
+ * removes the legacy natural early-Defeat seed; the deterministic dev-only
+ * Debug `Lose Mission` action enters the same typed terminal-result relay the
+ * v0.2 Defeat contract replaces. V02-WI-05 C03: the committed Defeat returns
+ * through the lifecycle boundary and opens the paid full-Repair Result Overlay
+ * only after the campaign transaction reports `committed` (no navigation
+ * before the browser-safety boundary evaluates it). The test proves the
+ * Defeat Mission Result Overlay opens and blocks with `MISSION FAILED`, the
+ * `-8 Credits` Repair cost and full Hull 100 repair are committed, Continue
+ * returns to Operations with Credits 12 − 8 = 4 and permits another mission
+ * with a fresh runtime, and there are no page errors or duplicate canvases.
+ * Exact result precedence, one-time commitment, Credit/Hull effects, and
+ * duplicate-signal resistance are unit-covered.
  */
 const DEFEAT_SESSION_SEED = 19023;
 
@@ -47,11 +52,10 @@ async function startCombatWithSeed(
 }
 
 test(
-  'a natural Defeat opens the blocking Result Overlay and Continue returns to Operations for the next mission',
-  // The natural mission simulates ~24 s under the fixed-step clock; under
-  // parallel full-suite load the wall-clock Defeat poll can exceed the default
-  // 30 s test budget, so this long-running simulation test gets an explicit
-  // 60 s budget (the simulation, not the assertions, drives the duration).
+  'a Defeat opens the paid full-Repair Result Overlay and Continue returns to Operations for the next mission',
+  // The Debug-forced terminal commits deterministically; the committed Defeat
+  // resolves through the lifecycle boundary once the campaign transaction
+  // reports `committed`.
   {
     annotation: {
       type: 'runtime-budget',
@@ -73,8 +77,9 @@ test(
     await startCombatWithSeed(page, DEFEAT_SESSION_SEED);
     const requestsAfterFirstCombat = assetRequests.length;
 
-    // The dev-only Debug `Lose Mission` action enters the normal Defeat seam:
-    // the Mission Result Overlay opens as the only continuation point.
+    // The dev-only Debug `Lose Mission` action enters the normal terminal
+    // relay: the paid full-Repair Result Overlay opens as the only
+    // continuation point (v0.2 §15.4).
     await page.keyboard.press('F1');
     await page.getByRole('button', { name: 'Lose Mission' }).click();
     const dialog = page.getByRole('dialog');
@@ -88,9 +93,11 @@ test(
         },
         { timeout: 5000 },
       )
-      .toBe('Mission Failed');
+      .toBe('MISSION FAILED');
     await expect(dialog.getByText('Reward')).toBeVisible();
     await expect(dialog.getByText('0 Credits')).toBeVisible();
+    await expect(dialog.getByText('Repair cost')).toBeVisible();
+    await expect(dialog.getByText('-8 Credits')).toBeVisible();
     const continueButton = dialog.getByRole('button', { name: 'Continue' });
     await expect(continueButton).toBeFocused();
 
@@ -127,10 +134,11 @@ test(
     await expect(dialog).toBeVisible();
     await expect(page.getByTestId('combat-screen')).toHaveCount(0);
 
-    // Continue returns to Operations with the committed Defeat state.
+    // Continue returns to Operations with the committed paid-Repair Defeat
+    // state: 12 starting Credits − 8 Repair cost = 4.
     await continueButton.click();
     await expect(page.getByTestId('operations-screen')).toBeVisible();
-    await expect(page.getByText('Credits: 12')).toBeVisible();
+    await expect(page.getByText('Credits: 4')).toBeVisible();
     await expect(dialog).toHaveCount(0);
 
     // The Mission Point is available again: start the next mission.
@@ -141,8 +149,8 @@ test(
       timeout: 15000,
     });
 
-    // The retained emergency-recovery Hull (25) drives the accessible Bar, and
-    // the fresh runtime produced no stale Combat input or page errors.
+    // The committed full-Repair Hull (100) drives the accessible Bar, and the
+    // fresh runtime produced no stale Combat input or page errors.
     await expect
       .poll(
         async () =>
@@ -151,7 +159,7 @@ test(
           timeout: 5000,
         },
       )
-      .toBe('25');
+      .toBe('100');
     await expect(page.locator('.ds-combat-hud')).toHaveCount(1);
 
     // The approved runtime assets are not requested again across the repeat loop:

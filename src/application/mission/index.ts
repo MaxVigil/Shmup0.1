@@ -12,9 +12,13 @@ export type {
 } from './commit-mission-result';
 export { emptyRoleCounts } from './commit-mission-result';
 export { failMissionStart } from './fail-mission-start';
+export { createMissionStartRecoveryController } from './fail-mission-start';
+export { ownsMissionStartSnapshot } from './fail-mission-start';
 export type {
   FailMissionStartDeps,
   FailMissionStartOutcome,
+  MissionStartRecoveryController,
+  MissionStartRecoveryIdentity,
 } from './fail-mission-start';
 export { SEAM_MISSION_ID } from './compatibility-seam';
 export { resolveMissionEncounters } from './encounter-resolution';

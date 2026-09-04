@@ -1,7 +1,6 @@
 export type { PersistenceDiagnostic } from './diagnostics';
 export {
   CAMPAIGN_SCHEMA_VERSION,
-  LEGACY_DEFEAT_RECOVERY_HULL,
   V02_DEFEAT_REPAIR_COST_CREDITS,
   V02_STARTING_CREDITS,
   createNewGameCampaign,
@@ -14,9 +13,10 @@ export type {
 } from './campaign-state';
 export {
   applyDefeatRecoveryOrGameOver,
+  applyMissionDefeat,
+  applyMissionEvacuation,
   applyMissionSuccess,
   applySeamAbort,
-  applySeamDefeat,
   beginMission,
   clearMissionInProgress,
 } from './campaign-transitions';

@@ -22,10 +22,12 @@ export type { CampaignRunStatus };
 export type BaseScreenId = 'operations' | 'hangar';
 
 /**
- * The presented Mission Result read model (S12, V02-WI-04): Success carries the
- * v0.2 run facts relayed from the authoritative simulation and the pre-committed
- * progression so the Result Overlay (Epic §15.4) presents committed values only.
- * Aborted opens Operations directly. The `missionInstanceOrdinal` binds
+ * The presented Mission Result read model (S12, V02-WI-04/V02-WI-05): Success
+ * carries the v0.2 run facts relayed from the authoritative simulation and the
+ * pre-committed progression so the Result Overlay (Epic §15.4) presents
+ * committed values only. Evacuated carries the frozen run facts and retained
+ * payout; Defeat after an affordable Repair carries the Repair cost; Game Over
+ * and Aborted present no mission Result. The `missionInstanceOrdinal` binds
  * consumption to the originating mission.
  */
 export type PresentedMissionResult =
@@ -43,9 +45,27 @@ export type PresentedMissionResult =
       readonly unlockedMissionIdsAfter: readonly MissionId[];
     }
   | {
+      readonly kind: 'evacuated';
+      readonly missionInstanceOrdinal: number;
+      readonly creditsEarned: number;
+      /** Pending combat rewards frozen at the successful Evacuation. */
+      readonly combatRewards: number;
+      /** Pending escape penalties frozen at the successful Evacuation. */
+      readonly escapePenalties: number;
+      /** `max(0, rewards - penalties)` before the 50% retention. */
+      readonly netCombatReward: number;
+      readonly destroyedCounts: RoleCounts;
+      readonly escapedCounts: RoleCounts;
+    }
+  | {
       readonly kind: 'defeat';
       readonly missionInstanceOrdinal: number;
       readonly creditsEarned: number;
+      /** Credits deducted by the full Repair shown by the v0.2 Defeat result
+       *  (Epic §15.4: `Repair cost -8 Credits`). The presented Defeat result
+       *  exists only after an affordable Repair; Game Over opens the terminal
+       *  Game Over Screen instead (Epic §13.5). */
+      readonly repairCostCredits: number;
     };
 
 /**

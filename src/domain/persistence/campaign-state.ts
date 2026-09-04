@@ -61,11 +61,6 @@ export interface CampaignStateV1 {
 export const V02_STARTING_CREDITS = 12;
 export const V02_DEFEAT_REPAIR_COST_CREDITS = 8;
 
-/** v0.1 emergency-recovery Hull retained by the temporary single-mission
- *  compatibility seam (Base §9.5). Superseded by the v0.2 paid full Repair in
- *  V02-WI-05; the seam never becomes a parallel authority. */
-export const LEGACY_DEFEAT_RECOVERY_HULL = 25;
-
 /** Input for the canonical v0.2 New Game factory. Domain stays framework- and
  *  content-independent; the application supplies the validated catalogue
  *  values (Code Principles §12). */

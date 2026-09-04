@@ -19,6 +19,10 @@ export default tseslint.config(
       'node_modules/**',
       'playwright-report/**',
       'test-results/**',
+      // Transient protocol directory (gitignored): never part of the build or
+      // commit; reviewer probes/handoff records there must not fail repository
+      // gates.
+      '.agent-handoff/**',
     ],
   },
   eslint.configs.recommended,

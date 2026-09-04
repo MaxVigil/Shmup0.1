@@ -111,9 +111,10 @@ export interface RoleDelay {
 
 /**
  * Authored Spawn Placement for one Arrival Group member (Epic §8.1.1,
- * V02-DEC-018/021). `top` is a normalized fraction measured inside the current
- * Aircraft horizontal engagement band; `seeded-side` is the approved Hunter
- * horizontal entry at a viewport-`Y` fraction, whose side the deterministic
+ * V02-DEC-018/021/026). `top` is a normalized fraction measured inside the
+ * current Aircraft horizontal engagement band; `seeded-side` is an approved
+ * horizontal entry at a viewport-`Y` fraction (Mission 01 Hunters and the
+ * Mission 02 delayed Basic flank and Hunters), whose side the deterministic
  * `mission-data` stream resolves in encounter order. Top Placements consume
  * zero RNG draws (V02-AC-003).
  */
@@ -165,11 +166,12 @@ export interface EncounterDefinition {
    */
   readonly roleDelays?: readonly RoleDelay[];
   /**
-   * Exact authored runtime staging (Epic §8.1.1, V02-DEC-021): the ordered
+   * Exact authored runtime staging (Epic §8.1.1, V02-DEC-021/026): the ordered
    * Arrival Groups and normalized Spawn Placements this encounter consumes at
    * runtime. Present only where the canonical source records exact numeric
-   * staging (Mission 01 for V02-WI-04); Missions 02/03 remain qualitative and
-   * carry no staging until their Product Owner staging decisions are recorded.
+   * staging (Mission 01 for V02-WI-04; Mission 02 for V02-WI-05);
+   * Mission 03 remains qualitative and carries no staging until its Product
+   * Owner staging decision is recorded.
    */
   readonly staging?: readonly ArrivalGroup[];
 }
@@ -397,6 +399,25 @@ export const INTERCEPTION_02: MissionDefinition = {
       composition: [entry('basic-drone', 3)],
       entry: { kind: 'fixed', region: 'top' },
       formation: 'offset-top',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.15 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.45 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.75 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-02-e2',
@@ -404,6 +425,34 @@ export const INTERCEPTION_02: MissionDefinition = {
       composition: [entry('basic-drone', 3), entry('ranged-drone', 1)],
       entry: { kind: 'unspecified' },
       formation: 'screened',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.25 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.5 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.75 },
+            },
+          ],
+        },
+        {
+          offsetSeconds: 2,
+          members: [
+            {
+              type: 'ranged-drone',
+              placement: { kind: 'top', fraction: 0.5 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-02-e3',
@@ -411,13 +460,64 @@ export const INTERCEPTION_02: MissionDefinition = {
       composition: [entry('basic-drone', 2), entry('ranged-drone', 2)],
       entry: { kind: 'unspecified' },
       formation: 'separated-firing-lanes',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.2 },
+            },
+            {
+              type: 'ranged-drone',
+              placement: { kind: 'top', fraction: 0.3 },
+            },
+            {
+              type: 'ranged-drone',
+              placement: { kind: 'top', fraction: 0.7 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.8 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-02-e4',
       timeSeconds: 150,
       composition: [entry('basic-drone', 4)],
-      entry: { kind: 'unspecified' },
+      entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
       formation: 'front-group-plus-delayed-flank',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.25 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.5 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.75 },
+            },
+          ],
+        },
+        {
+          offsetSeconds: 2,
+          members: [
+            {
+              type: 'basic-drone',
+              placement: { kind: 'seeded-side', yViewportFraction: 0.25 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-02-e5',
@@ -427,15 +527,63 @@ export const INTERCEPTION_02: MissionDefinition = {
         entry('ranged-drone', 1),
         entry('hunter-drone', 1),
       ],
-      entry: { kind: 'unspecified' },
+      entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
       formation: 'authored-stagger',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.25 },
+            },
+          ],
+        },
+        {
+          offsetSeconds: 1,
+          members: [
+            {
+              type: 'ranged-drone',
+              placement: { kind: 'top', fraction: 0.55 },
+            },
+          ],
+        },
+        {
+          offsetSeconds: 2,
+          members: [
+            {
+              type: 'hunter-drone',
+              placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-02-e6',
       timeSeconds: 260,
       composition: [entry('basic-drone', 2), entry('hunter-drone', 1)],
-      entry: { kind: 'unspecified' },
+      entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
       formation: 'asymmetric',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.35 },
+            },
+            {
+              type: 'basic-drone',
+              placement: { kind: 'top', fraction: 0.65 },
+            },
+            {
+              type: 'hunter-drone',
+              placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+            },
+          ],
+        },
+      ],
     },
   ],
   totals: { basic: 15, ranged: 4, hunter: 2, elite: 0 },

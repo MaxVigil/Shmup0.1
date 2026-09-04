@@ -4,11 +4,15 @@ import type {
   MissionResult,
   SuccessEconomyRelay,
 } from '@application/mission';
+import type { SessionState } from '@application/session';
 import type { TerminalCommitOutcome } from '@application/combat';
 import {
   createFrozenTerminalPayload,
   createTerminalRetryController,
   mapCommitMissionOutcome,
+  mayPresentHeldDefeat,
+  ownsTerminalSnapshot,
+  planCommittedTerminal,
   terminalCommitDisposition,
 } from './terminal-commit';
 
@@ -43,27 +47,53 @@ const defeatResult: MissionResult = {
   kind: 'defeat',
   missionInstanceOrdinal: 1,
   creditsAfter: 100,
-  hullIntegrityAfter: 60,
+  hullIntegrityAfter: 100,
+  runStatusAfter: 'active',
+  repairCostCredits: 8,
+};
+
+/** A committed Evacuation result shares the Success relay shape minus its
+ *  economy-specific meaning; built from the same committed-payload surface. */
+const evacuatedResult: MissionResult = {
+  ...successResult,
+  kind: 'evacuated',
 };
 
 describe('terminalCommitDisposition (V02-WI-04 C02)', () => {
-  it('maps a committed Success to authorize-success carrying the result', () => {
+  it('maps a committed Success to authorize-exit carrying the result', () => {
     const outcome: TerminalCommitOutcome = {
       status: 'committed',
       result: successResult,
     };
     expect(terminalCommitDisposition(outcome)).toEqual({
-      kind: 'authorize-success',
+      kind: 'authorize-exit',
       result: successResult,
     });
   });
 
-  it('maps a committed Defeat to recover without any result', () => {
+  it('maps a committed Evacuation to authorize-exit carrying the result (V02-WI-05)', () => {
+    const outcome: TerminalCommitOutcome = {
+      status: 'committed',
+      result: evacuatedResult,
+    };
+    expect(terminalCommitDisposition(outcome)).toEqual({
+      kind: 'authorize-exit',
+      result: evacuatedResult,
+    });
+  });
+
+  it('maps a committed Defeat to present-defeat carrying the immutable result (V02-WI-05 C03)', () => {
     const outcome: TerminalCommitOutcome = {
       status: 'committed',
       result: defeatResult,
     };
-    expect(terminalCommitDisposition(outcome)).toEqual({ kind: 'recover' });
+    // The command no longer navigates: the committed result is returned to the
+    // lifecycle boundary, which dispatches it only when presentation is safe
+    // or holds it behind the explicit Resume-only continuation.
+    expect(terminalCommitDisposition(outcome)).toEqual({
+      kind: 'present-defeat',
+      result: defeatResult,
+    });
   });
 
   it('maps an inert outcome to save-conflict', () => {
@@ -182,5 +212,142 @@ describe('createTerminalRetryController (V02-WI-04 C02)', () => {
     expect(controller.beginRetry()).toBe(true);
     controller.finishRetry();
     expect(controller.beginRetry()).toBe(true);
+  });
+});
+
+describe('V02-WI-05 C04 terminal boundary plan (planCommittedTerminal)', () => {
+  const identity = {
+    missionId: 'interception-01',
+    missionAttemptId: 7,
+    missionInstanceOrdinal: 1,
+  };
+
+  function sessionWith(
+    missionInstanceOrdinal = 1,
+    missionAttemptId = 7,
+    missionId = 'interception-01',
+    latched = false,
+    overlay: 'none' | 'terminal-exit-pause' | 'pause' = 'none',
+    running = true,
+  ): SessionState {
+    return {
+      activeMission: {
+        missionId,
+        missionAttemptId,
+        missionInstanceOrdinal,
+      },
+      combatLifecycle: {
+        running,
+        overlay,
+        browserSafetyLatched: latched,
+      },
+    } as unknown as SessionState;
+  }
+
+  it('rejects any completion that no longer owns the exact mission + durable attempt as stale', () => {
+    const committed = {
+      status: 'committed',
+      result: defeatResult,
+    } as const satisfies TerminalCommitOutcome;
+    expect(planCommittedTerminal(committed, null, identity)).toEqual({
+      kind: 'stale',
+    });
+    // Same session ordinal but a different durable attempt (restart scenario).
+    expect(
+      planCommittedTerminal(committed, sessionWith(1, 99), identity),
+    ).toEqual({ kind: 'stale' });
+    // Same ordinal + attempt but a different mission.
+    expect(
+      planCommittedTerminal(
+        committed,
+        sessionWith(1, 7, 'interception-02'),
+        identity,
+      ),
+    ).toEqual({ kind: 'stale' });
+    // A committed payload bound to a different instance ordinal is stale even
+    // when the session snapshot happens to match this owner's ordinal.
+    expect(
+      planCommittedTerminal(
+        {
+          status: 'committed',
+          result: { ...defeatResult, missionInstanceOrdinal: 9 },
+        },
+        sessionWith(),
+        identity,
+      ),
+    ).toEqual({ kind: 'stale' });
+  });
+
+  it('ownsTerminalSnapshot requires the exact mission id, attempt id, and ordinal', () => {
+    expect(ownsTerminalSnapshot(sessionWith(), identity)).toBe(true);
+    expect(ownsTerminalSnapshot(sessionWith(2, 7), identity)).toBe(false);
+    expect(ownsTerminalSnapshot(sessionWith(1, 8), identity)).toBe(false);
+    expect(
+      ownsTerminalSnapshot(sessionWith(1, 7, 'interception-02'), identity),
+    ).toBe(false);
+    expect(ownsTerminalSnapshot(null, identity)).toBe(false);
+  });
+
+  it('presents a committed Defeat immediately only when no safety latch is set', () => {
+    const outcome = {
+      status: 'committed',
+      result: defeatResult,
+    } as const;
+    expect(planCommittedTerminal(outcome, sessionWith(), identity)).toEqual({
+      kind: 'present',
+      result: defeatResult,
+    });
+  });
+
+  it('holds a committed Defeat/Game Over under the browser-safety latch for explicit Resume', () => {
+    const outcome = {
+      status: 'committed',
+      result: defeatResult,
+    } as const;
+    expect(
+      planCommittedTerminal(
+        outcome,
+        sessionWith(1, 7, 'interception-01', true),
+        identity,
+      ),
+    ).toEqual({ kind: 'hold', result: defeatResult });
+  });
+
+  it('maps committed Success/Evacuation to authorize-exit and failed/inert outcomes to Save Error/Conflict', () => {
+    const success = { status: 'committed', result: successResult } as const;
+    expect(planCommittedTerminal(success, sessionWith(), identity)).toEqual({
+      kind: 'authorize-exit',
+      result: successResult,
+    });
+    expect(
+      planCommittedTerminal({ status: 'inert' }, sessionWith(), identity),
+    ).toEqual({ kind: 'save-conflict' });
+    expect(
+      planCommittedTerminal({ status: 'failed' }, sessionWith(), identity),
+    ).toEqual({ kind: 'save-error' });
+  });
+
+  it('mayPresentHeldDefeat is true only after an explicit Resume on the exact snapshot', () => {
+    // Held behind the terminal-exit Pause: not presentable yet.
+    expect(
+      mayPresentHeldDefeat(
+        sessionWith(
+          1,
+          7,
+          'interception-01',
+          true,
+          'terminal-exit-pause',
+          false,
+        ),
+        identity,
+      ),
+    ).toBe(false);
+    // After Resume: running with no Overlay.
+    expect(mayPresentHeldDefeat(sessionWith(), identity)).toBe(true);
+    // A newer attempt or mission can never be presented by this owner.
+    expect(mayPresentHeldDefeat(sessionWith(1, 99), identity)).toBe(false);
+    expect(
+      mayPresentHeldDefeat(sessionWith(1, 7, 'interception-02'), identity),
+    ).toBe(false);
   });
 });

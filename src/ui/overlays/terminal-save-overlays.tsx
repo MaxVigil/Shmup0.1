@@ -77,15 +77,19 @@ export function SaveConflictOverlay({
 }
 
 /**
- * V02-WI-04 C03 terminal-exit Pause (Epic §13.3, V02-AC-019/023): entered only
- * when a committed Success resolves while the browser-safety manual-resume
- * latch is set (the tab was hidden or focus lost during the terminal retry).
- * The immutable Success result is already committed; the deterministic
- * centre-and-up exit must NOT start automatically while hidden. This Pause is
- * identity-bound to that committed exit: `Resume` is the ONLY action and the
- * only way to start it. Return to Base, Settings, Debug, Retry, and result
- * actions are never exposed here, and the Overlay cannot be closed by Esc or
- * the Scrim — an explicit `Resume` click is required.
+ * V02-WI-04 C03 / V02-WI-05 C03 terminal-exit Pause (Epic §13.3, §13.7,
+ * V02-AC-019/023): entered when a committed terminal outcome resolves while the
+ * browser-safety manual-resume latch is set (the tab was hidden or focus lost
+ * during the initial pending write or the terminal Retry). The immutable
+ * result is already committed; the Success/Evacuation exit must NOT start
+ * automatically while hidden, and a committed Defeat/Game Over must not
+ * present/navigate automatically. This Pause is identity-bound to that
+ * committed outcome: `Resume` is the ONLY action and the only continuation.
+ * Return to Base, Settings, Debug, Retry, and result actions are never exposed
+ * here, and the Overlay cannot be closed by Esc or the Scrim — an explicit
+ * `Resume` click is required (for Defeat it presents the committed Result or
+ * Game Over exactly once, without another write, reward/Repair recalculation,
+ * or exit animation).
  */
 export function TerminalExitPauseOverlay({
   onResume,

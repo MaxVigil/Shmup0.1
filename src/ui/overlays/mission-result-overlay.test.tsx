@@ -21,7 +21,9 @@ afterEach(() => {
   cleanup();
 });
 
-function storeWithResult(result: 'success' | 'defeat'): SessionStore {
+function storeWithResult(
+  result: 'success' | 'defeat' | 'evacuated',
+): SessionStore {
   const store = createInitializedSessionStore();
   const session = store.getState();
   if (session === null) {
@@ -53,12 +55,39 @@ function storeWithResult(result: 'success' | 'defeat'): SessionStore {
             completedMissionIdsAfter: ['interception-01'],
             creditsEarned: 8,
           })
-        : {
-            kind: 'defeat',
-            missionInstanceOrdinal: 0,
-            creditsAfter: 12,
-            hullIntegrityAfter: 25,
-          },
+        : result === 'defeat'
+          ? {
+              kind: 'defeat',
+              missionInstanceOrdinal: 0,
+              creditsAfter: 4,
+              hullIntegrityAfter: 100,
+              runStatusAfter: 'active',
+              repairCostCredits: 8,
+            }
+          : {
+              kind: 'evacuated',
+              missionInstanceOrdinal: 0,
+              creditsAfter: 14,
+              hullIntegrityAfter: 70,
+              creditsEarned: 2,
+              combatRewards: 5,
+              escapePenalties: 1,
+              netCombatReward: 4,
+              destroyedCounts: {
+                'basic-drone': 3,
+                'ranged-drone': 0,
+                'hunter-drone': 0,
+                'elite-drone': 0,
+              },
+              escapedCounts: {
+                'basic-drone': 0,
+                'ranged-drone': 0,
+                'hunter-drone': 0,
+                'elite-drone': 0,
+              },
+              unlockedMissionIdsAfter: ['interception-01'],
+              completedMissionIdsAfter: [],
+            },
   });
   return store;
 }
@@ -96,13 +125,30 @@ describe('MissionResultOverlay (Base §9.5, S12)', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
-  it('shows Mission Failed / Reward: 0 Credits on Defeat', () => {
+  it('shows MISSION FAILED with the v0.2 reward/repair rows on an affordable-Repair Defeat (Epic §15.4)', () => {
     const store = storeWithResult('defeat');
     renderOverlay(store);
     expect(
-      screen.getByRole('heading', { name: 'Mission Failed' }),
+      screen.getByRole('heading', { name: 'MISSION FAILED' }),
     ).toBeDefined();
+    expect(screen.getByText('Mission reward')).toBeDefined();
     expect(screen.getByText('0 Credits')).toBeDefined();
+    expect(screen.getByText('Repair cost')).toBeDefined();
+    expect(screen.getByText('-8 Credits')).toBeDefined();
+  });
+
+  it('shows EVACUATED with the frozen counts, retained 50%, and not-completed note (Epic §15.4)', () => {
+    const store = storeWithResult('evacuated');
+    renderOverlay(store);
+    expect(screen.getByRole('heading', { name: 'EVACUATED' })).toBeDefined();
+    expect(screen.getByText('Destroyed')).toBeDefined();
+    expect(screen.getByText('Escaped')).toBeDefined();
+    expect(screen.getByText('Retained 50%')).toBeDefined();
+    expect(screen.getByText('+2 Credits')).toBeDefined();
+    expect(screen.getByText('Mission not completed')).toBeDefined();
+    // No completion reward or unlock rows exist for an Evacuation.
+    expect(screen.queryByText('Completion reward')).toBeNull();
+    expect(screen.queryByText('Mission unlocked')).toBeNull();
   });
 
   it('renders nothing when no result is pending', () => {

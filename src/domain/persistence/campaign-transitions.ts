@@ -1,9 +1,6 @@
 import { HULL_INTEGRITY_MAX, isHullIntegrity, isMissionId } from '../model';
 import type { MissionId } from '../model';
-import {
-  LEGACY_DEFEAT_RECOVERY_HULL,
-  V02_DEFEAT_REPAIR_COST_CREDITS,
-} from './campaign-state';
+import { V02_DEFEAT_REPAIR_COST_CREDITS } from './campaign-state';
 import type { CampaignStateV1 } from './campaign-state';
 
 /**
@@ -61,6 +58,21 @@ function exactMarkerMatch(
   attemptId: number,
 ): boolean {
   return campaign.missionInProgress?.attemptId === attemptId;
+}
+
+/** True when the persisted marker belongs to the exact originating mission id
+ *  AND the exact campaign attempt id (V02-DEC-031). */
+function exactOriginatingMarkerMatch(
+  campaign: CampaignStateV1,
+  missionId: MissionId,
+  attemptId: number,
+): boolean {
+  const marker = campaign.missionInProgress;
+  return (
+    marker !== null &&
+    marker.missionId === missionId &&
+    marker.attemptId === attemptId
+  );
 }
 
 /**
@@ -142,16 +154,23 @@ export function applyMissionSuccess(
 }
 
 /**
- * Temporary v0.1 single-mission Defeat through the compatibility seam: zero
- * reward and the free emergency recovery to exactly 25 Hull (Base §9.5) — only
- * for the exact campaign attempt id (V02-WI-02 correction C03), so a stale
- * Defeat callback from an older attempt is inert before any Hull change.
- * V02-WI-05 replaces this with the zero-reward paid full Repair / Game Over
- * economy; the seam never applies the v0.2 Repair rule as a parallel authority.
+ * Canonical v0.2 Evacuation commitment (Epic §12.3, §13.4–13.7, V02-AC-015,
+ * V02-AC-020): a successful Evacuation freezes one immutable result and commits
+ * `payout = floor(max(0, combatRewards - escapePenalties) × 0.5)` Credits,
+ * retains the current Combat Hull, changes no completion/unlock/progression
+ * state, and clears the active-mission marker — only for the exact campaign
+ * attempt and mission that started it, so a stale or racing Evacuated callback
+ * from an older attempt is inert before any reward, Hull, or marker change.
+ * Enemies still active when Evacuation succeeds are neither `Escaped` nor an
+ * additional penalty (Epic §12.3, §18).
  */
-export function applySeamDefeat(
+export function applyMissionEvacuation(
   campaign: CampaignStateV1,
   attemptId: number,
+  missionId: MissionId,
+  combatHullIntegrity: number,
+  combatRewards: number,
+  escapePenalties: number,
 ): CampaignTransitionResult {
   if (campaign.missionInProgress === null) {
     return { kind: 'rejected', reason: 'no-mission-in-progress' };
@@ -159,11 +178,74 @@ export function applySeamDefeat(
   if (!exactMarkerMatch(campaign, attemptId)) {
     return { kind: 'rejected', reason: 'attempt-does-not-match' };
   }
+  if (campaign.missionInProgress.missionId !== missionId) {
+    return { kind: 'rejected', reason: 'marker-mission-mismatch' };
+  }
+  if (
+    !isHullIntegrity(combatHullIntegrity) ||
+    !Number.isInteger(combatRewards) ||
+    combatRewards < 0 ||
+    !Number.isInteger(escapePenalties) ||
+    escapePenalties < 0
+  ) {
+    return { kind: 'rejected', reason: 'invalid-evacuation-result-values' };
+  }
+  const netCombat = Math.max(0, combatRewards - escapePenalties);
+  const payout = Math.floor(netCombat * 0.5);
   return {
     kind: 'applied',
     campaign: {
       ...campaign,
-      hullIntegrity: LEGACY_DEFEAT_RECOVERY_HULL,
+      credits: campaign.credits + payout,
+      hullIntegrity: combatHullIntegrity,
+      missionInProgress: null,
+    },
+  };
+}
+
+/**
+ * Canonical v0.2 Defeat commitment (Epic §12.4, §13.5, V02-AC-016, V02-AC-020):
+ * zero mission reward and the paid full Repair / Game Over economy — only for
+ * the exact campaign attempt AND the exact originating mission (V02-WI-02
+ * correction C03; V02-WI-05 C04 adds the mission-identity check), so a stale
+ * Defeat callback from an older attempt — or from the same attempt identity of
+ * a different mission marker — is inert before any Credits, Hull, or marker
+ * change. When persistent Credits are at least the full Repair cost, exactly
+ * `V02_DEFEAT_REPAIR_COST_CREDITS` (8) Credits are deducted, Hull becomes 100,
+ * and the run stays `active`; otherwise no partial deduction occurs, the run
+ * enters `game-over`, and the marker is cleared in both branches. The caller
+ * distinguishes the branches through the applied campaign's `runStatus`.
+ */
+export function applyMissionDefeat(
+  campaign: CampaignStateV1,
+  attemptId: number,
+  missionId: MissionId,
+): CampaignTransitionResult {
+  if (campaign.missionInProgress === null) {
+    return { kind: 'rejected', reason: 'no-mission-in-progress' };
+  }
+  if (!exactMarkerMatch(campaign, attemptId)) {
+    return { kind: 'rejected', reason: 'attempt-does-not-match' };
+  }
+  if (campaign.missionInProgress.missionId !== missionId) {
+    return { kind: 'rejected', reason: 'marker-mission-mismatch' };
+  }
+  if (campaign.credits >= V02_DEFEAT_REPAIR_COST_CREDITS) {
+    return {
+      kind: 'applied',
+      campaign: {
+        ...campaign,
+        credits: campaign.credits - V02_DEFEAT_REPAIR_COST_CREDITS,
+        hullIntegrity: HULL_INTEGRITY_MAX,
+        missionInProgress: null,
+      },
+    };
+  }
+  return {
+    kind: 'applied',
+    campaign: {
+      ...campaign,
+      runStatus: 'game-over',
       missionInProgress: null,
     },
   };
@@ -210,27 +292,34 @@ export interface DefeatRecoveryResult {
 }
 
 /**
- * Combat-initialization-failure cleanup (Base AC-014, Epic §13.2 correction,
- * V02-WI-02 correction C02): atomically clears the persisted
- * `missionInProgress` marker for the EXACT originating attempt after a start
- * whose lazy Combat initialization rejected, so the failed start can be
- * retried in the same session and can never become a paid Defeat on reload.
+ * Combat-initialization-failure cleanup (Base AC-014, Epic §13.2, V02-DEC-031,
+ * V02-AC-020): atomically clears the persisted `missionInProgress` marker for
+ * the EXACT originating Mission Snapshot — its mission id AND its durable
+ * campaign attempt id — after a start whose lazy Combat initialization
+ * rejected, so the failed start can be retried in the same session and can
+ * never become a paid Defeat on reload.
  *
- * Exact-attempt matching: the marker stores the originating session Mission
- * Instance ordinal; a stale failure callback that arrives after a NEWER
- * attempt of the same mission set its own marker is rejected as
- * `attempt-does-not-match` and leaves the newer marker untouched. A callback
- * that finds no marker at all is rejected as `no-mission-in-progress`
- * (stale/duplicate of an already-cleared rollback).
+ * Exact originating-marker matching: the marker stores the originating mission
+ * id plus the campaign-authoritative attempt id. A stale failure callback that
+ * arrives after a NEWER attempt of the same mission set its own marker is
+ * rejected as `attempt-does-not-match`; a schema-valid but untrusted marker
+ * that belongs to ANOTHER mission is rejected as `mission-does-not-match`
+ * (V02-WI-05: the durable cleanup owner never clears by attempt id alone). A
+ * callback that finds no marker at all is rejected as
+ * `no-mission-in-progress` (stale/duplicate of an already-cleared rollback).
  */
 export function clearMissionInProgress(
   campaign: CampaignStateV1,
+  missionId: MissionId,
   attemptId: number,
 ): CampaignTransitionResult {
   if (campaign.missionInProgress === null) {
     return { kind: 'rejected', reason: 'no-mission-in-progress' };
   }
-  if (!exactMarkerMatch(campaign, attemptId)) {
+  if (campaign.missionInProgress.missionId !== missionId) {
+    return { kind: 'rejected', reason: 'mission-does-not-match' };
+  }
+  if (!exactOriginatingMarkerMatch(campaign, missionId, attemptId)) {
     return { kind: 'rejected', reason: 'attempt-does-not-match' };
   }
   return {

@@ -408,10 +408,36 @@ describe('validateCatalogue', () => {
     ).toBe(true);
   });
 
-  it('rejects runtime staging on Missions 02 or 03 (V02-WI-04 C01)', () => {
+  it('rejects a Mission 02 encounter whose staging is missing (V02-WI-05)', () => {
     const invalidMission: MissionDefinition = {
       ...INTERCEPTION_02,
       encounters: INTERCEPTION_02.encounters.map((encounter, index) =>
+        index === 2
+          ? ({
+              ...encounter,
+              staging: undefined,
+            } as unknown as EncounterDefinition)
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith({
+        missions: [INTERCEPTION_01, invalidMission, INTERCEPTION_03],
+      }),
+    );
+    expect(
+      issues.some(
+        (issue) =>
+          issue.path === 'missions[1].encounters' &&
+          /every Interception 02 encounter/.test(issue.message),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects runtime staging on Mission 03 (V02-WI-05, Epic §23.1)', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_03,
+      encounters: INTERCEPTION_03.encounters.map((encounter, index) =>
         index === 0
           ? {
               ...encounter,
@@ -432,16 +458,14 @@ describe('validateCatalogue', () => {
     };
     const issues = validateCatalogue(
       contentCatalogueWith({
-        missions: [INTERCEPTION_01, invalidMission, INTERCEPTION_03],
+        missions: [INTERCEPTION_01, INTERCEPTION_02, invalidMission],
       }),
     );
     expect(
       issues.some(
         (issue) =>
-          issue.path === 'missions[1].encounters' &&
-          /only Mission 01 may carry runtime Arrival Groups/.test(
-            issue.message,
-          ),
+          issue.path === 'missions[2].encounters' &&
+          /must not carry runtime Arrival Groups/.test(issue.message),
       ),
     ).toBe(true);
   });

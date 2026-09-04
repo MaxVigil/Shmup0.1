@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { INTERCEPTION_01, INTERCEPTION_03, MISSIONS } from '@content/index';
-import { resolveMissionEncounters } from './encounter-resolution';
+import { createMissionDataStream } from '@domain/index';
+import {
+  INTERCEPTION_01,
+  INTERCEPTION_02,
+  INTERCEPTION_03,
+  MISSIONS,
+} from '@content/index';
+import {
+  resolveMissionEncounters,
+  type ResolvedSpawnPlacement,
+} from './encounter-resolution';
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const SEED = 0xdeadbeef;
@@ -140,6 +149,90 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
       FIXED_STEP_SECONDS,
     );
     expect(second).toEqual(first);
+  });
+
+  it('resolves the exact Mission 02 Arrival Groups and three mission-data draws in e4 → e5 → e6 order (V02-DEC-026, V02-AC-003)', () => {
+    const seed = SEED;
+    const plan = resolveMissionEncounters(
+      INTERCEPTION_02,
+      seed,
+      FIXED_STEP_SECONDS,
+    );
+    expect(plan.missionId).toBe('interception-02');
+    expect(plan.encounters.map((e) => e.encounterId)).toEqual([
+      'interception-02-e1',
+      'interception-02-e2',
+      'interception-02-e3',
+      'interception-02-e4',
+      'interception-02-e5',
+      'interception-02-e6',
+    ]);
+    expect(plan.encounters.map((e) => e.timeSeconds)).toEqual([
+      10, 50, 100, 150, 200, 260,
+    ]);
+    expect(plan.finalArrivalTimeSeconds).toBe(260);
+    expect(plan.finalArrivalStepIndex).toBe(
+      Math.round(260 / FIXED_STEP_SECONDS),
+    );
+    const step = (seconds: number): number =>
+      Math.round(seconds / FIXED_STEP_SECONDS);
+    // e4: +0 s three Top Basics and +2 s the seeded-side Basic flank.
+    expect(
+      plan.encounters[3]?.staging?.map((group) => group.stepIndex),
+    ).toEqual([step(150), step(152)]);
+    expect(plan.encounters[3]?.staging?.[1]?.members).toHaveLength(1);
+    expect(plan.encounters[3]?.staging?.[1]?.members[0]).toMatchObject({
+      type: 'basic-drone',
+      placement: { kind: 'side', yViewportFraction: 0.25 },
+    });
+    // e5: +0 s Basic, +1 s Ranged, +2 s seeded-side Hunter.
+    expect(
+      plan.encounters[4]?.staging?.map((group) => group.stepIndex),
+    ).toEqual([step(200), step(201), step(202)]);
+    expect(plan.encounters[4]?.staging?.[2]?.members[0]).toMatchObject({
+      type: 'hunter-drone',
+      placement: { kind: 'side', yViewportFraction: 0.2 },
+    });
+    // e6: single 04:20 creation step with both Top Basics plus the Hunter.
+    expect(
+      plan.encounters[5]?.staging?.map((group) => group.stepIndex),
+    ).toEqual([step(260)]);
+    expect(plan.encounters[5]?.staging?.[0]?.members).toHaveLength(3);
+    // Exactly three mission-data draws exist and belong to e4/e5/e6 in order:
+    // the same stream read in authored encounter order maps draw 0 → the e4
+    // flank side, draw 1 → the e5 Hunter side, draw 2 → the e6 Hunter side.
+    // Top-only encounters consume zero draws, so any extra or reordered draw
+    // shifts the mapping below.
+    const stream = createMissionDataStream(seed);
+    const expectedSides: readonly ('upper-left' | 'upper-right')[] = [
+      stream.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
+      stream.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
+      stream.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
+    ];
+    const resolveSide = (
+      placement: ResolvedSpawnPlacement | undefined,
+    ): 'upper-left' | 'upper-right' => {
+      expect(placement?.kind).toBe('side');
+      return placement?.kind === 'side' ? placement.side : 'upper-left';
+    };
+    expect(
+      resolveSide(plan.encounters[3]?.staging?.[1]?.members[0]?.placement),
+    ).toBe(expectedSides[0]);
+    expect(
+      resolveSide(plan.encounters[4]?.staging?.[2]?.members[0]?.placement),
+    ).toBe(expectedSides[1]);
+    expect(
+      resolveSide(plan.encounters[5]?.staging?.[0]?.members[2]?.placement),
+    ).toBe(expectedSides[2]);
+    // Top Placements consumed zero draws: e1–e3 expose no side members and the
+    // staged side members above stayed aligned with exactly the three draws.
+    for (const encounter of plan.encounters.slice(0, 3)) {
+      for (const group of encounter.staging ?? []) {
+        for (const member of group.members) {
+          expect(member.placement.kind).toBe('top');
+        }
+      }
+    }
   });
 
   it('resolves approved seeded entry regions only for seeded encounters', () => {

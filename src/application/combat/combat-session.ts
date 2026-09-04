@@ -23,6 +23,9 @@ export interface CombatSession {
    * current authoritative Combat Hull, then discards the Combat runtime. No
    * reward, recovery, or Mission Result Overlay is produced; Operations opens
    * directly. Retained unexpanded until V02-WI-05 removes the v0.1 seam.
+   * V02-WI-05 C03: once the authoritative terminal result exists or its
+   * persistence is pending/held/frozen, this seam is blocked — it can never
+   * bypass a committed Defeat/Game Over or its Resume-only recovery.
    */
   readonly requestReturnToBase: () => void;
   /**
@@ -162,7 +165,10 @@ export interface CombatSessionInput {
    * `onComplete`. Phaser never calculates a result, mutates Credits/Hull, or
    * touches persistence directly (Epic §13, V02-AC-020). On a committed Success
    * the entry defers the session dispatch until the deterministic exit sequence
-   * completes; on Defeat the v0.1 seam dispatches immediately.
+   * completes; a committed Defeat/Game Over is dispatched by the entry's
+   * lifecycle boundary — immediately when no browser-safety latch is set, or
+   * held behind the explicit Resume-only continuation when the write committed
+   * while the tab was hidden or focus was lost (V02-WI-05 C03, Epic §13.7).
    */
   readonly commitTerminalResult: (
     terminal: CombatTerminalResult,

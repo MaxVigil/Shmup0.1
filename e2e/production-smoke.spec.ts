@@ -219,6 +219,9 @@ test('a natural Defeat resolves once and Continue returns to Operations for the 
   // contacts complete the deterministic natural Defeat at ~147 s.
   await page.mouse.move(400, 480);
 
+  // The natural Defeat commits with zero reward and the paid full Repair
+  // (Epic §12.4): exactly 8 Credits are deducted, Hull becomes 100, and the
+  // v0.2 failure Result Overlay opens (no emergency free recovery remains).
   const dialog = page.getByRole('dialog');
   await expect
     .poll(
@@ -230,17 +233,19 @@ test('a natural Defeat resolves once and Continue returns to Operations for the 
       },
       { timeout: 200000 },
     )
-    .toBe('Mission Failed');
+    .toBe('MISSION FAILED');
   await expect(dialog.getByText('Reward')).toBeVisible();
   await expect(dialog.getByText('0 Credits')).toBeVisible();
+  await expect(dialog.getByText('Repair cost')).toBeVisible();
+  await expect(dialog.getByText('-8 Credits')).toBeVisible();
 
   const continueButton = dialog.getByRole('button', { name: 'Continue' });
   await expect(continueButton).toBeFocused();
   await continueButton.click();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 12')).toBeVisible();
+  await expect(page.getByText('Credits: 4')).toBeVisible();
 
-  // The committed emergency-recovery Hull (25) drives the next mission.
+  // The committed full-Repair Hull (100) drives the next mission.
   await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
@@ -252,7 +257,7 @@ test('a natural Defeat resolves once and Continue returns to Operations for the 
       () => page.locator('.ds-combat-hud__track').getAttribute('aria-valuenow'),
       { timeout: 5000 },
     )
-    .toBe('25');
+    .toBe('100');
 
   expect(pageErrors).toEqual([]);
 });

@@ -283,19 +283,23 @@ test('development Debug Win/Lose enter the normal S12 result flow exactly once (
     timeout: 15000,
   });
 
-  // Lose Mission resolves as a normal Defeat with emergency recovery to 25.
+  // Lose Mission resolves as a v0.2 paid full-Repair Defeat (Epic §12.4,
+  // §13.5): Credits 20 − 8 Repair cost = 12, Hull restored to 100.
   await page.keyboard.press('F1');
   await page.getByRole('button', { name: 'Lose Mission' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Mission Failed' }),
+    page.getByRole('heading', { name: 'MISSION FAILED' }),
   ).toBeVisible();
   await expect(page.getByText('Reward')).toBeVisible();
   await expect(page.getByText('0 Credits')).toBeVisible();
+  await expect(page.getByText('Repair cost')).toBeVisible();
+  await expect(page.getByText('-8 Credits')).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 20')).toBeVisible();
+  await expect(page.getByText('Credits: 12')).toBeVisible();
 
-  // The emergency recovery (25 Hull) drives the next mission's accessible Bar.
+  // The committed full-Repair Hull (100) drives the next mission's accessible
+  // Bar.
   await page.getByRole('button', { name: 'Interception 01' }).click();
   await page.getByRole('button', { name: 'Start Mission' }).click();
   await expect(page.getByTestId('combat-screen')).toBeVisible();
@@ -304,5 +308,5 @@ test('development Debug Win/Lose enter the normal S12 result flow exactly once (
       () => page.locator('.ds-combat-hud__track').getAttribute('aria-valuenow'),
       { timeout: 5000 },
     )
-    .toBe('25');
+    .toBe('100');
 });

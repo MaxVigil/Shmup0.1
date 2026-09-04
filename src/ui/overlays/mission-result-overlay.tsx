@@ -7,12 +7,13 @@ import { Button, Divider, Overlay, Text } from '../primitives';
 
 /**
  * Mission Result Overlay (Base §9.5, S12; v0.2 §15.4, DS §8.26): the only
- * post-Success/Defeat continuation point. Success shows the exact v0.2
- * composition — `MISSION COMPLETE`, Destroyed and Escaped counts, combat
+ * post-Success/affordable-Repair continuation point. Success shows the exact
+ * v0.2 composition — `MISSION COMPLETE`, Destroyed and Escaped counts, combat
  * rewards, completion reward, escape penalties, total Credits earned, and the
  * newly unlocked mission only when one was newly unlocked — then `Continue`.
- * The v0.1 Defeat seam keeps the accepted compatibility presentation until
- * V02-WI-05 replaces it; the seam is never presented as final v0.2 behaviour.
+ * An affordable v0.2 Defeat shows `MISSION FAILED`, `Mission reward 0`, and
+ * the `Repair cost -8 Credits` rows (Epic §15.4); unaffordable Defeat opens
+ * the Game Over Screen instead of this Overlay.
  * Initial focus is `Continue`; `Esc`, Scrim interaction, Base Navigation,
  * Settings, `F`, movement, and firing do not close or bypass it. `Continue`
  * performs navigation/cleanup only — it clears the consumed result boundary
@@ -26,7 +27,11 @@ export function MissionResultOverlay(): ReactElement | null {
     return null;
   }
   const title =
-    result.kind === 'success' ? 'MISSION COMPLETE' : 'Mission Failed';
+    result.kind === 'success'
+      ? 'MISSION COMPLETE'
+      : result.kind === 'defeat'
+        ? 'MISSION FAILED'
+        : 'EVACUATED';
 
   const handleContinue = (): void => {
     const presented = session.missionResult;
@@ -66,12 +71,25 @@ export function MissionResultOverlay(): ReactElement | null {
   );
 }
 
-/** Renders the v0.2 Success breakdown or the v0.1 Defeat seam field rows. */
+/**
+ * Renders the exact v0.2 Result field rows for Success, Evacuation, or an
+ * affordable-Repair Defeat (Epic §15.4). The presented Defeat result exists
+ * only after an affordable full Repair; unaffordable Defeat opens the Game Over
+ * Screen instead of this Overlay. Evacuation freezes the run facts at the
+ * successful Evacuation and never shows a completion reward or unlock.
+ */
 function renderRows(result: PresentedMissionResult): ReactElement[] {
   if (result.kind === 'defeat') {
-    return [<FieldRow key="reward" label="Reward" value="0 Credits" />];
+    return [
+      <FieldRow key="reward" label="Mission reward" value="0 Credits" />,
+      <FieldRow
+        key="repair"
+        label="Repair cost"
+        value={`-${result.repairCostCredits} Credits`}
+      />,
+    ];
   }
-  const rows: ReactElement[] = [
+  const countRows: ReactElement[] = [
     <FieldRow
       key="destroyed"
       label="Destroyed"
@@ -82,6 +100,34 @@ function renderRows(result: PresentedMissionResult): ReactElement[] {
       label="Escaped"
       value={formatRoleCounts(result.escapedCounts)}
     />,
+  ];
+  if (result.kind === 'evacuated') {
+    return [
+      ...countRows,
+      <Divider key="divider-economy" />,
+      <FieldRow
+        key="net-rewards"
+        label="Net combat rewards"
+        value={`+${result.netCombatReward} Credits`}
+      />,
+      <FieldRow
+        key="retained"
+        label="Retained 50%"
+        value={`+${result.creditsEarned} Credits`}
+      />,
+      <FieldRow
+        key="credits-earned"
+        label="Credits earned"
+        value={`${result.creditsEarned} Credits`}
+      />,
+      <Divider key="divider-note" />,
+      <Text key="not-completed" as="p" style="body">
+        Mission not completed
+      </Text>,
+    ];
+  }
+  const rows: ReactElement[] = [
+    ...countRows,
     <Divider key="divider-economy" />,
     <FieldRow
       key="combat-rewards"

@@ -31,7 +31,14 @@ export type SessionAction =
   | { readonly type: 'session/repair' }
   | { readonly type: 'session/equip-weapon'; readonly weapon: WeaponType }
   | { readonly type: 'mission/start'; readonly snapshot: MissionSnapshot }
-  | { readonly type: 'mission/start-failed'; readonly missionId: MissionId }
+  | {
+      readonly type: 'mission/start-failed';
+      readonly missionId: MissionId;
+      /** V02-DEC-031: exact originating durable attempt id. */
+      readonly missionAttemptId: number;
+      /** V02-DEC-031: exact originating session Mission Instance ordinal. */
+      readonly missionInstanceOrdinal: number;
+    }
   | { readonly type: 'mission/start-failure-consumed' }
   | { readonly type: 'mission/result'; readonly result: MissionResult }
   | {
@@ -122,11 +129,25 @@ export function sessionReducer(
         combatLifecycle: RUNNING_COMBAT_LIFECYCLE,
       };
     case 'mission/start-failed':
-      // Combat initialization failure (Base AC-014): no active mission
-      // remains and Base state is unchanged; the failure is signalled with the
-      // originating mission so Operations can reopen its Mission Details with
-      // the approved message (V02-WI-03).
+      // Combat initialization failure (Base AC-014, V02-DEC-031): no active
+      // mission remains and Base state is unchanged; the failure is signalled
+      // with the originating mission so Operations can reopen its Mission
+      // Details with the approved message (V02-WI-03). The action carries the
+      // FULL originating Mission Snapshot identity (mission id, durable attempt
+      // id, and session Mission Instance ordinal); it is accepted only when
+      // the current Active Mission is exactly that snapshot, so a delayed or
+      // duplicated start-failure completion from an older attempt or a
+      // different application instance can never clear or signal a NEWER local
+      // mission/run.
       if (state === null || state.activeMission === 'none') {
+        return state;
+      }
+      if (
+        state.activeMission.missionId !== action.missionId ||
+        state.activeMission.missionAttemptId !== action.missionAttemptId ||
+        state.activeMission.missionInstanceOrdinal !==
+          action.missionInstanceOrdinal
+      ) {
         return state;
       }
       return {
@@ -175,18 +196,31 @@ export function sessionReducer(
         return state;
       }
       if (action.result.kind === 'defeat') {
+        // V02-WI-05 canonical Defeat (Epic §12.4, §13.5–13.6, V02-AC-016): the
+        // atomic campaign transition already deducted the full Repair cost and
+        // restored Hull to 100 when affordable, or entered Game Over without a
+        // partial deduction. This reducer mirrors the pre-committed values and
+        // the durable run status exactly once. An affordable Repair presents
+        // the v0.2 failure Result Overlay; Game Over presents no mission Result
+        // — the Session Router opens the terminal Game Over Screen.
+        const repaired = action.result.runStatusAfter === 'active';
         return {
           ...state,
           activeMission: 'none',
           credits: action.result.creditsAfter,
           hullIntegrity: action.result.hullIntegrityAfter,
-          missionResult: {
-            kind: 'defeat',
-            missionInstanceOrdinal: action.result.missionInstanceOrdinal,
-            creditsEarned: 0,
-          },
+          runStatus: action.result.runStatusAfter,
+          missionResult: repaired
+            ? {
+                kind: 'defeat',
+                missionInstanceOrdinal: action.result.missionInstanceOrdinal,
+                creditsEarned: 0,
+                repairCostCredits: action.result.repairCostCredits,
+              }
+            : null,
           // S13: any open Combat Overlay/lifecycle closes with the mission;
-          // the Mission Result Overlay becomes the only continuation point.
+          // the Mission Result Overlay or Game Over Screen becomes the only
+          // continuation point.
           combatLifecycle: IDLE_COMBAT_LIFECYCLE,
         };
       }
@@ -215,6 +249,31 @@ export function sessionReducer(
             destroyedCounts: action.result.destroyedCounts,
             escapedCounts: action.result.escapedCounts,
             unlockedMissionIdsAfter: [...action.result.unlockedMissionIdsAfter],
+          },
+          combatLifecycle: IDLE_COMBAT_LIFECYCLE,
+        };
+      }
+      if (action.result.kind === 'evacuated') {
+        // V02-WI-05 canonical Evacuation (Epic §12.3, §13.4, V02-AC-015): the
+        // atomic campaign transaction retained the current Combat Hull, added
+        // the floored 50% payout, and changed no progression. The deferred
+        // dispatch happens only after the committed Evacuation exit completes;
+        // this reducer mirrors the pre-committed values and presents the frozen
+        // run facts without re-computing any economy.
+        return {
+          ...state,
+          activeMission: 'none',
+          credits: action.result.creditsAfter,
+          hullIntegrity: action.result.hullIntegrityAfter,
+          missionResult: {
+            kind: 'evacuated',
+            missionInstanceOrdinal: action.result.missionInstanceOrdinal,
+            creditsEarned: action.result.creditsEarned,
+            combatRewards: action.result.combatRewards,
+            escapePenalties: action.result.escapePenalties,
+            netCombatReward: action.result.netCombatReward,
+            destroyedCounts: action.result.destroyedCounts,
+            escapedCounts: action.result.escapedCounts,
           },
           combatLifecycle: IDLE_COMBAT_LIFECYCLE,
         };
@@ -249,9 +308,11 @@ export function sessionReducer(
     case 'combat-lifecycle/open-debug':
     case 'combat-lifecycle/close-debug':
     case 'combat-lifecycle/browser-safety-event':
+    case 'combat-terminal/pending':
     case 'combat-terminal/save-error':
     case 'combat-terminal/save-conflict':
-    case 'combat-terminal/recover': {
+    case 'combat-terminal/recover':
+    case 'combat-start/recovery-error': {
       // S13 lifecycle commands are meaningful only during an Active Mission
       // and are inert before one starts, after it resolves, and while a
       // committed Mission Result is pending (Mission Result remains higher
