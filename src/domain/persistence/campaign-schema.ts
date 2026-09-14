@@ -453,7 +453,7 @@ function parseMissionIdArray(
  * `missionId` is an approved mission id and `attemptId` is a safe
  * non-negative integer issued by the platform-owned non-resetting allocator
  * (never a session ordinal or a replaceable campaign counter). The per-attempt
- * identity is required so a stale failure, Success, Defeat, or Aborted
+ * identity is required so a stale failure, Success, or Defeat
  * callback from an older application instance, attempt, or replaced run can
  * never affect a newer attempt of the same mission.
  */

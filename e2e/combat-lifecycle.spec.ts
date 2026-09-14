@@ -7,9 +7,10 @@ import type { Page } from '@playwright/test';
  * DELIVERY-AC-003). The development project (port 4173) exercises the Debug
  * surface; the production project (port 4174) proves F1 has no effect and the
  * Debug UI is excluded. Blur/visibility/effective-resize safety pause,
- * Settings restoration, Return to Base, refresh reset, and duplicate-canvas/
- * page-error hygiene are covered in both projects. Reducer permutations,
- * pause freeze, held-input hygiene, and Debug transforms are unit-covered.
+ * Settings restoration, the V02-WI-05 E01 removal of the temporary Return to
+ * Base abort, refresh reset, and duplicate-canvas/page-error hygiene are
+ * covered in both projects. Reducer permutations, pause freeze, held-input
+ * hygiene, and Debug transforms are unit-covered.
  */
 const MINIMUM_VIEWPORT = { width: 1280, height: 600 };
 
@@ -41,7 +42,8 @@ test('utility cluster and Pause Button/P/Esc open and resume the Pause Overlay (
   await expect(utility.getByRole('button', { name: 'Settings' })).toBeVisible();
 
   // The Pause Button opens the same Overlay as P/Esc; Resume is the initial
-  // focus and the action row offers Return to Base.
+  // focus and (V02-WI-05 E03) the destructive Evacuate action is the second
+  // action. The v0.1 Return to Base instant-abort action does not exist.
   await utility.getByRole('button', { name: 'Pause' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Paused' })).toBeVisible();
@@ -49,7 +51,9 @@ test('utility cluster and Pause Button/P/Esc open and resume the Pause Overlay (
   await expect(resume).toBeFocused();
   await expect(
     dialog.getByRole('button', { name: 'Return to Base' }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Evacuate' })).toHaveCount(1);
+  await expect(dialog.getByRole('button')).toHaveCount(2);
 
   // Esc resumes the same runtime — no new canvas.
   await page.keyboard.press('Escape');
@@ -71,29 +75,40 @@ test('utility cluster and Pause Button/P/Esc open and resume the Pause Overlay (
   expect(pageErrors).toEqual([]);
 });
 
-test('Return to Base resolves Aborted with no reward and opens Operations directly (Combat AC-037)', async ({
+test('the temporary Return to Base abort path is removed; Pause exposes Resume and the final destructive Evacuate action while the canonical Defeat still resolves (V02-WI-05 E01/E03)', async ({
   page,
 }) => {
   await startCombat(page);
   await page.keyboard.press('KeyP');
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
-  await page.getByRole('button', { name: 'Return to Base' }).click();
+  const dialog = page.getByRole('dialog');
+  // E01 removed the instant-Aborted Return to Base action; E03 delivers the
+  // final v0.2 Pause row: primary Resume (initial focus) plus destructive
+  // Evacuate.
+  await expect(dialog.getByRole('button', { name: 'Resume' })).toBeFocused();
+  await expect(
+    dialog.getByRole('button', { name: 'Return to Base' }),
+  ).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Evacuate' })).toHaveCount(1);
+  await expect(dialog.getByRole('button')).toHaveCount(2);
 
-  // Operations opens directly; no Result Overlay and no reward.
-  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  // Resume closes the Overlay and keeps the mission active (nothing resolves
+  // the mission for free).
+  await dialog.getByRole('button', { name: 'Resume' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByText('Credits: 12')).toBeVisible();
 
-  // The current Combat Hull is retained and the mission is available again.
-  await page.getByRole('button', { name: 'Interception 01' }).click();
-  await page.getByRole('button', { name: 'Start Mission' }).click();
-  await expect(page.getByTestId('combat-screen')).toBeVisible();
-  await expect
-    .poll(
-      () => page.locator('.ds-combat-hud__track').getAttribute('aria-valuenow'),
-      { timeout: 5000 },
-    )
-    .toBe('100');
+  // The canonical v0.2 Defeat terminal (paid full Repair) still resolves the
+  // mission and returns to Operations through the Debug Lose Mission action,
+  // proving the removed free-abort seam is not replaced by any hidden route.
+  await page.keyboard.press('F1');
+  await page.getByRole('button', { name: 'Lose Mission' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'MISSION FAILED' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await expect(page.getByText('Credits: 4')).toBeVisible();
+  await expect(page.locator('canvas')).toHaveCount(0);
 });
 
 test('Combat Settings reuses the shared Overlay, pauses, and resumes on Close (Combat AC-038, AC-063)', async ({
@@ -232,6 +247,48 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
   await expect(
     dialog.getByRole('button', { name: 'Set Hull: 100' }),
   ).toBeDisabled();
+
+  // V02-WI-05 E04 C01: permitted scrolling inside a blocking Overlay stays
+  // native — the inert-content focus containment never cancels pointer defaults.
+  const content = dialog.locator('.ds-overlay__content');
+  const scrollContract = await page.evaluate(() => {
+    const element = document.querySelector('.ds-overlay__content');
+    if (element === null) {
+      return null;
+    }
+    return {
+      overflowY: getComputedStyle(element).overflowY,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    };
+  });
+  expect(scrollContract).not.toBeNull();
+  expect(scrollContract!.overflowY).toBe('auto');
+  expect(scrollContract!.scrollHeight).toBeGreaterThan(
+    scrollContract!.clientHeight,
+  );
+  const contentBox = await content.boundingBox();
+  expect(contentBox).not.toBeNull();
+  if (contentBox !== null) {
+    await page.mouse.move(
+      contentBox.x + contentBox.width / 2,
+      contentBox.y + contentBox.height / 2,
+    );
+    await page.mouse.wheel(0, 160);
+  }
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector('.ds-overlay__content')?.scrollTop ?? 0,
+      ),
+    )
+    .toBeGreaterThan(0);
+  // The pointer interaction does not drop keyboard focus out of the Overlay.
+  expect(
+    await page.evaluate(
+      () => document.activeElement?.closest('[role="dialog"]') !== null,
+    ),
+  ).toBe(true);
 
   // Spawn Standard Enemy adds exactly one drone (Active Enemies +1).
   const activeRow = dialog.locator('.ds-field-row', {

@@ -171,21 +171,123 @@ test('mission start lazily loads the distinct Combat chunk and reaches one canva
   }
 });
 
-test('Return to Base resolves Aborted with no reward and opens Operations directly (Delivery §7.6, Combat AC-037)', async ({
+test('the v0.1 Return to Base abort path is absent in production while the final Evacuate affordances are present (V02-WI-05 E01/E03)', async ({
   page,
 }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto('/');
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await startCombat(page);
 
+  // Active Combat owns the canonical top-right order: destructive text
+  // Evacuate, then the Pause and Settings icon Buttons (DS §8.26).
+  const utility = page.getByTestId('combat-utility');
+  const utilityButtons = utility.getByRole('button');
+  await expect(utilityButtons).toHaveCount(3);
+  await expect(utilityButtons.nth(0)).toHaveText('Evacuate');
+  await expect(utilityButtons.nth(1)).toHaveAttribute('aria-label', 'Pause');
+  await expect(utilityButtons.nth(2)).toHaveAttribute('aria-label', 'Settings');
+
   await page.keyboard.press('KeyP');
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
-  await page.getByRole('button', { name: 'Return to Base' }).click();
+  const dialog = page.getByRole('dialog');
+  const resume = dialog.getByRole('button', { name: 'Resume' });
+  await expect(resume).toBeFocused();
+  // The v0.1 instant-Aborted Return to Base action does not exist; the final
+  // v0.2 Pause row is Resume plus the destructive Evacuate action.
+  await expect(
+    dialog.getByRole('button', { name: 'Return to Base' }),
+  ).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Evacuate' })).toHaveCount(1);
+  await expect(dialog.getByRole('button')).toHaveCount(2);
 
-  await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.getByText('Credits: 12')).toBeVisible();
+  // Esc / Resume still restore running Combat; no free resolution exists.
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
+  expect(pageErrors).toEqual([]);
+});
+
+test('a successful Evacuation resolves once through the production artifact and Continue returns to Operations without completion or unlock (V02-AC-014/015/023)', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await startCombat(page);
+
+  // The production build offers the real destructive Evacuate affordance and the
+  // same blocking confirmation. No development seam (Debug, dev observability,
+  // IndexedDB rewrite) exists or is used in this test.
+  const utility = page.getByTestId('combat-utility');
+  await utility.getByRole('button', { name: 'Evacuate' }).click();
+  const confirmation = page.getByRole('dialog');
+  await expect(
+    confirmation.getByRole('heading', { name: 'Evacuate?' }),
+  ).toBeVisible();
+  await expect(confirmation).toContainText(
+    'Evacuation takes 5 seconds. Combat continues during the countdown.',
+  );
+  await expect(
+    confirmation.getByRole('button', { name: 'Cancel' }),
+  ).toBeFocused();
+  await confirmation
+    .getByRole('button', { name: 'Confirm Evacuation' })
+    .click();
+
+  // The authoritative HUD replacement and the irreversible commitment.
+  const countdown = page.locator('.ds-combat-countdown');
+  await expect(countdown).toHaveText('EVACUATION 00:05');
+  await expect(utility.getByRole('button', { name: 'Evacuate' })).toHaveCount(
+    0,
+  );
+
+  // The exact zero step is reached through the real 300-step countdown and no
+  // result may open at 00:00: the shared exit runs first.
+  await expect
+    .poll(async () => (await countdown.textContent()) ?? '', {
+      timeout: 30000,
+      intervals: [50, 100],
+    })
+    .toBe('EVACUATION 00:00');
+  await expect(page.getByRole('heading', { name: 'EVACUATED' })).toHaveCount(0);
+
+  const result = page.getByRole('dialog');
+  await expect(result.getByRole('heading', { name: 'EVACUATED' })).toBeVisible({
+    timeout: 20000,
+  });
+  await expect(page.getByRole('heading', { name: 'EVACUATED' })).toHaveCount(1);
+  await expect(result).toContainText('Mission not completed');
+  await expect(result.getByText('Completion reward')).toHaveCount(0);
+  await expect(result.getByText('Mission unlocked')).toHaveCount(0);
+  await expect(result.getByText('Mission reward')).toHaveCount(0);
+  const creditsEarnedText = await result
+    .locator('.ds-field-row', { hasText: 'Credits earned' })
+    .textContent();
+  const creditsEarned = Number.parseInt(
+    /\d+/.exec(creditsEarnedText ?? '')?.[0] ?? '',
+    10,
+  );
+  expect(Number.isNaN(creditsEarned)).toBe(false);
+
+  // Continue returns to Operations with no completion, no unlock, and no second
+  // economy mutation: the durable balance equals the single committed payout.
+  await result.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
   await expect(page.locator('canvas')).toHaveCount(0);
+  await expect(page.getByText(`Credits: ${12 + creditsEarned}`)).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Interception 02 (Locked)' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Interception 01 (Completed)' }),
+  ).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
 });
 
 test('a natural Defeat resolves once and Continue returns to Operations for the next mission (Delivery §7.5, Combat AC-010/028–036, MASTER-AC-005)', async ({
@@ -317,7 +419,7 @@ test('runtime requests stay on localhost, request no prohibited asset, and load 
   page.on('request', (request) => requests.push(request.url()));
 
   // Complete golden-path traversal: Boot, Operations, Hangar, Overlays,
-  // Combat, and Return to Base.
+  // Combat, Pause (Resume-only in V02-WI-05 E01), and back to running Combat.
   await page.goto('/');
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await page.getByRole('button', { name: 'Hangar' }).click();
@@ -331,8 +433,9 @@ test('runtime requests stay on localhost, request no prohibited asset, and load 
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await startCombat(page);
   await page.keyboard.press('KeyP');
-  await page.getByRole('button', { name: 'Return to Base' }).click();
-  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
+  await page.getByRole('button', { name: 'Resume' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.waitForLoadState('networkidle');
 
   const origin = new URL(page.url()).origin;
@@ -612,12 +715,31 @@ test('the production artifact is locally servable and hygienic with a distinct l
   }
 });
 
-test('five consecutive aborted missions leave no Combat residue and no persistent memory growth (Combat AC-048, Master §7.10)', async ({
+test('repeated fixed-seed Defeat/Game Over mission cycles leave no Combat residue and no persistent memory growth (V02-WI-05 E01 interim for V02-AC-027)', async ({
   page,
   context,
 }) => {
+  // V02-WI-05 E01: the v0.1 instant-Aborted seam is removed and Evacuation is
+  // not delivered until E02/E03, so a repeated in-page mission cycle can only
+  // end through the canonical terminal outcomes. Each cycle uses the
+  // deterministic fixed-seed natural Defeat (~147 s sim time at the authored
+  // timeline; the explicit budget covers headless full-suite slowdown). The
+  // full five-mission Success/Evacuation/Defeat residue evidence remains owned
+  // by V02-AC-027 once Evacuation exists; this interim keeps the same
+  // in-page warm-up + no-growth contract truthful for the outcomes available.
+  test.setTimeout(900_000);
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.addInitScript((value) => {
+    const original = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+    globalThis.crypto.getRandomValues = (array) => {
+      if (array instanceof Uint32Array) {
+        array.fill(value >>> 0);
+        return array;
+      }
+      return original(array);
+    };
+  }, DEFEAT_SESSION_SEED);
 
   await page.goto('/');
   await expect(page.getByTestId('operations-screen')).toBeVisible();
@@ -626,28 +748,65 @@ test('five consecutive aborted missions leave no Combat residue and no persisten
 
   const baselineHeap = await heapAfterGc(page, context);
   const heapsAfterEach: number[] = [];
-  for (let mission = 1; mission <= 5; mission += 1) {
+
+  /** Starts one mission and parks the aircraft off the auto-fire column so the
+   *  deterministic fixed-seed Ranged/Hunter contact Defeat resolves. */
+  const startDefeatRun = async (): Promise<void> => {
     await startCombat(page);
-    await page.keyboard.press('KeyP');
-    await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
-    await page.getByRole('button', { name: 'Return to Base' }).click();
+    await page.mouse.move(400, 480);
+  };
+
+  /** Waits for the natural Defeat resolution and returns to Operations through
+   *  Continue (affordable Repair) or the confirmed New Game (Game Over). */
+  const resolveDefeatToOperations = async (): Promise<void> => {
+    // Affordable Repair (Credits >= 8) opens the MISSION FAILED Result Overlay;
+    // an unaffordable Defeat opens the terminal Game Over Screen.
+    await expect
+      .poll(
+        async () => {
+          const failed = await page
+            .getByRole('heading', { name: 'MISSION FAILED' })
+            .count();
+          const gameOver = await page.getByTestId('game-over-screen').count();
+          return failed + gameOver;
+        },
+        { timeout: 420000, intervals: [250, 500, 1000] },
+      )
+      .toBeGreaterThan(0);
+    if ((await page.getByTestId('game-over-screen').count()) > 0) {
+      await page.getByRole('button', { name: 'New Game' }).click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await page.getByRole('button', { name: 'Confirm' }).click();
+      await expect(page.getByTestId('operations-screen')).toBeVisible();
+      await expect(page.getByText('Credits: 12')).toBeVisible();
+      return;
+    }
+    await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByTestId('operations-screen')).toBeVisible();
-    await expect(page.locator('canvas')).toHaveCount(0);
-    await expect(page.locator('.ds-combat-hud')).toHaveCount(0);
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    heapsAfterEach.push(await heapAfterGc(page, context));
-  }
-  // Recorded series for evidence: post-Boot baseline then five post-GC values.
+  };
+
+  // Cycle 1: natural Defeat with affordable Repair (12 − 8 → 4 Credits).
+  await startDefeatRun();
+  await resolveDefeatToOperations();
+  await expect(page.locator('canvas')).toHaveCount(0);
+  await expect(page.locator('.ds-combat-hud')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  heapsAfterEach.push(await heapAfterGc(page, context));
+
+  // Cycle 2: a second natural Defeat is unaffordable (4 < 8) and resolves as
+  // Game Over; the confirmed New Game returns to Operations with 12 Credits.
+  await startDefeatRun();
+  await resolveDefeatToOperations();
+  await expect(page.locator('canvas')).toHaveCount(0);
+  await expect(page.locator('.ds-combat-hud')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  heapsAfterEach.push(await heapAfterGc(page, context));
+
+  // Recorded series for evidence: post-Boot baseline then the post-GC values.
   console.log(
     'S14-HEAP-SERIES',
     JSON.stringify({ baselineHeap, heapsAfterEach }),
   );
-
-  // No obsolete Combat-owned DOM survives the fifth Abort.
-  await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.locator('canvas')).toHaveCount(0);
-  await expect(page.locator('.ds-combat-hud')).toHaveCount(0);
-  await expect(page.getByRole('dialog')).toHaveCount(0);
 
   // Bounded heap contract (S14-WI01): the first mission is the lazy-Combat
   // warm-up and legitimately retains the loaded Phaser runtime, so the contract
@@ -679,22 +838,283 @@ async function heapAfterGc(
   return usedSize;
 }
 
+/**
+ * V02-WI-05 E02 C03 Pass B workload-integrity harness (Epic §20.1,
+ * V02-AC-028). The independent review found that this record sampled 1.5 s
+ * after the Combat Countdown reached `00:00` and then measured frame timing
+ * without proving that Combat, the single canvas, the Combat HUD, and the
+ * `00:00` Countdown remained active: the deterministic natural Mission 01 run
+ * resolves Defeat ~4.7 s after the 03:10 final arrival, so the sample could
+ * (and did) contain Base/terminal/Result Overlay frames and still record a
+ * plausible FPS number.
+ *
+ * The corrected harness:
+ * - drives the Aircraft with supported pointer input only — the canonical
+ *   maximum-speed horizontal triangle sweep at `80% VH`, in short bursts
+ *   released by the authored Combat Countdown values `01:28`, `00:45`, and
+ *   `00:00` (the Countdown is the approved player-visible HUD and is derived
+ *   from the mission clock, so the bursts stay aligned to the authored e3/e4/e5
+ *   arrival windows independent of frame-rate load). This is the §9.2/§9.3
+ *   counterplay (displace out of the projected firing line and provoke the
+ *   committed Hunter run), keeps the Aircraft operational through the authored
+ *   e5 window, and uses no Debug/evidence mutation, hidden entity-read API,
+ *   time acceleration, threshold reduction, or smaller workload;
+ * - proves the real Combat Screen, exactly one canvas, the Combat HUD, the
+ *   `00:00` Combat Countdown, and the absence of any terminal/result/Base frame
+ *   before the sample and at the start, middle, and end of the timing sample
+ *   itself (in-page DOM probes inside the sampling loop);
+ * - writes the COMPLETE raw observation — including the invalid-workload
+ *   state — BEFORE any budget assertion can abort the test, so a failing run
+ *   always leaves truthful evidence that `npm run evidence:compare` and
+ *   `npm run evidence:mutation` reject.
+ */
+/** Duration of the pre-sample part of the final-arrival dodge burst (ms). */
+const PASS_B_PRE_SAMPLE_MS = 1500;
+const PASS_B_SAMPLE_WINDOW_MS = 6000;
+const PASS_B_FLIGHT = {
+  /** Aircraft hold/sweep altitude as a fraction of viewport height. */
+  altitudeFraction: 0.8,
+  minWidthFraction: 0.1,
+  maxWidthFraction: 0.9,
+  /** Pointer-move cadence for the sweep (real player-rate input). */
+  moveIntervalMs: 50,
+  /** Canonical maximum Aircraft speed (45% of the viewport short side). */
+  speedRatioPerSecond: 0.45,
+} as const;
+/** The authored Combat Countdown values that release each dodge burst. */
+const PASS_B_BURSTS = [
+  { countdownText: '01:28', durationMs: 5000 },
+  { countdownText: '00:45', durationMs: 5000 },
+  { countdownText: '00:00', durationMs: 8000 },
+] as const;
+/**
+ * The fixed, ordered Pass B observation contract consumed by
+ * `scripts/compare-performance-evidence.mjs`: one pre-sample probe plus the
+ * timing sample's start/middle/end probes. The validator validates each raw
+ * probe's shape and values and derives every accepted workload fact from them.
+ */
+const PASS_B_PROBE_ORDER = [
+  'pre-sample',
+  'sample-start',
+  'sample-mid',
+  'sample-end',
+] as const;
+
+/** The player-visible Combat facts the harness must prove for a valid sample. */
+interface CombatDomProbe {
+  readonly combatScreenVisible: boolean;
+  readonly canvasCount: number;
+  readonly combatHudCount: number;
+  readonly countdownText: string | null;
+  readonly dialogCount: number;
+  readonly resultOverlayCount: number;
+  readonly gameOverScreenCount: number;
+  readonly operationsScreenCount: number;
+}
+
+interface PassBSample {
+  readonly deltas: number[];
+  readonly longTasks: number[];
+  readonly probes: CombatDomProbe[];
+}
+
+/** Reads the approved Combat presentation facts from the real DOM. */
+function combatDomProbeExpression(): CombatDomProbe {
+  const countdown = document.querySelector('.ds-combat-countdown');
+  return {
+    combatScreenVisible:
+      document.querySelector('[data-testid="combat-screen"]') !== null,
+    canvasCount: document.querySelectorAll('canvas').length,
+    combatHudCount: document.querySelectorAll('.ds-combat-hud').length,
+    countdownText: countdown === null ? null : countdown.textContent,
+    dialogCount: document.querySelectorAll('[role="dialog"]').length,
+    resultOverlayCount: document.querySelectorAll('.ds-mission-result-overlay')
+      .length,
+    gameOverScreenCount: document.querySelectorAll(
+      '[data-testid="game-over-screen"]',
+    ).length,
+    operationsScreenCount: document.querySelectorAll(
+      '[data-testid="operations-screen"]',
+    ).length,
+  };
+}
+
+async function readCombatDomProbe(page: Page): Promise<CombatDomProbe> {
+  return page.evaluate(combatDomProbeExpression);
+}
+
+/** Resolves the deterministic supported-input flight-path coordinates. */
+function passBFlightCoordinates(viewport: {
+  readonly width: number;
+  readonly height: number;
+}): {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly y: number;
+  readonly legSeconds: number;
+} {
+  const minX = viewport.width * PASS_B_FLIGHT.minWidthFraction;
+  const maxX = viewport.width * PASS_B_FLIGHT.maxWidthFraction;
+  const y = viewport.height * PASS_B_FLIGHT.altitudeFraction;
+  const speed =
+    Math.min(viewport.width, viewport.height) *
+    PASS_B_FLIGHT.speedRatioPerSecond;
+  return { minX, maxX, y, legSeconds: (maxX - minX) / speed };
+}
+
+function passBSweepX(
+  elapsedSeconds: number,
+  legSeconds: number,
+  minX: number,
+  maxX: number,
+): number {
+  const phase = elapsedSeconds % (2 * legSeconds);
+  const ratio =
+    phase <= legSeconds ? phase / legSeconds : 2 - phase / legSeconds;
+  return minX + (maxX - minX) * ratio;
+}
+
+/**
+ * Runs one dodge burst: a canonical maximum-speed horizontal triangle sweep
+ * between `10%` and `90% VW` at `80% VH`, emitted as real pointer input at a
+ * player-rate cadence for `durationMs`, then released (the Aircraft settles at
+ * the last commanded position and holds it until the next burst).
+ */
+async function runPassBBurst(
+  page: Page,
+  viewport: { readonly width: number; readonly height: number },
+  durationMs: number,
+): Promise<number> {
+  const { minX, maxX, y, legSeconds } = passBFlightCoordinates(viewport);
+  const startedAt = Date.now();
+  let moves = 0;
+  while (Date.now() - startedAt < durationMs) {
+    const elapsedSeconds = (Date.now() - startedAt) / 1000;
+    await page.mouse.move(
+      passBSweepX(elapsedSeconds, legSeconds, minX, maxX),
+      y,
+    );
+    moves += 1;
+    await page.waitForTimeout(PASS_B_FLIGHT.moveIntervalMs);
+  }
+  return moves;
+}
+
+/** Holds the Aircraft at the initial pose while waiting for a Countdown value. */
+async function waitForPassBCountdown(
+  page: Page,
+  expected: string,
+  timeoutMs: number,
+): Promise<{ readonly reached: boolean; readonly probe: CombatDomProbe }> {
+  const deadline = Date.now() + timeoutMs;
+  let probe = await readCombatDomProbe(page);
+  while (Date.now() < deadline) {
+    if (probe.countdownText === expected) {
+      return { reached: true, probe };
+    }
+    if (
+      probe.dialogCount > 0 ||
+      probe.resultOverlayCount > 0 ||
+      probe.gameOverScreenCount > 0 ||
+      probe.operationsScreenCount > 0
+    ) {
+      // A terminal/result/Base frame appeared before the authored arrival the
+      // burst belongs to: stop immediately and record the invalid workload.
+      return { reached: false, probe };
+    }
+    await page.waitForTimeout(200);
+    probe = await readCombatDomProbe(page);
+  }
+  return { reached: false, probe };
+}
+
+/**
+ * Samples the real rendered frames for `sampleMs` while recording the approved
+ * Combat DOM facts at the start, middle, and end of the sample. The probe is
+ * the same `combatDomProbeExpression` fact set; it is inlined because an
+ * in-page probe cannot receive a function argument.
+ */
+async function samplePassBFrames(
+  page: Page,
+  sampleMs: number,
+): Promise<PassBSample> {
+  return page.evaluate(
+    (windowMs) =>
+      new Promise<PassBSample>((resolve) => {
+        const collected: number[] = [];
+        const tasks: number[] = [];
+        const probes: CombatDomProbe[] = [];
+        const probe = (): CombatDomProbe => {
+          const countdown = document.querySelector('.ds-combat-countdown');
+          return {
+            combatScreenVisible:
+              document.querySelector('[data-testid="combat-screen"]') !== null,
+            canvasCount: document.querySelectorAll('canvas').length,
+            combatHudCount: document.querySelectorAll('.ds-combat-hud').length,
+            countdownText: countdown === null ? null : countdown.textContent,
+            dialogCount: document.querySelectorAll('[role="dialog"]').length,
+            resultOverlayCount: document.querySelectorAll(
+              '.ds-mission-result-overlay',
+            ).length,
+            gameOverScreenCount: document.querySelectorAll(
+              '[data-testid="game-over-screen"]',
+            ).length,
+            operationsScreenCount: document.querySelectorAll(
+              '[data-testid="operations-screen"]',
+            ).length,
+          };
+        };
+        const observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            tasks.push(entry.duration);
+          }
+        });
+        observer.observe({ entryTypes: ['longtask'] });
+        probes.push(probe());
+        const start = performance.now();
+        let last = start;
+        let midRecorded = false;
+        const tick = (): void => {
+          const now = performance.now();
+          collected.push(now - last);
+          last = now;
+          const elapsed = now - start;
+          if (!midRecorded && elapsed >= windowMs / 2) {
+            midRecorded = true;
+            probes.push(probe());
+          }
+          if (elapsed < windowMs) {
+            requestAnimationFrame(tick);
+          } else {
+            probes.push(probe());
+            observer.disconnect();
+            resolve({ deltas: collected, longTasks: tasks, probes });
+          }
+        };
+        requestAnimationFrame(tick);
+      }),
+    sampleMs,
+  );
+}
+
 test('records the uninstrumented Mission 01 regular-workload performance record in the production build (V02-AC-028, V02-WI-04 C03 Pass B)', async ({
   page,
   context,
 }) => {
-  // V02-WI-04 C03 Pass B: the ordinary uninstrumented production build owns
-  // frame-time / FPS / long-task / heap / cleanup / request / artifact timing
-  // for the authored e5 encounter (3 Basic + 1 Ranged + 1 Hunter at 1366×768).
-  // The e5 arrives at 190 s under the real-time fixed-step clock, so the
-  // explicit budget covers the wait plus the measurement window. Entity/work
-  // maxima are observed in the separate Pass A instrumented record — this
-  // record never substitutes authored arithmetic for runtime reads.
-  test.setTimeout(470_000);
-  await page.setViewportSize({ width: 1366, height: 768 });
+  // V02-WI-04 C03 Pass B owns frame-time / FPS / long-task / heap / cleanup /
+  // request timing for the authored e5 encounter (3 Basic + 1 Ranged + 1
+  // Hunter at 1366×768) in the ordinary production build. Entity/work maxima
+  // are observed in the separate Pass A instrumented record — this record
+  // never substitutes authored arithmetic for runtime reads.
+  test.setTimeout(560_000);
+  const viewport = { width: 1366, height: 768 };
+  await page.setViewportSize(viewport);
 
   // Deterministic canonical session seed (Technical Foundation §8) fixed
-  // through the browser entropy adapter before navigation.
+  // through the browser entropy adapter before navigation — the SAME fixed seed
+  // that derives the SAME canonical mission seed in the instrumented Pass A
+  // record, so both records describe the identical authored e5 schedule,
+  // placements, and fixed Ranged/Hunter RNG path.
   const sessionSeed = 19023;
   await page.addInitScript((value) => {
     const original = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
@@ -709,12 +1129,16 @@ test('records the uninstrumented Mission 01 regular-workload performance record 
 
   const buildLines: string[] = [];
   const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
   page.on('console', (message) => {
     if (
       message.type() === 'info' &&
       message.text().startsWith('[shmup] build ')
     ) {
       buildLines.push(message.text());
+    }
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text());
     }
   });
   page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -725,56 +1149,107 @@ test('records the uninstrumented Mission 01 regular-workload performance record 
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await startCombat(page);
 
-  // Wait for the authored e5 arrival (190 s) through the ceiling Combat
-  // Countdown reaching 00:00 (Epic §15.2). The budget is load-tolerant: under
-  // headless full-suite load the fixed-step sim can run below 1:1 wall time,
-  // so the poll allows a generous real-time window to reach the deterministic
-  // 03:10 arrival.
-  const countdown = page.locator('.ds-combat-countdown');
-  await expect
-    .poll(async () => countdown.innerText(), {
-      timeout: 420000,
-      intervals: [250, 500, 1000],
-    })
-    .toMatch(/^00:00$/);
+  // The Aircraft starts at its 50% VW / 80% VH hold pose; the flight path only
+  // displaces it in short bursts released by the authored Countdown values.
+  const flightError: { message: string | null } = { message: null };
+  const burstRecords: { countdown: string; moves: number }[] = [];
+  let arrivalReached = false;
+  let arrivalProbe: CombatDomProbe | null = null;
+  let failureProbe: CombatDomProbe | null = null;
+  let preSampleProbe: CombatDomProbe | null = null;
+  let sample: PassBSample | null = null;
+  let sampleWindowMs = 0;
+  let heapBeforeGcBytes: number | null = null;
 
-  // Let the five e5 enemies fully enter and become concurrently active.
-  await page.waitForTimeout(1500);
-
-  // ~6 s frame-time distribution with the five enemies active, plus long
-  // tasks and the pre/post-window GC heap (Chrome-only).
-  const heapBeforeGcBytes = await heapAfterGc(page, context);
-  const windowStart = Date.now();
-  const { deltas, longTasks } = await page.evaluate(
-    () =>
-      new Promise<{ deltas: number[]; longTasks: number[] }>((resolve) => {
-        const collected: number[] = [];
-        const tasks: number[] = [];
-        const observer = new PerformanceObserver((list) => {
-          for (const entry of list.getEntries()) {
-            tasks.push(entry.duration);
-          }
+  for (const burst of PASS_B_BURSTS) {
+    try {
+      const wait = await waitForPassBCountdown(
+        page,
+        burst.countdownText,
+        420_000,
+      );
+      if (!wait.reached) {
+        failureProbe = wait.probe;
+        break;
+      }
+      if (burst.countdownText === '00:00') {
+        // The final-arrival burst is INTERLEAVED with the timing sample: the
+        // Aircraft must keep dodging for the whole sample, and the sample must
+        // be provably active Combat at its start, middle, and end.
+        arrivalReached = true;
+        arrivalProbe = wait.probe;
+        const preSampleMoves = await runPassBBurst(
+          page,
+          viewport,
+          PASS_B_PRE_SAMPLE_MS,
+        );
+        preSampleProbe = await readCombatDomProbe(page);
+        heapBeforeGcBytes = await heapAfterGc(page, context);
+        const burstTask = runPassBBurst(
+          page,
+          viewport,
+          burst.durationMs - PASS_B_PRE_SAMPLE_MS,
+        );
+        const sampleStartedAt = Date.now();
+        sample = await samplePassBFrames(page, PASS_B_SAMPLE_WINDOW_MS);
+        sampleWindowMs = Date.now() - sampleStartedAt;
+        const sampleMoves = await burstTask;
+        burstRecords.push({
+          countdown: burst.countdownText,
+          moves: preSampleMoves + sampleMoves,
         });
-        observer.observe({ entryTypes: ['longtask'] });
-        let last = performance.now();
-        const start = performance.now();
-        const tick = (): void => {
-          const now = performance.now();
-          collected.push(now - last);
-          last = now;
-          if (performance.now() - start < 6000) {
-            requestAnimationFrame(tick);
-          } else {
-            observer.disconnect();
-            resolve({ deltas: collected, longTasks: tasks });
-          }
-        };
-        requestAnimationFrame(tick);
-      }),
-  );
+        break;
+      }
+      burstRecords.push({
+        countdown: burst.countdownText,
+        moves: await runPassBBurst(page, viewport, burst.durationMs),
+      });
+    } catch (error) {
+      flightError.message =
+        error instanceof Error ? error.message : String(error);
+      break;
+    }
+  }
 
-  const heapAfterGcBytes = await heapAfterGc(page, context);
-  const sampleWindowMs = Date.now() - windowStart;
+  const measuredHeapBeforeGcBytes =
+    heapBeforeGcBytes ?? (await heapAfterGc(page, context));
+  const measuredHeapAfterGcBytes =
+    sample === null
+      ? measuredHeapBeforeGcBytes
+      : await heapAfterGc(page, context);
+
+  // Post-run cleanup evidence (Epic §20.1, V02-AC-027; V02-WI-05 E01): the
+  // temporary Return to Base seam is removed, so the running mission is
+  // resolved through the canonical active-mission refresh Defeat recovery
+  // (V02-AC-018) — reloading resolves the persisted marker exactly once and
+  // opens Operations with no Combat entity, canvas, HUD bridge, or overlay
+  // residue. The facts are MEASURED here and asserted only after the raw record
+  // has been written.
+  await page.reload();
+  await page
+    .waitForSelector('[data-testid="operations-screen"]', { timeout: 15000 })
+    .catch(() => null);
+  const cleanup = {
+    operationsVisible: await page.getByTestId('operations-screen').isVisible(),
+    canvasCount: await page.locator('canvas').count(),
+    combatHudCount: await page.locator('.ds-combat-hud').count(),
+    dialogOverlayCount: await page.getByRole('dialog').count(),
+  };
+
+  const deltas = sample?.deltas ?? [];
+  const longTasks = sample?.longTasks ?? [];
+  const rawProbeFacts = [
+    ...(preSampleProbe === null ? [] : [preSampleProbe]),
+    ...(sample?.probes ?? []),
+  ];
+  // The recorded probes carry their fixed contract labels so the evidence
+  // package can validate the exact ordered observation structure. The summary
+  // flags below are reporting conveniences only, derived from the same raw
+  // probes; `npm run evidence:compare` recomputes every fact from the probes.
+  const probes = rawProbeFacts.map((facts, index) => ({
+    label: PASS_B_PROBE_ORDER[index] ?? `unexpected-${index}`,
+    ...facts,
+  }));
   const sorted = [...deltas].sort((a, b) => a - b);
   const percentile = (fraction: number): number =>
     sorted.length === 0
@@ -816,10 +1291,56 @@ test('records the uninstrumented Mission 01 regular-workload performance record 
   const canonicalMissionSeed = fnv1a32(
     `shmup-mvp:rng-v1|${sessionSeed}|combat-mission|0`,
   );
-  expect(canonicalMissionSeed).toBe(609704137);
 
   // C05: evidence ownership — the current control runId + source fingerprint.
   const ownership = readEvidenceOwnership();
+
+  // The workload is ACCEPTED only when the authored `03:10` final arrival was
+  // actually reached and every probe — before the sample, mid-sample, and at the
+  // end of the sample — proved real active Combat with the `00:00` Countdown and
+  // no terminal/result/Base frame. These facts are recorded BEFORE the budget
+  // assertions so a failing run leaves truthful invalid-workload evidence.
+  const combatActiveThroughout =
+    rawProbeFacts.length > 0 &&
+    rawProbeFacts.every(
+      (probe) =>
+        probe.combatScreenVisible &&
+        probe.canvasCount === 1 &&
+        probe.combatHudCount === 1,
+    );
+  const countdownRemainedFinal =
+    rawProbeFacts.length > 0 &&
+    rawProbeFacts.every((probe) => probe.countdownText === '00:00');
+  const terminalOrResultSeen = rawProbeFacts.some(
+    (probe) =>
+      probe.dialogCount > 0 ||
+      probe.resultOverlayCount > 0 ||
+      probe.gameOverScreenCount > 0,
+  );
+  const baseOrOperationsSeen = rawProbeFacts.some(
+    (probe) => probe.operationsScreenCount > 0,
+  );
+  const workloadValidity = {
+    valid:
+      arrivalReached &&
+      flightError.message === null &&
+      sample !== null &&
+      combatActiveThroughout &&
+      countdownRemainedFinal &&
+      !terminalOrResultSeen &&
+      !baseOrOperationsSeen,
+    arrivalReached,
+    flightInputError: flightError.message,
+    combatActiveThroughout,
+    countdownRemainedFinal,
+    terminalOrResultSeen,
+    baseOrOperationsSeen,
+    probeCount: probes.length,
+    probeOrder: [...PASS_B_PROBE_ORDER],
+    probes,
+    arrivalProbe,
+    failureProbe,
+  };
 
   const evidence = {
     label:
@@ -833,9 +1354,30 @@ test('records the uninstrumented Mission 01 regular-workload performance record 
       cpuCount: cpus().length,
       totalMemBytes: totalmem(),
     },
-    viewport: { width: 1366, height: 768 },
+    viewport,
     workload:
-      'Mission 01 natural run to the 03:10 e5 Encounter (3 Basic + 1 Ranged + 1 Hunter) with continuous Machine Gun fire',
+      'Mission 01 authored run to the 03:10 e5 Encounter (3 Basic + 1 Ranged + 1 Hunter) with continuous automatic Machine Gun fire and the deterministic supported-input flight path',
+    workloadIdentity: {
+      description:
+        'The SAME fixed session seed as the instrumented Pass A record derives the SAME canonical mission seed for Mission 01, so the authored e5 Arrival Group, its placed members, and the fixed Ranged/Hunter RNG path are identical; the run is the ordinary production artifact at 1366×768 with continuous automatic Machine Gun fire, and the Combat Countdown reaching 00:00 proves the exact 03:10 final arrival step executed.',
+      sessionSeed,
+      canonicalSeed: canonicalMissionSeed,
+      width: viewport.width,
+      height: viewport.height,
+      productionArtifact: true,
+      continuousAutomaticFire: true,
+    },
+    inputPath: {
+      description:
+        'Supported pointer input only: a canonical maximum-speed horizontal triangle sweep between 10% and 90% VW at 80% VH, in short bursts released by the authored Combat Countdown values 01:28, 00:45, and 00:00; between bursts the Aircraft holds its last commanded pose (starting at the 50% VW / 80% VH pose).',
+      altitudeFraction: PASS_B_FLIGHT.altitudeFraction,
+      minWidthFraction: PASS_B_FLIGHT.minWidthFraction,
+      maxWidthFraction: PASS_B_FLIGHT.maxWidthFraction,
+      speedRatioPerSecond: PASS_B_FLIGHT.speedRatioPerSecond,
+      moveIntervalMs: PASS_B_FLIGHT.moveIntervalMs,
+      bursts: burstRecords,
+    },
+    workloadValidity,
     sessionSeed,
     canonicalSeed: canonicalMissionSeed,
     sampleWindowMs,
@@ -851,59 +1393,21 @@ test('records the uninstrumented Mission 01 regular-workload performance record 
     longTasks: {
       count: longTasks.length,
       maxMs: Number(
-        (
-          longTasks.reduce((max, value) => Math.max(max, value), 0) ?? 0
-        ).toFixed(3),
+        longTasks.reduce((max, value) => Math.max(max, value), 0).toFixed(3),
       ),
     },
-    heapUsedBeforeGcBytes: heapBeforeGcBytes,
-    heapUsedAfterGcBytes: heapAfterGcBytes,
+    heapUsedBeforeGcBytes: measuredHeapBeforeGcBytes,
+    heapUsedAfterGcBytes: measuredHeapAfterGcBytes,
     requestsDuringRun: workloadRequests.length,
-    // C05: evidence ownership — the current control runId + source fingerprint.
+    consoleErrors: consoleErrors.slice(0, 20),
     runId: ownership.runId,
     sourceFingerprint: ownership.sourceFingerprint,
     pageErrors: pageErrors.length,
   };
 
-  // Budget assertions: representative sample size, the 60 FPS / 16.7 ms target
-  // met proportionally, no sustained window below the 50 FPS minimum, and no
-  // page errors.
-  expect(evidence.frameTimeMs.count).toBeGreaterThan(100);
-  expect(evidence.sustainedFps).toBeGreaterThanOrEqual(50);
-  expect(evidence.minimumSustainedWindowFps).toBeGreaterThanOrEqual(50);
-  expect(pageErrors).toEqual([]);
-
-  // Post-run cleanup evidence (Epic §20.1, V02-AC-027): resolve the running
-  // mission to Operations through whichever terminal path is active — a
-  // natural result (the descending e5 group can resolve Defeat after the
-  // sample window) or Pause → Return to Base — and assert no Combat entity,
-  // canvas, HUD bridge, or overlay residue remains.
-  if ((await page.getByRole('dialog').count()) > 0) {
-    await page.getByRole('button', { name: 'Continue' }).click();
-  } else {
-    await page.keyboard.press('KeyP');
-    await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
-    await page.getByRole('button', { name: 'Return to Base' }).click();
-  }
-  await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.locator('canvas')).toHaveCount(0);
-  await expect(page.locator('.ds-combat-hud')).toHaveCount(0);
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-
-  // C05 delta 2: the machine-readable cleanup object is recorded ONLY after
-  // the cleanup assertions above actually passed, measured from the real
-  // post-cleanup state — never pre-authored prose.
-  const cleanup = {
-    operationsVisible: await page.getByTestId('operations-screen').isVisible(),
-    canvasCount: await page.locator('canvas').count(),
-    combatHudCount: await page.locator('.ds-combat-hud').count(),
-    dialogOverlayCount: await page.getByRole('dialog').count(),
-  };
-  expect(cleanup.operationsVisible).toBe(true);
-  expect(cleanup.canvasCount).toBe(0);
-  expect(cleanup.combatHudCount).toBe(0);
-  expect(cleanup.dialogOverlayCount).toBe(0);
-
+  // The raw observation — including the invalid-workload state and every timing
+  // field — is written BEFORE any budget assertion can abort the test, so a
+  // failing run can never leave a plausible-looking record behind.
   mkdirSync(EVIDENCE_DIR, { recursive: true });
   const path = join(
     EVIDENCE_DIR,
@@ -912,4 +1416,34 @@ test('records the uninstrumented Mission 01 regular-workload performance record 
   const finalEvidence = { ...evidence, cleanup };
   writeFileSync(path, `${JSON.stringify(finalEvidence, null, 2)}\n`);
   console.log('V02-WI04-PASS-B-RECORD', JSON.stringify(finalEvidence));
+
+  // ---- Integrity assertions (after the truthful record exists) --------------
+  expect(workloadValidity.arrivalReached).toBe(true);
+  expect(workloadValidity.combatActiveThroughout).toBe(true);
+  expect(workloadValidity.countdownRemainedFinal).toBe(true);
+  expect(workloadValidity.terminalOrResultSeen).toBe(false);
+  expect(workloadValidity.baseOrOperationsSeen).toBe(false);
+  expect(workloadValidity.valid).toBe(true);
+  expect(workloadValidity.probeCount).toBeGreaterThanOrEqual(3);
+  expect(workloadValidity.probes.map((probe) => probe.label)).toEqual([
+    ...PASS_B_PROBE_ORDER,
+  ]);
+  expect(
+    consoleErrors.filter((text) => text.includes('already in use')),
+  ).toEqual([]);
+
+  // ---- Budget assertions (Epic §20.1, V02-AC-028) ---------------------------
+  // Representative sample size, the 50 FPS sustained / minimum-window floor,
+  // and no uncaught page error. The thresholds are unchanged.
+  expect(evidence.frameTimeMs.count).toBeGreaterThan(100);
+  expect(evidence.sustainedFps).toBeGreaterThanOrEqual(50);
+  expect(evidence.minimumSustainedWindowFps).toBeGreaterThanOrEqual(50);
+  expect(pageErrors).toEqual([]);
+
+  // C05 delta 2: the machine-readable cleanup object carries exact zero Combat
+  // residue measured from the real post-cleanup state.
+  expect(cleanup.operationsVisible).toBe(true);
+  expect(cleanup.canvasCount).toBe(0);
+  expect(cleanup.combatHudCount).toBe(0);
+  expect(cleanup.dialogOverlayCount).toBe(0);
 });

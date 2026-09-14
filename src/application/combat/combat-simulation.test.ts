@@ -11,13 +11,20 @@ import {
 } from '@test-support/domain';
 import {
   advanceSimulationFrames,
+  beginEvacuation,
+  buildEvacuationCountdownReadModel,
   createCombatSimulation,
+  evacuationCountdownDisplaySeconds,
+  evacuationEnemyOpacity,
+  EVACUATION_COUNTDOWN_STEPS,
+  EXIT_CENTRE_STEPS,
   FIXED_STEP_SECONDS,
   MAX_STEPS_PER_FRAME,
   stepCombatSimulation,
   submitCombatCommand,
 } from './combat-simulation';
 import type { CombatSimulationState } from './combat-simulation';
+import type { CombatEnemy } from './enemies';
 import type { CombatInputCommand } from './input-command';
 import { brakingDistance, resolveMovementConfig } from './movement-config';
 import { isPointerInsideViewport } from './input-command';
@@ -673,8 +680,8 @@ describe('v0.2 Success exit ordering and timing (Epic §13.3, V02-WI-04 C01)', (
     runtime.submitDebug({ type: 'combat-debug/win-mission' });
     let state = runtime.getState();
     expect(state.terminalResult).toEqual({ kind: 'success' });
-    expect(state.successExitPhase).toBe('centre');
-    expect(state.successExitAuthorized).toBe(false);
+    expect(state.exitPhase).toBe('centre');
+    expect(state.exitAuthorized).toBe(false);
     // Without the commit-authorization seam the exit does not advance at all,
     // even over many frames (gameplay already froze at the terminal step).
     const frozen = runtime.advance(5);
@@ -682,10 +689,10 @@ describe('v0.2 Success exit ordering and timing (Epic §13.3, V02-WI-04 C01)', (
     expect(frozen.aircraft.centerX).toBe(state.aircraft.centerX);
     // The transaction commits Success → the entry authorizes the exit → the
     // centre phase advances from exactly its 30 remaining steps.
-    runtime.authorizeSuccessExit();
+    runtime.authorizeCommittedExit();
     state = runtime.advance(FIXED_STEP_SECONDS);
-    expect(state.successExitAuthorized).toBe(true);
-    expect(state.successExitPhase).toBe('centre');
+    expect(state.exitAuthorized).toBe(true);
+    expect(state.exitPhase).toBe('centre');
     expect(state.exitCentreStepsRemaining).toBe(29);
   });
 
@@ -699,12 +706,12 @@ describe('v0.2 Success exit ordering and timing (Epic §13.3, V02-WI-04 C01)', (
     }
     expect(runtime.getState().aircraft.centerX).toBeGreaterThan(880);
     runtime.submitDebug({ type: 'combat-debug/win-mission' });
-    runtime.authorizeSuccessExit();
+    runtime.authorizeCommittedExit();
     let state = runtime.getState();
     const startCenterX = state.aircraft.centerX;
     for (let index = 0; index < 30; index += 1) {
       state = runtime.advance(FIXED_STEP_SECONDS);
-      expect(state.successExitPhase).toBe('centre');
+      expect(state.exitPhase).toBe('centre');
       expect(state.exitCentreStepsRemaining).toBe(29 - index);
     }
     // After exactly 30 fixed steps the Aircraft reached 50% VW and the centre
@@ -715,7 +722,7 @@ describe('v0.2 Success exit ordering and timing (Epic §13.3, V02-WI-04 C01)', (
     expect(startCenterX).toBeGreaterThan(state.aircraft.centerX);
     const beforeY = state.aircraft.centerY;
     const upward = runtime.advance(FIXED_STEP_SECONDS);
-    expect(upward.successExitPhase).toBe('fly-up');
+    expect(upward.exitPhase).toBe('fly-up');
     expect(upward.aircraft.centerY).toBeLessThan(beforeY);
     expect(upward.aircraft.centerX).toBe(state.aircraft.centerX);
   });
@@ -723,20 +730,575 @@ describe('v0.2 Success exit ordering and timing (Epic §13.3, V02-WI-04 C01)', (
   it('a repeated authorize is inert and the exit completes and dispatches once', () => {
     const runtime = createTestCombatRuntime();
     runtime.submitDebug({ type: 'combat-debug/win-mission' });
-    runtime.authorizeSuccessExit();
-    runtime.authorizeSuccessExit(); // inert
+    runtime.authorizeCommittedExit();
+    runtime.authorizeCommittedExit(); // inert
     let state = runtime.getState();
     // 30 centre steps + 85 fly-up steps fully exit the 1280x600 viewport
     // (48 px tall aircraft at 480 px, 60% VH/s = 6 px/step).
     for (let index = 0; index < 30 + 90; index += 1) {
       state = runtime.advance(FIXED_STEP_SECONDS);
-      if (state.successExitPhase === 'complete') {
+      if (state.exitPhase === 'complete') {
         break;
       }
     }
-    expect(state.successExitPhase).toBe('complete');
+    expect(state.exitPhase).toBe('complete');
     expect(
       state.aircraft.centerY + state.aircraftHeight / 2,
     ).toBeLessThanOrEqual(0);
+  });
+});
+/** V02-WI-05 E02 crafted active Basic fixture at an explicit centre (complete
+ *  rendered bounds from the authoritative state; already entered/activated). */
+function basicAt(
+  state: CombatSimulationState,
+  centerX: number,
+  centerY: number,
+): CombatEnemy {
+  return {
+    id: 0,
+    kind: 'basic',
+    type: 'basic-drone',
+    hullIntegrity: 100,
+    centerX,
+    centerY,
+    width: state.enemyBoundsByType['basic-drone'].width,
+    height: state.enemyBoundsByType['basic-drone'].height,
+    entry: 'top',
+    hasEnteredVisibleArea: true,
+    activated: true,
+    ordinal: 0,
+  };
+}
+
+describe('V02-WI-05 E02 deterministic Evacuation commitment (Epic §13.4, V02-AC-014/015)', () => {
+  it('beginEvacuation records exactly 300 steps once; repeated and post-terminal pure calls are strict no-ops', () => {
+    const fresh = createState();
+    const committed = beginEvacuation(fresh);
+    expect(committed.evacuationStepsRemaining).toBe(EVACUATION_COUNTDOWN_STEPS);
+    expect(committed).not.toBe(fresh);
+    // Already-committed repeated calls are no-ops.
+    expect(beginEvacuation(committed)).toBe(committed);
+    // One executed step decrements exactly once (a duplicated begin would
+    // record 600 and never resolve on the canonical 300th executed step).
+    const afterOne = stepCombatSimulation(committed, FIXED_STEP_SECONDS);
+    expect(afterOne.evacuationStepsRemaining).toBe(
+      EVACUATION_COUNTDOWN_STEPS - 1,
+    );
+    expect(beginEvacuation(afterOne)).toBe(afterOne);
+    // Post-terminal no-op: once the zero step resolved Evacuated, no later
+    // begin can restart or re-arm the commitment.
+    let running = committed;
+    for (let index = 0; index < EVACUATION_COUNTDOWN_STEPS; index += 1) {
+      running = stepCombatSimulation(running, FIXED_STEP_SECONDS);
+    }
+    expect(running.terminalResult).toEqual({ kind: 'evacuated' });
+    expect(beginEvacuation(running)).toBe(running);
+  });
+
+  it('exposes the canonical countdown read model: 300/299/240/1/0 → 5/5/4/1/0 seconds', () => {
+    expect(EVACUATION_COUNTDOWN_STEPS).toBe(300);
+    expect(evacuationCountdownDisplaySeconds(300)).toBe(5);
+    expect(evacuationCountdownDisplaySeconds(299)).toBe(5);
+    expect(evacuationCountdownDisplaySeconds(240)).toBe(4);
+    expect(evacuationCountdownDisplaySeconds(1)).toBe(1);
+    expect(evacuationCountdownDisplaySeconds(0)).toBe(0);
+    expect(evacuationCountdownDisplaySeconds(-7)).toBe(0);
+    const committed = beginEvacuation(createState());
+    expect(buildEvacuationCountdownReadModel(committed)).toEqual({
+      committed: true,
+      remainingSteps: 300,
+      displaySeconds: 5,
+    });
+    const afterOne = stepCombatSimulation(committed, FIXED_STEP_SECONDS);
+    expect(buildEvacuationCountdownReadModel(afterOne)).toEqual({
+      committed: true,
+      remainingSteps: 299,
+      displaySeconds: 5,
+    });
+  });
+
+  it('runtime begin is accepted exactly once; pause freezes the countdown and accepted resize consumes nothing', () => {
+    const runtime = createTestCombatRuntime({ mode: 'keyboard' });
+    runtime.beginEvacuation();
+    expect(runtime.getState().evacuationStepsRemaining).toBe(
+      EVACUATION_COUNTDOWN_STEPS,
+    );
+    runtime.beginEvacuation(); // duplicate relay: strict no-op
+    // Paused lifecycle: frames never execute a step, so no catch-up.
+    runtime.setPaused(true);
+    runtime.advance(10);
+    expect(runtime.getState().evacuationStepsRemaining).toBe(
+      EVACUATION_COUNTDOWN_STEPS,
+    );
+    // Resize reprojects without consuming or resetting the countdown.
+    runtime.submit({
+      type: 'combat/viewport-resize',
+      width: 1500,
+      height: 800,
+      aircraftWidth: AIRCRAFT_WIDTH,
+      aircraftHeight: AIRCRAFT_HEIGHT,
+    });
+    expect(runtime.getState().evacuationStepsRemaining).toBe(
+      EVACUATION_COUNTDOWN_STEPS,
+    );
+    // Resume: the next 1/60 frame decrements exactly once (fresh accumulator).
+    runtime.setPaused(false);
+    runtime.advance(FIXED_STEP_SECONDS);
+    expect(runtime.getState().evacuationStepsRemaining).toBe(
+      EVACUATION_COUNTDOWN_STEPS - 1,
+    );
+    // A disposed runtime ignores every later begin without throwing.
+    runtime.dispose();
+    const after = runtime.getState();
+    runtime.beginEvacuation();
+    expect(runtime.getState()).toBe(after);
+  });
+
+  it('resolves the immutable Evacuated terminal on the exact 300th executed step with Success suppressed throughout', () => {
+    const fresh = createState();
+    // Control: without a commitment this cleared mission would already be a
+    // Success on the first executed step.
+    const ready = {
+      ...fresh,
+      arrivalGroupIndex: fresh.arrivalGroups.length,
+      enemies: [],
+    };
+    expect(
+      stepCombatSimulation(ready, FIXED_STEP_SECONDS).terminalResult,
+    ).toEqual({ kind: 'success' });
+    // The same cleared mission under a commitment never resolves Success —
+    // even before the first countdown step or after every enemy is gone.
+    let committed = beginEvacuation(ready);
+    for (let index = 0; index < EVACUATION_COUNTDOWN_STEPS - 1; index += 1) {
+      committed = stepCombatSimulation(committed, FIXED_STEP_SECONDS);
+      expect(committed.terminalResult).toBeNull();
+    }
+    expect(committed.evacuationStepsRemaining).toBe(1);
+    const resolved = stepCombatSimulation(committed, FIXED_STEP_SECONDS);
+    expect(resolved.evacuationStepsRemaining).toBe(0);
+    expect(resolved.terminalResult).toEqual({ kind: 'evacuated' });
+    // Post-terminal steps change nothing (no second terminal, no movement of
+    // the frozen exit before authorization).
+    expect(stepCombatSimulation(resolved, FIXED_STEP_SECONDS)).toBe(resolved);
+  });
+
+  it('continues due authored spawns and normal movement during the commitment', () => {
+    const fresh = createState();
+    const nextGroup = fresh.arrivalGroups[1];
+    expect(nextGroup).toBeDefined();
+    // Jump mission time to the exact step before the second authored Arrival
+    // Group (the first group is treated as already spawned by the cursor).
+    const committed = beginEvacuation({
+      ...fresh,
+      missionStepCount: nextGroup!.stepIndex - 1,
+      arrivalGroupIndex: 1,
+    });
+    const afterSpawn = stepCombatSimulation(committed, FIXED_STEP_SECONDS);
+    // The due authored group arrived during the commitment, in authored member
+    // count, while the countdown decremented exactly once.
+    expect(afterSpawn.arrivalGroupIndex).toBe(2);
+    expect(afterSpawn.enemies).toHaveLength(nextGroup!.members.length);
+    expect(afterSpawn.evacuationStepsRemaining).toBe(
+      EVACUATION_COUNTDOWN_STEPS - 1,
+    );
+    expect(afterSpawn.terminalResult).toBeNull();
+    // Movement continues: a crafted active enemy inside the countdown window
+    // travels downward while the commitment is still running.
+    const state = beginEvacuation({
+      ...fresh,
+      enemies: [basicAt(fresh, 640, 200)],
+    });
+    const moved = stepCombatSimulation(state, FIXED_STEP_SECONDS);
+    expect(moved.enemies[0]!.centerY).toBeGreaterThan(200);
+    expect(moved.evacuationStepsRemaining).toBe(EVACUATION_COUNTDOWN_STEPS - 1);
+  });
+
+  it('observes normal collision damage and escape economy during the commitment', () => {
+    const fresh = createState();
+    // Regular Basic contact still damages the Aircraft mid-countdown (the
+    // enemy survives; no escape/no penalty; collision work ran before the
+    // terminal evaluation of this step).
+    const contact = beginEvacuation({
+      ...fresh,
+      playerHullIntegrity: 40,
+      enemies: [basicAt(fresh, 640, 480)],
+    });
+    const damaged = stepCombatSimulation(contact, FIXED_STEP_SECONDS);
+    expect(damaged.evacuationStepsRemaining).toBe(
+      EVACUATION_COUNTDOWN_STEPS - 1,
+    );
+    expect(damaged.playerHullIntegrity).toBeLessThan(40);
+    expect(damaged.playerDefeated).toBe(false);
+    expect(damaged.terminalResult).toBeNull();
+    expect(damaged.enemies).toHaveLength(1);
+    // A Basic that fully exits the bottom boundary mid-countdown is a normal
+    // Escaped enemy: it adds its penalty and leaves no active enemy — the
+    // frozen-at-Evacuation rule applies only to enemies active at resolution.
+    const escapee = beginEvacuation({
+      ...fresh,
+      enemies: [
+        {
+          ...basicAt(fresh, 640, 0),
+          centerY:
+            fresh.viewportHeight +
+            fresh.enemyBoundsByType['basic-drone'].height / 2 +
+            4,
+        },
+      ],
+    });
+    const escaped = stepCombatSimulation(escapee, FIXED_STEP_SECONDS);
+    expect(escaped.escapedCountByType['basic-drone']).toBe(1);
+    expect(escaped.pendingEscapePenalties).toBe(1);
+    expect(escaped.enemies).toHaveLength(0);
+    expect(escaped.evacuationStepsRemaining).toBe(
+      EVACUATION_COUNTDOWN_STEPS - 1,
+    );
+    expect(escaped.terminalResult).toBeNull();
+  });
+
+  it('Defeat stays first priority on the exact zero step after real contact damage', () => {
+    const fresh = createState();
+    // The zero step: remaining is 1. The crafted Basic overlaps the Aircraft
+    // and the complete collision/damage work of this step drives Hull to 0, so
+    // Defeat — not Evacuated — must resolve (evaluation-order counter-case).
+    const zeroStep = {
+      ...beginEvacuation(fresh),
+      evacuationStepsRemaining: 1,
+      playerHullIntegrity: 10,
+      enemies: [basicAt(fresh, 640, 480)],
+    };
+    const resolved = stepCombatSimulation(zeroStep, FIXED_STEP_SECONDS);
+    expect(resolved.terminalResult).toEqual({ kind: 'defeat' });
+    expect(resolved.evacuationStepsRemaining).toBe(0);
+    expect(resolved.playerHullIntegrity).toBe(0);
+    // The regular contact never escapes or penalises the enemy at resolution.
+    expect(resolved.enemies).toHaveLength(1);
+    expect(resolved.escapedCountByType['basic-drone']).toBe(0);
+    expect(resolved.pendingEscapePenalties).toBe(0);
+  });
+
+  it('freezes the immutable Evacuated terminal and drives the exact 30-step fade/centre, then the 60% VH/s upward exit', () => {
+    const fresh = createState();
+    // A visible active enemy freezes at resolution (never Escaped, never
+    // penalised) and fades across the shared committed exit.
+    const zeroStep = {
+      ...fresh,
+      evacuationStepsRemaining: 1,
+      enemies: [basicAt(fresh, 640, 150)],
+    };
+    const frozen = stepCombatSimulation(zeroStep, FIXED_STEP_SECONDS);
+    expect(frozen.terminalResult).toEqual({ kind: 'evacuated' });
+    expect(frozen.exitPhase).toBe('centre');
+    expect(frozen.exitCentreStepsRemaining).toBe(EXIT_CENTRE_STEPS);
+    expect(frozen.evacuationStepsRemaining).toBe(0);
+    expect(frozen.escapedCountByType['basic-drone']).toBe(0);
+    expect(frozen.pendingEscapePenalties).toBe(0);
+    expect(frozen.enemies).toHaveLength(1);
+    // Pre-commit freeze: no exit advancement, full opacity, no movement.
+    expect(stepCombatSimulation(frozen, FIXED_STEP_SECONDS)).toBe(frozen);
+    expect(evacuationEnemyOpacity(frozen)).toBe(1);
+    const rewardSnapshot = frozen.pendingCombatRewards;
+    const enemySnapshot = frozen.enemies[0]!;
+
+    // Authorize (the committed campaign write resolved) and run the exact 30
+    // centre steps: Aircraft X lands on 50% VW, Y stays fixed, and the fade
+    // scalar descends from full to exactly zero.
+    let exit = { ...frozen, exitAuthorized: true };
+    for (let index = 1; index <= EXIT_CENTRE_STEPS; index += 1) {
+      exit = stepCombatSimulation(exit, FIXED_STEP_SECONDS);
+      expect(exit.exitPhase).toBe('centre');
+      expect(evacuationEnemyOpacity(exit)).toBeCloseTo(
+        (EXIT_CENTRE_STEPS - index) / EXIT_CENTRE_STEPS,
+        6,
+      );
+    }
+    expect(exit.exitCentreStepsRemaining).toBe(0);
+    expect(exit.aircraft.centerX).toBeCloseTo(exit.viewportWidth * 0.5, 6);
+    expect(exit.aircraft.centerY).toBe(frozen.aircraft.centerY);
+    expect(evacuationEnemyOpacity(exit)).toBe(0);
+    // Fade completes: the enemy surface is at zero opacity and the frozen
+    // entity itself never moved, escaped, or added a penalty.
+    expect(exit.enemies[0]!.id).toBe(enemySnapshot.id);
+    expect(exit.enemies[0]!.centerX).toBe(enemySnapshot.centerX);
+    expect(exit.enemies[0]!.centerY).toBe(enemySnapshot.centerY);
+    expect(exit.pendingCombatRewards).toBe(rewardSnapshot);
+
+    // Fly-up at 60% VH/s: no extra horizontal drift, then complete when the
+    // complete rendered bounds leave the top viewport.
+    const beforeY = exit.aircraft.centerY;
+    const upward = stepCombatSimulation(exit, FIXED_STEP_SECONDS);
+    expect(upward.exitPhase).toBe('fly-up');
+    expect(upward.aircraft.centerY).toBeLessThan(beforeY);
+    expect(upward.aircraft.centerX).toBe(exit.aircraft.centerX);
+    expect(evacuationEnemyOpacity(upward)).toBe(0);
+    let complete = upward;
+    for (
+      let index = 0;
+      index < 400 && complete.exitPhase !== 'complete';
+      index += 1
+    ) {
+      complete = stepCombatSimulation(complete, FIXED_STEP_SECONDS);
+    }
+    expect(complete.exitPhase).toBe('complete');
+    expect(
+      complete.aircraft.centerY + complete.aircraftHeight / 2,
+    ).toBeLessThanOrEqual(0);
+    // No post-terminal gameplay/spawn/collision/economy mutation occurred.
+    expect(complete.enemies).toHaveLength(1);
+    expect(complete.enemies[0]!.id).toBe(enemySnapshot.id);
+    expect(complete.pendingCombatRewards).toBe(rewardSnapshot);
+    expect(complete.escapedCountByType['basic-drone']).toBe(0);
+  });
+
+  it('resize reprojects both Evacuation exit phases without restarting or consuming steps', () => {
+    const fresh = createState();
+    const zeroStep = {
+      ...fresh,
+      evacuationStepsRemaining: 1,
+      enemies: [basicAt(fresh, 640, 150)],
+    };
+    const frozen = stepCombatSimulation(zeroStep, FIXED_STEP_SECONDS);
+    expect(frozen.terminalResult).toEqual({ kind: 'evacuated' });
+    // Advance 10 of the 30 centre steps, then resize.
+    let mid = { ...frozen, exitAuthorized: true };
+    for (let index = 0; index < 10; index += 1) {
+      mid = stepCombatSimulation(mid, FIXED_STEP_SECONDS);
+    }
+    expect(mid.exitCentreStepsRemaining).toBe(EXIT_CENTRE_STEPS - 10);
+    expect(mid.aircraft.centerY).toBe(frozen.aircraft.centerY);
+    const resizeCommand = {
+      type: 'combat/viewport-resize',
+      width: 1500,
+      height: 800,
+      aircraftWidth: AIRCRAFT_WIDTH,
+      aircraftHeight: AIRCRAFT_HEIGHT,
+    } as const;
+    const resizedCentre = submitCombatCommand(mid, resizeCommand);
+    // Phase, remaining steps, resolved terminal, and the frozen enemy survive.
+    expect(resizedCentre.exitPhase).toBe('centre');
+    expect(resizedCentre.exitCentreStepsRemaining).toBe(EXIT_CENTRE_STEPS - 10);
+    expect(resizedCentre.terminalResult).toEqual({ kind: 'evacuated' });
+    expect(resizedCentre.evacuationStepsRemaining).toBe(0);
+    expect(resizedCentre.enemies[0]!.id).toBe(mid.enemies[0]!.id);
+    const continued = stepCombatSimulation(resizedCentre, FIXED_STEP_SECONDS);
+    expect(continued.exitCentreStepsRemaining).toBe(EXIT_CENTRE_STEPS - 11);
+
+    // Resize during the upward phase reprojects geometry and continues to
+    // complete without restarting the exit.
+    let flying = continued;
+    for (let index = 0; index < 30; index += 1) {
+      flying = stepCombatSimulation(flying, FIXED_STEP_SECONDS);
+    }
+    expect(flying.exitPhase).toBe('fly-up');
+    const resizedFlying = submitCombatCommand(flying, {
+      type: 'combat/viewport-resize',
+      width: 1600,
+      height: 900,
+      aircraftWidth: AIRCRAFT_WIDTH,
+      aircraftHeight: AIRCRAFT_HEIGHT,
+    });
+    expect(resizedFlying.exitPhase).toBe('fly-up');
+    expect(resizedFlying.aircraft.centerY).toBeCloseTo(
+      flying.aircraft.centerY * (900 / 800),
+      6,
+    );
+    let complete = resizedFlying;
+    for (
+      let index = 0;
+      index < 400 && complete.exitPhase !== 'complete';
+      index += 1
+    ) {
+      complete = stepCombatSimulation(complete, FIXED_STEP_SECONDS);
+    }
+    expect(complete.exitPhase).toBe('complete');
+    expect(complete.enemies).toHaveLength(1);
+  });
+
+  it('resolves Evacuated through the runtime after exactly 300 executed frames and keeps a later begin inert', () => {
+    const runtime = createTestCombatRuntime();
+    runtime.beginEvacuation();
+    // Mission 01's first authored Arrival Group is due after the 300-step
+    // window, so the operational Aircraft survives and resolves Evacuated on
+    // the exact 300th executed step.
+    let state = runtime.getState();
+    for (let index = 0; index < EVACUATION_COUNTDOWN_STEPS; index += 1) {
+      state = runtime.advance(FIXED_STEP_SECONDS);
+      expect(state.evacuationStepsRemaining).toBe(
+        EVACUATION_COUNTDOWN_STEPS - 1 - index,
+      );
+      if (index < EVACUATION_COUNTDOWN_STEPS - 1) {
+        expect(state.terminalResult).toBeNull();
+      }
+    }
+    expect(state.terminalResult).toEqual({ kind: 'evacuated' });
+    expect(state.exitPhase).toBe('centre');
+    expect(state.exitCentreStepsRemaining).toBe(EXIT_CENTRE_STEPS);
+    // Post-terminal runtime begin is a strict no-op.
+    const frozen = runtime.getState();
+    runtime.beginEvacuation();
+    expect(runtime.getState()).toBe(frozen);
+  });
+});
+
+describe('V02-WI-05 E02 C01 committed-exit resize continuity (Epic §13.3–13.4)', () => {
+  const resizeLate = {
+    type: 'combat/viewport-resize',
+    width: 1500,
+    height: 800,
+    aircraftWidth: AIRCRAFT_WIDTH,
+    aircraftHeight: AIRCRAFT_HEIGHT,
+  } as const;
+  const resizeFinal = {
+    type: 'combat/viewport-resize',
+    width: 1600,
+    height: 900,
+    aircraftWidth: AIRCRAFT_WIDTH,
+    aircraftHeight: AIRCRAFT_HEIGHT,
+  } as const;
+
+  it('keeps a late Success fly-up and complete phase proportional instead of clamping back into gameplay bounds', () => {
+    const fresh = createState();
+    const ready = {
+      ...fresh,
+      arrivalGroupIndex: fresh.arrivalGroups.length,
+      enemies: [],
+    };
+    const success = stepCombatSimulation(ready, FIXED_STEP_SECONDS);
+    expect(success.terminalResult).toEqual({ kind: 'success' });
+    // Authorize + 30 centre steps + enough fly-up steps to climb above the
+    // gameplay movement bounds (centre Y < bounds.minY) but not yet complete.
+    let exit = { ...success, exitAuthorized: true };
+    for (let index = 0; index < EXIT_CENTRE_STEPS; index += 1) {
+      exit = stepCombatSimulation(exit, FIXED_STEP_SECONDS);
+    }
+    for (let index = 0; index < 80; index += 1) {
+      exit = stepCombatSimulation(exit, FIXED_STEP_SECONDS);
+    }
+    expect(exit.exitPhase).toBe('fly-up');
+    expect(exit.aircraft.centerY).toBeLessThan(exit.bounds.minY);
+    const beforeY = exit.aircraft.centerY;
+    const beforeX = exit.aircraft.centerX;
+
+    const resized = submitCombatCommand(exit, resizeLate);
+    // Proportional reprojection: Y scales (no clamp back down into the bounds)
+    // while phase, terminal payload, authorization, and counters survive.
+    expect(resized.exitPhase).toBe('fly-up');
+    expect(resized.aircraft.centerY).toBeCloseTo(beforeY * (800 / 600), 6);
+    expect(resized.aircraft.centerX).toBeCloseTo(beforeX * (1500 / 1280), 6);
+    expect(resized.aircraft.centerY).toBeLessThan(resized.bounds.minY);
+    expect(resized.terminalResult).toEqual({ kind: 'success' });
+    expect(resized.exitAuthorized).toBe(true);
+    expect(resized.exitCentreStepsRemaining).toBe(0);
+    expect(resized.enemies).toHaveLength(0);
+
+    // The upward flight continues to complete after the resize.
+    let done = resized;
+    for (
+      let index = 0;
+      index < 200 && done.exitPhase !== 'complete';
+      index += 1
+    ) {
+      done = stepCombatSimulation(done, FIXED_STEP_SECONDS);
+    }
+    expect(done.exitPhase).toBe('complete');
+
+    // A further resize on the complete phase stays proportional and complete.
+    const finalResized = submitCombatCommand(done, resizeFinal);
+    expect(finalResized.exitPhase).toBe('complete');
+    expect(finalResized.aircraft.centerY).toBeCloseTo(
+      done.aircraft.centerY * (900 / 800),
+      6,
+    );
+    expect(finalResized.terminalResult).toEqual({ kind: 'success' });
+  });
+
+  it('keeps a late Evacuation fly-up proportional and preserves the frozen entities/economy across resize', () => {
+    const fresh = createState();
+    const zeroStep = {
+      ...fresh,
+      evacuationStepsRemaining: 1,
+      enemies: [basicAt(fresh, 640, 150)],
+    };
+    const frozen = stepCombatSimulation(zeroStep, FIXED_STEP_SECONDS);
+    expect(frozen.terminalResult).toEqual({ kind: 'evacuated' });
+    let exit = { ...frozen, exitAuthorized: true };
+    for (let index = 0; index < EXIT_CENTRE_STEPS; index += 1) {
+      exit = stepCombatSimulation(exit, FIXED_STEP_SECONDS);
+    }
+    for (let index = 0; index < 80; index += 1) {
+      exit = stepCombatSimulation(exit, FIXED_STEP_SECONDS);
+    }
+    expect(exit.exitPhase).toBe('fly-up');
+    expect(exit.aircraft.centerY).toBeLessThan(exit.bounds.minY);
+    const enemyBefore = exit.enemies[0]!;
+    const rewardsBefore = exit.pendingCombatRewards;
+
+    const resized = submitCombatCommand(exit, resizeLate);
+    expect(resized.exitPhase).toBe('fly-up');
+    expect(resized.aircraft.centerY).toBeCloseTo(
+      exit.aircraft.centerY * (800 / 600),
+      6,
+    );
+    expect(resized.aircraft.centerY).toBeLessThan(resized.bounds.minY);
+    expect(resized.terminalResult).toEqual({ kind: 'evacuated' });
+    expect(resized.exitAuthorized).toBe(true);
+    expect(resized.exitCentreStepsRemaining).toBe(0);
+    expect(resized.evacuationStepsRemaining).toBe(0);
+    // The frozen enemy surface and the immutable economy survive the resize.
+    expect(resized.enemies[0]!.id).toBe(enemyBefore.id);
+    expect(resized.enemies[0]!.centerY).toBeCloseTo(
+      enemyBefore.centerY * (800 / 600),
+      6,
+    );
+    expect(resized.pendingCombatRewards).toBe(rewardsBefore);
+    expect(resized.escapedCountByType['basic-drone']).toBe(0);
+
+    let done = resized;
+    for (
+      let index = 0;
+      index < 200 && done.exitPhase !== 'complete';
+      index += 1
+    ) {
+      done = stepCombatSimulation(done, FIXED_STEP_SECONDS);
+    }
+    expect(done.exitPhase).toBe('complete');
+    const finalResized = submitCombatCommand(done, resizeFinal);
+    expect(finalResized.exitPhase).toBe('complete');
+    expect(finalResized.aircraft.centerY).toBeCloseTo(
+      done.aircraft.centerY * (900 / 800),
+      6,
+    );
+    expect(finalResized.enemies[0]!.id).toBe(enemyBefore.id);
+    expect(finalResized.pendingCombatRewards).toBe(rewardsBefore);
+  });
+});
+
+describe('V02-WI-05 E02 C01 authorizeCommittedExit guard (Epic §13.3–13.5)', () => {
+  it('never authorizes the exit before a terminal or for a frozen Defeat', () => {
+    const runtime = createTestCombatRuntime();
+    // Premature: no terminal exists yet — the commit gate must hold.
+    runtime.authorizeCommittedExit();
+    expect(runtime.getState().exitAuthorized).toBe(false);
+    expect(runtime.getState().exitPhase).toBe('none');
+    // A frozen Defeat has no exit sequence; authorization stays inert.
+    runtime.submitDebug({ type: 'combat-debug/lose-mission' });
+    expect(runtime.getState().terminalResult).toEqual({ kind: 'defeat' });
+    runtime.authorizeCommittedExit();
+    expect(runtime.getState().exitAuthorized).toBe(false);
+    expect(runtime.getState().exitPhase).toBe('none');
+    // Frames after the Defeat still never animate an exit.
+    runtime.advance(60);
+    expect(runtime.getState().aircraft.centerY).toBe(480);
+  });
+
+  it('authorizes exactly once for a frozen committed Success terminal', () => {
+    const runtime = createTestCombatRuntime();
+    runtime.submitDebug({ type: 'combat-debug/win-mission' });
+    expect(runtime.getState().terminalResult).toEqual({ kind: 'success' });
+    expect(runtime.getState().exitAuthorized).toBe(false);
+    runtime.authorizeCommittedExit();
+    expect(runtime.getState().exitAuthorized).toBe(true);
+    runtime.authorizeCommittedExit(); // inert
+    expect(runtime.getState().exitAuthorized).toBe(true);
   });
 });

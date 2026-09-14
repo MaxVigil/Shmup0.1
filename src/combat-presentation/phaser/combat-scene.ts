@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import {
+  buildEvacuationCountdownReadModel,
+  evacuationEnemyOpacity,
   routeKeyInput,
   shouldForwardPointerMove,
   type CombatEnemy,
@@ -14,6 +16,7 @@ import type { CombatGeometry } from '../presentation-config/combat-config';
 import {
   COMBAT_RENDER_DEPTH,
   formatCombatCountdown,
+  formatEvacuationCountdown,
   resolveCombatGeometry,
 } from '../presentation-config/combat-config';
 import {
@@ -90,8 +93,24 @@ export class CombatScene extends Phaser.Scene {
     EnemyVisualKind,
     EnemyVisualResolution
   >();
-  /** True once the prepared texture for a kind is registered (no late swap). */
-  private readonly enemyTexturesReady = new Set<EnemyVisualKind>();
+  /**
+   * V02-WI-05 E02 C03 single-flight prepared-texture lifecycle per kind:
+   * absent = not started, `decoding` = exactly one in-flight decode and one
+   * eventual registration attempt, `ready` = registered for the session,
+   * `fallback` = stable session fallback after a decode/registration failure.
+   * A later render frame never starts a second decode, reassigns the prepared
+   * data URI, or re-registers the texture (`V02-AC-025`).
+   */
+  private readonly enemyTextureStates = new Map<
+    EnemyVisualKind,
+    'decoding' | 'ready' | 'fallback'
+  >();
+  /** The ONE in-flight decoded element per kind, detached on scene shutdown so
+   *  a late completion can never register a texture or retain a callback. */
+  private readonly enemyTextureDecodes = new Map<
+    EnemyVisualKind,
+    HTMLImageElement
+  >();
   /** Read-only stable-ID visual map for enemy (Ranged) projectiles (v0.2 §9.2). */
   private readonly enemyProjectileVisuals = new Map<
     number,
@@ -119,7 +138,10 @@ export class CombatScene extends Phaser.Scene {
     // may be disposed while a callback is pending, so Combat-owned callbacks
     // must not dereference Phaser objects after destruction (Repository
     // Architecture §9 cleanup).
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    const handleDisposal = (): void => {
+      if (this.isShuttingDown) {
+        return;
+      }
       this.isShuttingDown = true;
       // Enemy, destroyed-enemy-feedback, and projectile visuals are
       // scene-owned and destroyed with it; the maps are cleared so no stale
@@ -129,8 +151,23 @@ export class CombatScene extends Phaser.Scene {
       this.projectileVisuals.clear();
       this.enemyProjectileVisuals.clear();
       this.aircraftFlashActive = false;
+      // A decode that is still in flight must not complete after disposal: the
+      // scene-owned callbacks are detached so a late load/error can neither
+      // register a texture on a destroyed scene nor retain a resource.
+      for (const image of this.enemyTextureDecodes.values()) {
+        image.onload = null;
+        image.onerror = null;
+      }
+      this.enemyTextureDecodes.clear();
+      this.enemyTextureStates.clear();
       this.removeCombatListeners();
-    });
+    };
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, handleDisposal);
+    // V02-WI-05 E02 C03: `game.destroy()` destroys scenes through
+    // `Systems.destroy`, which emits DESTROY (not SHUTDOWN), so the same
+    // scene-owned cleanup must also own the disposal path; the handler is
+    // idempotent through `isShuttingDown`.
+    this.events.once(Phaser.Scenes.Events.DESTROY, handleDisposal);
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleScaleResize, this);
     this.registerCombatListeners();
     this.cameras.main.setBackgroundColor(this.geometry.backgroundColor);
@@ -383,8 +420,17 @@ export class CombatScene extends Phaser.Scene {
       return;
     }
     const { enemies, activeEnemyFlashStepsRemaining } = this.simState;
+    // V02-WI-05 E02: one simulation-owned scalar drives every active enemy's
+    // opacity (full during normal Combat and the frozen pre-commit Evacuation
+    // terminal; `remaining / 30` across the exact 30 committed centre steps).
+    // A fully faded enemy surface is removed/inert (never re-created), exactly
+    // as Epic §13.4 requires after the fade completes.
+    const opacity = evacuationEnemyOpacity(this.simState);
     const seen = new Set<number>();
     for (const enemy of enemies) {
+      if (opacity <= 0) {
+        continue;
+      }
       seen.add(enemy.id);
       const kind = enemyVisualKindForType(enemy.type);
       const resolution = this.enemyVisualResolutions.get(kind);
@@ -394,16 +440,16 @@ export class CombatScene extends Phaser.Scene {
       const flashing = (activeEnemyFlashStepsRemaining[enemy.id] ?? 0) > 0;
       if (resolution.status === 'ready') {
         this.ensureEnemyTexture(kind, resolution);
-        if (!this.enemyTexturesReady.has(kind)) {
+        if (this.enemyTextureStates.get(kind) !== 'ready') {
           // The prepared texture is still decoding: render the stable fallback
           // geometry (the session resolution is already fixed to `ready`).
-          this.upsertFallbackEnemyVisual(enemy, kind, flashing);
+          this.upsertFallbackEnemyVisual(enemy, kind, flashing, opacity);
           continue;
         }
-        this.upsertImageEnemyVisual(enemy, kind, flashing);
+        this.upsertImageEnemyVisual(enemy, kind, flashing, opacity);
         continue;
       }
-      this.upsertFallbackEnemyVisual(enemy, kind, flashing);
+      this.upsertFallbackEnemyVisual(enemy, kind, flashing, opacity);
     }
     for (const [id, visual] of this.enemyVisuals) {
       if (!seen.has(id)) {
@@ -413,36 +459,75 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
-  /** Registers the prepared enemy texture exactly once per kind when ready. */
+  /**
+   * Starts the ONE prepared-texture decode and registration attempt for a kind
+   * (V02-WI-05 E02 C03, `V02-AC-025`). The per-kind state is single-flight:
+   * while a decode is pending, later render frames observe `decoding` and never
+   * create another `Image`, assign the prepared data URI again, or call
+   * `textures.addImage` again. An already registered prepared texture is reused
+   * for the session without a new decode, and a decode or registration failure
+   * settles permanently into the approved procedural fallback (no per-frame
+   * retry, no late swap).
+   */
   private ensureEnemyTexture(
     kind: EnemyVisualKind,
     resolution: Extract<EnemyVisualResolution, { readonly status: 'ready' }>,
   ): void {
-    if (this.enemyTexturesReady.has(kind)) {
+    if (this.enemyTextureStates.has(kind)) {
       return;
     }
     const key = enemyTextureKey(kind);
     if (this.textures.exists(key)) {
-      this.enemyTexturesReady.add(kind);
+      this.enemyTextureStates.set(kind, 'ready');
       return;
     }
+    this.enemyTextureStates.set(kind, 'decoding');
     const image = new Image();
-    const onLoad = (): void => {
+    this.enemyTextureDecodes.set(kind, image);
+    const settle = (state: 'ready' | 'fallback'): void => {
+      // V02-WI-05 E02 C04: EVERY terminal outcome — successful registration,
+      // decode error, or registration failure — detaches both scene-owned
+      // callbacks BEFORE the in-flight owner is released. Phaser retains the
+      // element of a successful registration as the texture source, so a
+      // retained `onload`/`onerror` closure would keep the disposed
+      // `CombatScene` reachable after shutdown/disposal.
+      image.onload = null;
+      image.onerror = null;
+      if (
+        this.isShuttingDown ||
+        this.enemyTextureStates.get(kind) !== 'decoding'
+      ) {
+        // Scene shutdown already detached this decode; a late completion stays
+        // inert and leaves no scene-owned callback or resource behind.
+        return;
+      }
+      this.enemyTextureDecodes.delete(kind);
+      this.enemyTextureStates.set(kind, state);
+    };
+    image.onload = () => {
       if (this.isShuttingDown) {
         return;
       }
-      if (this.textures.addImage(key, image) === null) {
-        // Registration failure falls back to the approved procedural geometry
-        // for the remainder of the session; no second request is issued.
-        return;
-      }
-      this.enemyTexturesReady.add(kind);
+      // A throwing Phaser registration boundary is the same stable session
+      // fallback as a `null` registration result; no retry is attempted.
+      const registered = this.registerEnemyTexture(key, image);
+      settle(registered ? 'ready' : 'fallback');
     };
-    image.onload = onLoad;
-    image.onerror = () => {
-      // The prepared URL failed after Boot settled: the fallback stays fixed.
-    };
+    image.onerror = () => settle('fallback');
     image.src = resolution.url;
+  }
+
+  /**
+   * Registers one decoded prepared enemy texture (V02-WI-05 E02 C04). A Phaser
+   * registration boundary that returns `null` or throws is reported as the same
+   * stable fallback; no second attempt is made.
+   */
+  private registerEnemyTexture(key: string, image: HTMLImageElement): boolean {
+    try {
+      return this.textures.addImage(key, image) !== null;
+    } catch {
+      return false;
+    }
   }
 
   /** Renders one enemy as the prepared image (texture already registered). */
@@ -450,6 +535,7 @@ export class CombatScene extends Phaser.Scene {
     enemy: CombatEnemy,
     kind: EnemyVisualKind,
     flashing: boolean,
+    opacity: number,
   ): void {
     const key = enemyTextureKey(kind);
     const existing = this.enemyVisuals.get(enemy.id);
@@ -469,6 +555,7 @@ export class CombatScene extends Phaser.Scene {
     }
     visual.setPosition(enemy.centerX, enemy.centerY);
     visual.setDisplaySize(enemy.width, enemy.height);
+    visual.setAlpha(opacity);
     if (flashing) {
       visual.setTint(hexToNumber(this.geometry.enemyFlashColor));
     } else {
@@ -481,6 +568,7 @@ export class CombatScene extends Phaser.Scene {
     enemy: CombatEnemy,
     kind: EnemyVisualKind,
     flashing: boolean,
+    opacity: number,
   ): void {
     const existing = this.enemyVisuals.get(enemy.id);
     if (
@@ -497,6 +585,7 @@ export class CombatScene extends Phaser.Scene {
       visual.setDepth(COMBAT_RENDER_DEPTH.enemy);
       this.enemyVisuals.set(enemy.id, visual);
     }
+    visual.setAlpha(opacity);
     const resolution = this.enemyVisualResolutions.get(kind);
     const geometry =
       resolution?.status === 'ready' ? undefined : resolution?.geometry;
@@ -643,8 +732,15 @@ export class CombatScene extends Phaser.Scene {
       return;
     }
     const { enemyProjectiles } = this.simState;
+    // V02-WI-05 E02: the same simulation-owned scalar drives every active
+    // enemy-projectile opacity across the committed Evacuation fade; a fully
+    // faded projectile surface is removed/inert (never re-created).
+    const opacity = evacuationEnemyOpacity(this.simState);
     const seen = new Set<number>();
     for (const projectile of enemyProjectiles) {
+      if (opacity <= 0) {
+        continue;
+      }
       seen.add(projectile.id);
       let visual = this.enemyProjectileVisuals.get(projectile.id);
       if (visual === undefined) {
@@ -663,6 +759,7 @@ export class CombatScene extends Phaser.Scene {
         visual.setPosition(projectile.centerX, projectile.centerY);
         visual.setSize(projectile.width, projectile.height);
       }
+      visual.setAlpha(opacity);
     }
     for (const [id, visual] of this.enemyProjectileVisuals) {
       if (!seen.has(id)) {
@@ -763,6 +860,13 @@ export class CombatScene extends Phaser.Scene {
     // Hull, Countdown, and Critical Hull state every rendered frame so the bar
     // width, fill, aria-valuenow, countdown text, and warning change in the
     // same frame as the simulation — without any React per-frame state.
+    // V02-WI-05 E03 (Epic §13.4 step 5, V02-AC-014, DS §8.26): once the E02
+    // commitment is recorded, this ONE canonical Countdown element displays the
+    // Evacuation Countdown sourced only from the authoritative read model; the
+    // Combat Countdown is replaced, never rendered beside it. Paused frames do
+    // not advance the simulation, so the displayed value freezes and resumes
+    // with the same authoritative state. The scene owns no timer.
+    const evacuation = buildEvacuationCountdownReadModel(this.simState);
     this.context.bridge.update({
       aircraftCenterX: centerX,
       aircraftBottomY: centerY + this.geometry.aircraftHeightPx / 2,
@@ -773,7 +877,9 @@ export class CombatScene extends Phaser.Scene {
       // Strict-below-25 danger fill (v0.2 §15.3, DS §8.26): at 25 it is accent.
       hullDanger: this.simState.playerHullIntegrity < 25,
       viewportShortSide: this.geometry.shortSide,
-      countdownText: formatCombatCountdown(this.simState.countdownSeconds),
+      countdownText: evacuation.committed
+        ? formatEvacuationCountdown(evacuation.displaySeconds)
+        : formatCombatCountdown(this.simState.countdownSeconds),
       criticalHullVisible: this.simState.criticalHullMessageStepsRemaining > 0,
     });
   }

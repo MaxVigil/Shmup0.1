@@ -29,7 +29,7 @@ interface AircraftSample {
 /** Derives the authoritative aircraft centre from the Hull bar rect. */
 function readAircraft(page: Page): Promise<AircraftSample | null> {
   return page.evaluate(() => {
-    const hud = document.querySelector('.ds-combat-hud');
+    const hud = document.querySelector('.ds-combat-hud__bar');
     if (hud === null) {
       return null;
     }

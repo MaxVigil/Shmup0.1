@@ -76,7 +76,6 @@ for (const credits of [12, 7]) {
         commitTerminalResult: (...args) => {
           calls.push(args);
         },
-        abortMission: vi.fn(),
       });
       const dispatch = (
         type: Parameters<typeof app.store.dispatch>[0]['type'],

@@ -58,7 +58,6 @@ describe('SessionRouter', () => {
   beforeEach(() => {
     (loadCombatSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       dispose: vi.fn(),
-      requestReturnToBase: vi.fn(),
       setControlMode: vi.fn(),
       submitDebugCommand: vi.fn(),
       getObservability: vi.fn(),

@@ -1,5 +1,7 @@
 export { MissionDetailsOverlay } from './mission-details-overlay';
 export type { MissionDetailsOverlayProps } from './mission-details-overlay';
+export { EvacuationConfirmationOverlay } from './evacuation-confirmation-overlay';
+export type { EvacuationConfirmationOverlayProps } from './evacuation-confirmation-overlay';
 export { MissionStartRecoveryErrorOverlay } from './mission-start-recovery-error-overlay';
 export { MissionResultOverlay } from './mission-result-overlay';
 export { NewGameConfirmationOverlay } from './new-game-confirmation-overlay';

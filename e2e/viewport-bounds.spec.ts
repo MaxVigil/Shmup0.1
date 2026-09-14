@@ -273,6 +273,38 @@ test('Pause Overlay has no document overflow and a fully visible Resume ring at 
   await measureFocusedRing(page, 'Resume');
 });
 
+test('Evacuation Confirmation has no document overflow and a fully visible Cancel ring at 1280x600 (V02-AC-014, DS-AC-007)', async ({
+  page,
+}) => {
+  await page.setViewportSize(MINIMUM_VIEWPORT);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Interception 01' }).click();
+  await page.getByRole('button', { name: 'Start Mission' }).click();
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
+
+  // The blocking Evacuate? confirmation opened from active Combat: the initial
+  // Cancel action owns focus and its complete focus ring (2px ring + 2px
+  // positive offset) must stay inside the minimum viewport (Verification §14.2,
+  // DS-AC-007).
+  await page
+    .getByTestId('combat-utility')
+    .getByRole('button', { name: 'Evacuate' })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Evacuate?' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await measureFocusedRing(page, 'Cancel');
+
+  // The destructive action is reachable by keyboard and its ring also fits.
+  await page.keyboard.press('Tab');
+  await expect(
+    page.getByRole('button', { name: 'Confirm Evacuation' }),
+  ).toBeFocused();
+  await measureFocusedRing(page, 'Confirm Evacuation');
+});
+
 test('Game Over Screen has no document overflow and a fully visible New Game ring at 1280x600 (V02-AC-016)', async ({
   page,
 }) => {

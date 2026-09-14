@@ -3,6 +3,7 @@ import {
   IDLE_COMBAT_LIFECYCLE,
   RUNNING_COMBAT_LIFECYCLE,
   combatLifecycleReducer,
+  evacuationAvailability,
 } from './lifecycle';
 import type { CombatLifecycleAction, CombatLifecycleState } from './lifecycle';
 
@@ -19,6 +20,8 @@ const PAUSED: CombatLifecycleState = {
   debugRestoreOrigin: 'none',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  evacuationConfirmationOrigin: 'none',
+  evacuationCommitted: false,
 };
 const SETTINGS: CombatLifecycleState = {
   running: false,
@@ -26,6 +29,8 @@ const SETTINGS: CombatLifecycleState = {
   debugRestoreOrigin: 'none',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  evacuationConfirmationOrigin: 'none',
+  evacuationCommitted: false,
 };
 const DEBUG_FROM_RUNNING: CombatLifecycleState = {
   running: false,
@@ -33,6 +38,8 @@ const DEBUG_FROM_RUNNING: CombatLifecycleState = {
   debugRestoreOrigin: 'running',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  evacuationConfirmationOrigin: 'none',
+  evacuationCommitted: false,
 };
 const DEBUG_FROM_PAUSE: CombatLifecycleState = {
   running: false,
@@ -40,6 +47,8 @@ const DEBUG_FROM_PAUSE: CombatLifecycleState = {
   debugRestoreOrigin: 'pause',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  evacuationConfirmationOrigin: 'none',
+  evacuationCommitted: false,
 };
 const IDLE: CombatLifecycleState = IDLE_COMBAT_LIFECYCLE;
 
@@ -136,6 +145,8 @@ describe('S13 lifecycle: Settings Overlay', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     });
     expect(reduce(latched, 'combat-lifecycle/close-settings')).toEqual({
       running: false,
@@ -143,6 +154,8 @@ describe('S13 lifecycle: Settings Overlay', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     });
     const resumed = reduce(
       reduce(latched, 'combat-lifecycle/close-settings'),
@@ -177,6 +190,8 @@ describe('S13 lifecycle: Debug Overlay', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     });
   });
 
@@ -205,6 +220,8 @@ describe('S13 lifecycle: browser safety events', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     });
     // Repeated events create nothing new (AC-069).
     expect(reduce(paused, 'combat-lifecycle/browser-safety-event')).toBe(
@@ -229,6 +246,8 @@ describe('V02-WI-04 C02: terminal-persistence recovery states', () => {
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
   const SAVE_CONFLICT: CombatLifecycleState = {
     running: false,
@@ -236,6 +255,8 @@ describe('V02-WI-04 C02: terminal-persistence recovery states', () => {
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
 
   it('save-error opens a blocking Save Error from the terminal state', () => {
@@ -321,6 +342,8 @@ describe('V02-WI-04 C03: hidden-tab/focus safety during terminal recovery', () =
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
   const LATCHED_SAVE_ERROR: CombatLifecycleState = {
     ...SAVE_ERROR,
@@ -332,6 +355,8 @@ describe('V02-WI-04 C03: hidden-tab/focus safety during terminal recovery', () =
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
 
   it('a browser-safety event while Save Error is open latches manual Resume without closing the Overlay', () => {
@@ -382,6 +407,8 @@ describe('V02-WI-04 C03: hidden-tab/focus safety during terminal recovery', () =
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     };
     for (const action of [
       'combat-lifecycle/resume',
@@ -402,6 +429,8 @@ describe('V02-WI-05 C03: Defeat/Game Over committed under the initial-write latc
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
   const LATCHED_PAUSE: CombatLifecycleState = {
     running: false,
@@ -409,6 +438,8 @@ describe('V02-WI-05 C03: Defeat/Game Over committed under the initial-write latc
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
   const LATCHED_SETTINGS: CombatLifecycleState = {
     running: false,
@@ -416,6 +447,8 @@ describe('V02-WI-05 C03: Defeat/Game Over committed under the initial-write latc
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
   const LATCHED_DEBUG: CombatLifecycleState = {
     running: false,
@@ -423,6 +456,8 @@ describe('V02-WI-05 C03: Defeat/Game Over committed under the initial-write latc
     debugRestoreOrigin: 'running',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
 
   it('recover from a latched Pause holds the committed result behind the Resume-only terminal-exit Pause', () => {
@@ -475,6 +510,8 @@ describe('V02-WI-05 C04: terminal-pending write keeps browser safety terminal-aw
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: true,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
   const PENDING_PAUSED: CombatLifecycleState = {
     running: false,
@@ -482,6 +519,8 @@ describe('V02-WI-05 C04: terminal-pending write keeps browser safety terminal-aw
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: true,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
 
   it('the pending action marks the lifecycle once and is idempotent', () => {
@@ -541,6 +580,8 @@ describe('V02-WI-05 C04: terminal-pending write keeps browser safety terminal-aw
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     });
     // The write resolved: the pending flag is cleared and only explicit
     // Resume leaves the terminal-exit Pause.
@@ -560,6 +601,8 @@ describe('V02-WI-05 C04: terminal-pending write keeps browser safety terminal-aw
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
       terminalSavePending: true,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     };
     const latched = reduce(
       settingsPending,
@@ -580,6 +623,8 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: true,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
   const LATCHED_SAVE_ERROR: CombatLifecycleState = {
     running: false,
@@ -587,6 +632,8 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
 
   it('a failed/rejected completion opens Save Error WITHOUT clearing the latch (S2 chain repair)', () => {
@@ -600,6 +647,8 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     });
     // The latch is present on the Save Error state itself.
     expect(opened.browserSafetyLatched).toBe(true);
@@ -624,6 +673,8 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     });
   });
 
@@ -659,6 +710,8 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
       terminalSavePending: false,
+      evacuationConfirmationOrigin: 'none',
+      evacuationCommitted: false,
     });
     expect(LATCHED_SAVE_ERROR.browserSafetyLatched).toBe(true);
   });
@@ -671,6 +724,8 @@ describe('V02-DEC-031: Mission Start Recovery Error lifecycle state', () => {
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: false,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
   };
 
   it('opens the blocking Mission Start Recovery Error from the frozen Combat shell', () => {
@@ -714,5 +769,375 @@ describe('V02-DEC-031: Mission Start Recovery Error lifecycle state', () => {
     expect(reduce(conflict, 'combat-start/recovery-error')).toBe(conflict);
     const held = reduce(RECOVERY_ERROR, 'combat-terminal/save-conflict');
     expect(reduce(held, 'combat-start/recovery-error')).toBe(held);
+  });
+});
+
+describe('V02-WI-05 E01: Evacuation Confirmation lifecycle (Epic §13.4, §15.5, V02-DEC-013/027/030)', () => {
+  const openFromRunning = (): CombatLifecycleState =>
+    reduce(RUNNING, 'combat-lifecycle/open-evacuation-confirmation');
+  const openFromPause = (): CombatLifecycleState =>
+    reduce(PAUSED, 'combat-lifecycle/open-evacuation-confirmation');
+
+  it('open from running pauses Combat and records the exact running origin', () => {
+    const open = openFromRunning();
+    expect(open.running).toBe(false);
+    expect(open.overlay).toBe('evacuation-confirmation');
+    expect(open.evacuationConfirmationOrigin).toBe('running');
+    expect(open.evacuationCommitted).toBe(false);
+    expect(open.browserSafetyLatched).toBe(false);
+    expect(open.terminalSavePending).toBe(false);
+    expect(open.debugRestoreOrigin).toBe('none');
+  });
+
+  it('open from Pause stays paused and records the exact pause origin', () => {
+    const open = openFromPause();
+    expect(open.running).toBe(false);
+    expect(open.overlay).toBe('evacuation-confirmation');
+    expect(open.evacuationConfirmationOrigin).toBe('pause');
+    expect(open.evacuationCommitted).toBe(false);
+    expect(open.browserSafetyLatched).toBe(false);
+  });
+
+  it('a second Open while the confirmation is open is a strict no-op', () => {
+    const open = openFromRunning();
+    expect(reduce(open, 'combat-lifecycle/open-evacuation-confirmation')).toBe(
+      open,
+    );
+  });
+
+  it('Open is a no-op once Evacuation is committed (no re-offer after confirmation)', () => {
+    const confirmed = reduce(
+      openFromRunning(),
+      'combat-lifecycle/confirm-evacuation',
+    );
+    expect(confirmed.evacuationCommitted).toBe(true);
+    expect(
+      reduce(confirmed, 'combat-lifecycle/open-evacuation-confirmation'),
+    ).toBe(confirmed);
+    // ... even from an ordinary Pause opened after confirmation.
+    const pausedAfterConfirm = reduce(confirmed, 'combat-lifecycle/open-pause');
+    expect(
+      reduce(
+        pausedAfterConfirm,
+        'combat-lifecycle/open-evacuation-confirmation',
+      ),
+    ).toBe(pausedAfterConfirm);
+  });
+
+  it('Cancel from a running origin restores running and clears the origin exactly once', () => {
+    const cancelled = reduce(
+      openFromRunning(),
+      'combat-lifecycle/cancel-evacuation-confirmation',
+    );
+    expect(cancelled).toEqual(RUNNING);
+    expect(cancelled.evacuationConfirmationOrigin).toBe('none');
+    expect(cancelled.evacuationCommitted).toBe(false);
+    // Repeated Cancel (now out of state) is a strict no-op.
+    expect(
+      reduce(cancelled, 'combat-lifecycle/cancel-evacuation-confirmation'),
+    ).toBe(cancelled);
+  });
+
+  it('Cancel from a Pause origin returns to Pause and clears the origin', () => {
+    const cancelled = reduce(
+      openFromPause(),
+      'combat-lifecycle/cancel-evacuation-confirmation',
+    );
+    expect(cancelled.running).toBe(false);
+    expect(cancelled.overlay).toBe('pause');
+    expect(cancelled.evacuationConfirmationOrigin).toBe('none');
+  });
+
+  it('Cancel from a running origin under a browser-safety latch returns to Pause with the latch intact', () => {
+    const open = openFromRunning();
+    const latched = reduce(open, 'combat-lifecycle/browser-safety-event');
+    expect(latched.overlay).toBe('evacuation-confirmation');
+    expect(latched.browserSafetyLatched).toBe(true);
+    const cancelled = reduce(
+      latched,
+      'combat-lifecycle/cancel-evacuation-confirmation',
+    );
+    expect(cancelled.overlay).toBe('pause');
+    expect(cancelled.running).toBe(false);
+    expect(cancelled.browserSafetyLatched).toBe(true);
+    expect(cancelled.evacuationConfirmationOrigin).toBe('none');
+    // Only the canonical explicit Resume clears the latch.
+    const resumed = reduce(cancelled, 'combat-lifecycle/resume');
+    expect(resumed.running).toBe(true);
+    expect(resumed.browserSafetyLatched).toBe(false);
+  });
+
+  it('Confirm clears the origin exactly once, records the commitment fact, and returns to running', () => {
+    const confirmed = reduce(
+      openFromRunning(),
+      'combat-lifecycle/confirm-evacuation',
+    );
+    expect(confirmed).toEqual({
+      ...RUNNING,
+      evacuationCommitted: true,
+    });
+    expect(confirmed.evacuationConfirmationOrigin).toBe('none');
+    // Repeated Confirm is a strict no-op.
+    expect(reduce(confirmed, 'combat-lifecycle/confirm-evacuation')).toBe(
+      confirmed,
+    );
+    // Repeated Cancel after Confirm is a strict no-op.
+    expect(
+      reduce(confirmed, 'combat-lifecycle/cancel-evacuation-confirmation'),
+    ).toBe(confirmed);
+    // Cancel of an open confirmation never silently confirms.
+    const cancelled = reduce(
+      openFromPause(),
+      'combat-lifecycle/cancel-evacuation-confirmation',
+    );
+    expect(cancelled.evacuationCommitted).toBe(false);
+    expect(reduce(cancelled, 'combat-lifecycle/confirm-evacuation')).toBe(
+      cancelled,
+    );
+  });
+
+  it('Confirm from a Pause origin resumes Combat with the commitment fact (no latch)', () => {
+    const confirmed = reduce(
+      openFromPause(),
+      'combat-lifecycle/confirm-evacuation',
+    );
+    expect(confirmed.running).toBe(true);
+    expect(confirmed.overlay).toBe('none');
+    expect(confirmed.evacuationConfirmationOrigin).toBe('none');
+    expect(confirmed.evacuationCommitted).toBe(true);
+  });
+
+  it('Confirm under a browser-safety latch returns to Pause and keeps the latch for explicit Resume', () => {
+    const open = openFromPause();
+    const latched = reduce(open, 'combat-lifecycle/browser-safety-event');
+    expect(latched.overlay).toBe('evacuation-confirmation');
+    const confirmed = reduce(latched, 'combat-lifecycle/confirm-evacuation');
+    expect(confirmed.overlay).toBe('pause');
+    expect(confirmed.running).toBe(false);
+    expect(confirmed.browserSafetyLatched).toBe(true);
+    expect(confirmed.evacuationCommitted).toBe(true);
+    expect(confirmed.evacuationConfirmationOrigin).toBe('none');
+    // Only explicit Resume may leave the latched Pause.
+    const resumed = reduce(confirmed, 'combat-lifecycle/resume');
+    expect(resumed.running).toBe(true);
+    expect(resumed.browserSafetyLatched).toBe(false);
+    expect(resumed.evacuationCommitted).toBe(true);
+  });
+
+  it('a browser-safety event while the confirmation is open latches without closing or replacing it', () => {
+    const open = openFromRunning();
+    const latched = reduce(open, 'combat-lifecycle/browser-safety-event');
+    expect(latched.overlay).toBe('evacuation-confirmation');
+    expect(latched.evacuationConfirmationOrigin).toBe('running');
+    expect(latched.running).toBe(false);
+    expect(latched.browserSafetyLatched).toBe(true);
+    // Repeated events are idempotent.
+    expect(reduce(latched, 'combat-lifecycle/browser-safety-event')).toBe(
+      latched,
+    );
+    // Pause/Settings/Debug/Resume cannot close or replace the confirmation.
+    for (const type of [
+      'combat-lifecycle/resume',
+      'combat-lifecycle/open-pause',
+      'combat-lifecycle/open-settings',
+      'combat-lifecycle/open-debug',
+    ] as const) {
+      expect(reduce(latched, type)).toBe(latched);
+    }
+  });
+
+  it('Open is a strict no-op from every incompatible blocking Overlay', () => {
+    const incompatibleStates = [
+      reduce(RUNNING, 'combat-lifecycle/open-settings'),
+      reduce(PAUSED, 'combat-lifecycle/open-debug'),
+      reduce(RUNNING, 'combat-terminal/save-error'),
+      reduce(RUNNING, 'combat-terminal/save-conflict'),
+      reduce(RUNNING, 'combat-start/recovery-error'),
+    ];
+    // The terminal-exit Pause is built through the latched committed-recover
+    // chain and must also reject Open.
+    const latchedPause: CombatLifecycleState = {
+      ...RUNNING,
+      running: false,
+      overlay: 'pause',
+      browserSafetyLatched: true,
+    };
+    const terminalExit = reduce(latchedPause, 'combat-terminal/recover');
+    incompatibleStates.push(terminalExit);
+    for (const state of incompatibleStates) {
+      expect(
+        reduce(state, 'combat-lifecycle/open-evacuation-confirmation'),
+      ).toBe(state);
+    }
+  });
+
+  it('Open is a strict no-op while a terminal write is pending and when not running with no Overlay', () => {
+    const pendingRunning = reduce(RUNNING, 'combat-terminal/pending');
+    expect(
+      reduce(pendingRunning, 'combat-lifecycle/open-evacuation-confirmation'),
+    ).toBe(pendingRunning);
+    const idle: CombatLifecycleState = { ...IDLE_COMBAT_LIFECYCLE };
+    expect(reduce(idle, 'combat-lifecycle/open-evacuation-confirmation')).toBe(
+      idle,
+    );
+  });
+
+  it('terminal-pending, save-recovery, and mission-start-recovery relays are strict no-ops while the confirmation is open', () => {
+    const open = openFromRunning();
+    expect(reduce(open, 'combat-terminal/pending')).toBe(open);
+    expect(reduce(open, 'combat-terminal/save-error')).toBe(open);
+    expect(reduce(open, 'combat-terminal/save-conflict')).toBe(open);
+    expect(reduce(open, 'combat-start/recovery-error')).toBe(open);
+    expect(reduce(open, 'combat-terminal/recover')).toBe(open);
+  });
+
+  it('Confirm and Cancel are strict no-ops when no confirmation is open', () => {
+    expect(reduce(RUNNING, 'combat-lifecycle/confirm-evacuation')).toBe(
+      RUNNING,
+    );
+    expect(reduce(PAUSED, 'combat-lifecycle/confirm-evacuation')).toBe(PAUSED);
+    expect(
+      reduce(RUNNING, 'combat-lifecycle/cancel-evacuation-confirmation'),
+    ).toBe(RUNNING);
+    expect(
+      reduce(IDLE, 'combat-lifecycle/cancel-evacuation-confirmation'),
+    ).toBe(IDLE);
+  });
+
+  it('the neutral IDLE and entry RUNNING lifecycle states carry no origin and no commitment', () => {
+    expect(IDLE.evacuationConfirmationOrigin).toBe('none');
+    expect(IDLE.evacuationCommitted).toBe(false);
+    expect(RUNNING.evacuationConfirmationOrigin).toBe('none');
+    expect(RUNNING.evacuationCommitted).toBe(false);
+  });
+});
+
+describe('V02-WI-05 E03 C01: application-owned Evacuation availability selector (Epic §13.4, §15.5)', () => {
+  const withLifecycle = (
+    base: CombatLifecycleState,
+    overrides: Partial<CombatLifecycleState>,
+  ): CombatLifecycleState => ({ ...base, ...overrides });
+
+  const CONFIRMATION_FROM_RUNNING = withLifecycle(RUNNING, {
+    running: false,
+    overlay: 'evacuation-confirmation',
+    evacuationConfirmationOrigin: 'running',
+  });
+  const CONFIRMATION_FROM_PAUSE = withLifecycle(PAUSED, {
+    overlay: 'evacuation-confirmation',
+    evacuationConfirmationOrigin: 'pause',
+  });
+  const SAVE_ERROR = reduce(RUNNING, 'combat-terminal/save-error');
+  const SAVE_CONFLICT = reduce(RUNNING, 'combat-terminal/save-conflict');
+  const RECOVERY_ERROR = reduce(RUNNING, 'combat-start/recovery-error');
+  const TERMINAL_EXIT_PAUSE = withLifecycle(PAUSED, {
+    overlay: 'terminal-exit-pause',
+    browserSafetyLatched: true,
+    terminalSavePending: false,
+  });
+  const TERMINAL_PENDING_RUNNING = reduce(RUNNING, 'combat-terminal/pending');
+  const TERMINAL_PENDING_PAUSE = reduce(PAUSED, 'combat-terminal/pending');
+  const COMMITTED_RUNNING = withLifecycle(RUNNING, {
+    evacuationCommitted: true,
+  });
+  const COMMITTED_PAUSE = withLifecycle(PAUSED, { evacuationCommitted: true });
+
+  it('is the single rule for the two activatable origins', () => {
+    expect(evacuationAvailability(RUNNING)).toEqual({
+      visible: true,
+      enabled: true,
+      origin: 'running',
+    });
+    expect(evacuationAvailability(PAUSED)).toEqual({
+      visible: true,
+      enabled: true,
+      origin: 'pause',
+    });
+  });
+
+  it('hides the affordance while an atomic terminal write is pending', () => {
+    for (const state of [TERMINAL_PENDING_RUNNING, TERMINAL_PENDING_PAUSE]) {
+      expect(evacuationAvailability(state)).toEqual({
+        visible: false,
+        enabled: false,
+        origin: 'none',
+      });
+    }
+  });
+
+  it('hides the affordance in every terminal/recovery Overlay state', () => {
+    for (const state of [
+      SAVE_ERROR,
+      SAVE_CONFLICT,
+      TERMINAL_EXIT_PAUSE,
+      RECOVERY_ERROR,
+      COMMITTED_RUNNING,
+      COMMITTED_PAUSE,
+    ]) {
+      expect(evacuationAvailability(state)).toEqual({
+        visible: false,
+        enabled: false,
+        origin: 'none',
+      });
+    }
+  });
+
+  it('keeps the affordance visible but disabled behind ordinary blocking Overlays', () => {
+    for (const state of [
+      SETTINGS,
+      DEBUG_FROM_RUNNING,
+      DEBUG_FROM_PAUSE,
+      CONFIRMATION_FROM_RUNNING,
+      CONFIRMATION_FROM_PAUSE,
+      IDLE,
+    ]) {
+      const availability = evacuationAvailability(state);
+      expect(availability.visible).toBe(true);
+      expect(availability.enabled).toBe(false);
+      expect(availability.origin).toBe('none');
+    }
+  });
+
+  it('the lifecycle reducer accepts exactly the activatable selector states and records the selector origin', () => {
+    const states: readonly (readonly [string, CombatLifecycleState])[] = [
+      ['running', RUNNING],
+      ['pause', PAUSED],
+      ['settings', SETTINGS],
+      ['debug-from-running', DEBUG_FROM_RUNNING],
+      ['debug-from-pause', DEBUG_FROM_PAUSE],
+      ['confirmation-from-running', CONFIRMATION_FROM_RUNNING],
+      ['confirmation-from-pause', CONFIRMATION_FROM_PAUSE],
+      ['terminal-pending-running', TERMINAL_PENDING_RUNNING],
+      ['terminal-pending-pause', TERMINAL_PENDING_PAUSE],
+      ['save-error', SAVE_ERROR],
+      ['save-conflict', SAVE_CONFLICT],
+      ['terminal-exit-pause', TERMINAL_EXIT_PAUSE],
+      ['mission-start-recovery-error', RECOVERY_ERROR],
+      ['committed-running', COMMITTED_RUNNING],
+      ['committed-pause', COMMITTED_PAUSE],
+      ['idle', IDLE],
+    ];
+    for (const [label, state] of states) {
+      const availability = evacuationAvailability(state);
+      const opened = reduce(
+        state,
+        'combat-lifecycle/open-evacuation-confirmation',
+      );
+      if (availability.origin === 'none') {
+        // Not activatable: the command is a strict no-op — it cannot open a
+        // second confirmation, replace a blocking Overlay, or change origin.
+        expect(opened, label).toBe(state);
+        expect(opened.evacuationConfirmationOrigin, label).toBe(
+          state.evacuationConfirmationOrigin,
+        );
+      } else {
+        expect(opened.overlay, label).toBe('evacuation-confirmation');
+        expect(opened.evacuationConfirmationOrigin, label).toBe(
+          availability.origin,
+        );
+        expect(opened.evacuationCommitted, label).toBe(false);
+        expect(opened.running, label).toBe(false);
+      }
+    }
   });
 });

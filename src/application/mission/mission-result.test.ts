@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { CONTENT_CATALOGUE } from '@content/index';
-import { V02_STARTING_CREDITS } from '@domain/index';
+import {
+  V02_DEFEAT_REPAIR_COST_CREDITS,
+  V02_STARTING_CREDITS,
+} from '@domain/index';
 import { initializeSession } from '../session/initialize-session';
 import { createSessionStore } from '../session/store';
 import type { SessionStore } from '../session/store';
@@ -258,36 +261,6 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     expect(store.getState()).toBe(before);
   });
 
-  it('commits Aborted: no reward/recovery, retained Hull, no Overlay', () => {
-    const store = initializedStore();
-    startMissionIn(store);
-    store.dispatch({
-      type: 'mission/result',
-      result: {
-        kind: 'aborted',
-        missionInstanceOrdinal: 0,
-        creditsAfter: V02_STARTING_CREDITS,
-        hullIntegrityAfter: 60,
-      },
-    });
-    const session = store.getState()!;
-    expect(session.credits).toBe(V02_STARTING_CREDITS);
-    expect(session.hullIntegrity).toBe(60);
-    expect(session.activeMission).toBe('none');
-    expect(session.missionResult).toBeNull();
-    // Repeated Aborted signals are no-ops.
-    store.dispatch({
-      type: 'mission/result',
-      result: {
-        kind: 'aborted',
-        missionInstanceOrdinal: 0,
-        creditsAfter: V02_STARTING_CREDITS,
-        hullIntegrityAfter: 60,
-      },
-    });
-    expect(store.getState()!.hullIntegrity).toBe(60);
-  });
-
   it('result-consumed clears the presented result and is idempotent', () => {
     const store = initializedStore();
     startMissionIn(store);
@@ -399,7 +372,7 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     expect(after.activeMission.hullIntegrity).toBe(75);
   });
 
-  it('a stale Aborted command cannot abort mission 1', () => {
+  it('a stale Aborted result kind can never resolve mission 1 (V02-WI-05 E01)', () => {
     const store = initializedStore();
     startMissionIn(store); // mission 0
     store.dispatch({
@@ -420,18 +393,25 @@ describe('mission/result commitment (Base §9.5, AC-032/033/034; Epic §13, V02-
     startMissionIn(store); // mission 1
 
     const before = store.getState()!;
-    // A stale Return-to-Base callback still bound to mission 0.
+    // V02-WI-05 E01: the instant-Aborted result kind was deleted, so no
+    // stale/racing callback can resolve mission 1 for free. A stale typed
+    // terminal bound to mission 0 remains the only possible racing signal and
+    // is covered by the 'delayed terminal from mission 0' regression above.
+    // This branch re-asserts the observable consequence: mission 1 survives a
+    // racing result relay from the older Mission Instance unchanged.
     store.dispatch({
       type: 'mission/result',
       result: {
-        kind: 'aborted',
+        kind: 'defeat',
         missionInstanceOrdinal: 0,
         creditsAfter: V02_STARTING_CREDITS + 1,
         hullIntegrityAfter: 55,
+        runStatusAfter: 'active',
+        repairCostCredits: V02_DEFEAT_REPAIR_COST_CREDITS,
       },
     });
     const after = store.getState()!;
-    expect(after).toBe(before); // strict no-op: mission 1 not aborted
+    expect(after).toBe(before); // strict no-op: mission 1 not resolved
     if (after.activeMission === 'none') {
       throw new Error('Mission 1 must still be active.');
     }

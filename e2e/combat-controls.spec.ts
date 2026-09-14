@@ -42,10 +42,12 @@ interface AircraftSample {
 }
 
 /** Derives the authoritative aircraft centre from the Hull bar rect: bar
- *  centre = aircraft centre X; bar top = aircraft bottom + 1% short-side gap. */
+ *  centre = aircraft centre X; bar top = aircraft bottom + 1% short-side gap.
+ *  The bar is the one HUD child with per-frame geometry (`.ds-combat-hud__bar`);
+ *  the Countdown/CRITICAL HULL column never follows the Aircraft. */
 function readAircraft(page: Page): Promise<AircraftSample | null> {
   return page.evaluate(() => {
-    const hud = document.querySelector('.ds-combat-hud');
+    const hud = document.querySelector('.ds-combat-hud__bar');
     if (hud === null) {
       return null;
     }

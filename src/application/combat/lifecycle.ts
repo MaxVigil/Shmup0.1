@@ -2,12 +2,14 @@
  * S13 application-owned Combat lifecycle controller (Combat §10–12, Master
  * §7.6–7.7, MASTER-AC-008/009, AC-037–069). One pure reducer is the single
  * authority for running-versus-paused state, the active blocking Combat
- * Overlay (`none`, Pause, Settings, or development Debug), the Debug
- * restoration origin, and the idempotent browser-safety-pause latch. React
- * renders this state and relays semantic commands; Phaser and the Combat
- * runtime only obey pause/input/debug commands and expose read-only snapshots.
- * Lifecycle truth is never distributed across React booleans, Phaser pause
- * flags, DOM callbacks, or a second store.
+ * Overlay (`none`, Pause, Settings, development Debug, or — V02-WI-05 E01 —
+ * the Evacuation Confirmation), the Debug restoration origin, the idempotent
+ * browser-safety-pause latch, and (E01) the Evacuation Confirmation origin
+ * and irreversible commitment fact. React renders this state and relays
+ * semantic commands; Phaser and the Combat runtime only obey pause/input/
+ * debug commands and expose read-only snapshots. Lifecycle truth is never
+ * distributed across React booleans, Phaser pause flags, DOM callbacks, or a
+ * second store.
  *
  * Mission Result remains higher priority and immutable under every S13 command:
  * the session reducer rejects all lifecycle commands while a result is pending.
@@ -18,6 +20,7 @@ export type CombatOverlayId =
   | 'pause'
   | 'settings'
   | 'debug'
+  | 'evacuation-confirmation'
   | 'save-error'
   | 'save-conflict'
   | 'terminal-exit-pause'
@@ -25,6 +28,18 @@ export type CombatOverlayId =
 
 /** Where Debug was opened from, for canonical close restoration (Combat §11.2). */
 export type DebugRestoreOrigin = 'none' | 'running' | 'pause';
+
+/**
+ * V02-WI-05 E01 Evacuation Confirmation origin (Epic §13.4, §15.5,
+ * V02-DEC-013/030): the exact prior state recorded when the single blocking
+ * `evacuation-confirmation` Overlay opened. `running` means it opened from
+ * active Combat with no Overlay; `pause` means it opened from the Pause
+ * Overlay. The value is `none` whenever the confirmation Overlay is closed
+ * and is cleared by Cancel/Confirm exactly once. Cancel and Confirm use it to
+ * restore the exact prior state (subject to any browser-safety manual-Resume
+ * latch).
+ */
+export type EvacuationConfirmationOrigin = 'none' | 'running' | 'pause';
 
 export interface CombatLifecycleState {
   /** False while Combat is paused or a blocking Overlay is open. */
@@ -50,6 +65,23 @@ export interface CombatLifecycleState {
    * semantics (AC-066/067) are unchanged outside this pending window.
    */
   readonly terminalSavePending: boolean;
+  /**
+   * V02-WI-05 E01: the exact origin of the currently open Evacuation
+   * Confirmation Overlay (`running`/`pause`), or `none` while it is closed.
+   * Meaningful only while `overlay === 'evacuation-confirmation'`; Cancel and
+   * Confirm reset it to `none` exactly once (Epic §13.4 step 3, §15.5).
+   */
+  readonly evacuationConfirmationOrigin: EvacuationConfirmationOrigin;
+  /**
+   * V02-WI-05 E01: irreversible Evacuation commitment-eligibility fact
+   * (Epic §13.4, §15.5, V02-DEC-027). Set by the single accepted Confirm and
+   * never cleared for the rest of this Mission Instance, so no later UI can
+   * re-offer Evacuation after confirmation. E02/E03 consume it as the
+   * eligibility precondition for exactly one authoritative runtime
+   * `beginEvacuation` command. Mission end / a new Mission Instance resets it
+   * with the lifecycle (IDLE/RUNNING entry states).
+   */
+  readonly evacuationCommitted: boolean;
 }
 
 /** Neutral state before Combat starts and after a mission resolves (S13). */
@@ -59,6 +91,8 @@ export const IDLE_COMBAT_LIFECYCLE: CombatLifecycleState = Object.freeze({
   debugRestoreOrigin: 'none',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  evacuationConfirmationOrigin: 'none',
+  evacuationCommitted: false,
 });
 
 /** State entered by one accepted mission start: running with no Overlay. */
@@ -68,7 +102,61 @@ export const RUNNING_COMBAT_LIFECYCLE: CombatLifecycleState = Object.freeze({
   debugRestoreOrigin: 'none',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  evacuationConfirmationOrigin: 'none',
+  evacuationCommitted: false,
 });
+
+/**
+ * V02-WI-05 E03 C01 application-owned Evacuation availability rule
+ * (Epic §13.4, §15.5, V02-DEC-030). ONE pure selector decides whether the
+ * `Evacuate` affordance may be offered and activated; the lifecycle reducer's
+ * `open-evacuation-confirmation` guard and the presentation consume this exact
+ * rule, so the UI and the lifecycle can never drift apart.
+ *
+ * - `visible` — the affordance may be rendered at all. It is HIDDEN while
+ *   Evacuation is irreversibly committed (`evacuationCommitted`) and while a
+ *   terminal/recovery state owns the screen: a pending atomic terminal write
+ *   (`terminalSavePending`), Save Error, Save Conflict, the Resume-only
+ *   terminal-exit Pause, or the blocking Mission Start Recovery Error.
+ * - `enabled` — activation is possible right now: only from active running
+ *   Combat with no Overlay or from the Pause Overlay. Ordinary blocking
+ *   Overlays (Pause, Settings, development Debug, the open Evacuation
+ *   Confirmation itself) keep the affordance visible but DISABLED.
+ * - `origin` — the exact origin a successful activation records
+ *   (`running`/`pause`), or `none` when activation is not possible.
+ *
+ * The active Mission Instance requirement remains owned by the session reducer
+ * (every lifecycle command is inert without an active mission) and the Combat
+ * Screen renders only inside an active mission, so this selector needs no
+ * second mission fact.
+ */
+export interface EvacuationAvailability {
+  readonly visible: boolean;
+  readonly enabled: boolean;
+  readonly origin: EvacuationConfirmationOrigin;
+}
+
+export function evacuationAvailability(
+  state: CombatLifecycleState,
+): EvacuationAvailability {
+  if (
+    state.evacuationCommitted ||
+    state.terminalSavePending ||
+    state.overlay === 'save-error' ||
+    state.overlay === 'save-conflict' ||
+    state.overlay === 'terminal-exit-pause' ||
+    state.overlay === 'mission-start-recovery-error'
+  ) {
+    return { visible: false, enabled: false, origin: 'none' };
+  }
+  if (state.running && state.overlay === 'none') {
+    return { visible: true, enabled: true, origin: 'running' };
+  }
+  if (state.overlay === 'pause') {
+    return { visible: true, enabled: true, origin: 'pause' };
+  }
+  return { visible: true, enabled: false, origin: 'none' };
+}
 
 /**
  * Canonical lifecycle command matrix (Combat §10–11, §12.2–12.3, AC-052/063–069;
@@ -158,6 +246,26 @@ export type CombatLifecycleAction =
   | {
       readonly type: 'combat-start/recovery-error';
       readonly missionInstanceOrdinal: number;
+    }
+  // V02-WI-05 E01 Evacuation Confirmation lifecycle actions (Epic §13.4,
+  // §15.5, V02-DEC-013/030). The Overlay is application-owned and blocking;
+  // E01 adds the reducer/state contract only — the confirmation component and
+  // the visible Evacuate affordance are delivered by E03. `Confirm` records
+  // the irreversible commitment-eligibility fact and returns to running
+  // (unless a browser-safety manual-Resume latch requires Pause); E02/E03
+  // bind exactly one authoritative runtime `beginEvacuation` command to the
+  // confirmed resumed state.
+  | {
+      readonly type: 'combat-lifecycle/open-evacuation-confirmation';
+      readonly missionInstanceOrdinal: number;
+    }
+  | {
+      readonly type: 'combat-lifecycle/cancel-evacuation-confirmation';
+      readonly missionInstanceOrdinal: number;
+    }
+  | {
+      readonly type: 'combat-lifecycle/confirm-evacuation';
+      readonly missionInstanceOrdinal: number;
     };
 
 export function combatLifecycleReducer(
@@ -175,6 +283,8 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
         };
       }
       return state;
@@ -189,13 +299,15 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
         };
       }
       // V02-WI-04 C03: the terminal-exit Pause is Resume-only. Only this
       // explicit Resume may start the committed Success exit or present a held
       // Defeat/Game Over; no other lifecycle command can leave that state (the
-      // immutable result can never be re-exposed to Return to Base, Settings,
-      // Debug, or Retry). The write has already resolved, so the flag is false.
+      // immutable result can never be re-exposed to Settings, Debug, or
+      // Retry). The write has already resolved, so the flag is false.
       if (state.overlay === 'terminal-exit-pause') {
         return {
           running: true,
@@ -203,6 +315,8 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: false,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
         };
       }
       return state;
@@ -215,6 +329,8 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
         };
       }
       return state;
@@ -231,6 +347,8 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: true,
             terminalSavePending: state.terminalSavePending,
+            evacuationConfirmationOrigin: 'none',
+            evacuationCommitted: state.evacuationCommitted,
           }
         : {
             running: true,
@@ -238,6 +356,8 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: false,
             terminalSavePending: state.terminalSavePending,
+            evacuationConfirmationOrigin: 'none',
+            evacuationCommitted: state.evacuationCommitted,
           };
     case 'combat-lifecycle/open-debug':
       // F1 from running Combat pauses and opens Debug (AC-039); F1 from Pause
@@ -249,6 +369,8 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'running',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
         };
       }
       if (state.overlay === 'pause') {
@@ -272,6 +394,8 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: true,
           terminalSavePending: state.terminalSavePending,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
         };
       }
       if (state.debugRestoreOrigin === 'running') {
@@ -281,6 +405,8 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
         };
       }
       // Debug replaced Pause (or a defensive unknown origin): reopen Pause.
@@ -290,6 +416,8 @@ export function combatLifecycleReducer(
         debugRestoreOrigin: 'none',
         browserSafetyLatched: false,
         terminalSavePending: state.terminalSavePending,
+        evacuationConfirmationOrigin: 'none',
+        evacuationCommitted: state.evacuationCommitted,
       };
     case 'combat-terminal/save-error':
     case 'combat-terminal/save-conflict':
@@ -304,6 +432,11 @@ export function combatLifecycleReducer(
       // V02-WI-05 C05: opening Save Error/Save Conflict replaces the blocking
       // overlay but never discharges an existing manual-resume latch — only
       // explicit Resume (or ownership teardown/reset) may clear it.
+      // V02-WI-05 E01: an open Evacuation Confirmation is never replaced by a
+      // terminal-persistence outcome — a terminal write cannot be pending while
+      // the confirmation is open (Combat is paused), so a Save Error/Save
+      // Conflict relay is a stale/racing no-op that must not discard the
+      // player's open confirmation.
       if (state.overlay === 'save-error') {
         if (action.type === 'combat-terminal/save-conflict') {
           return {
@@ -312,13 +445,16 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: state.browserSafetyLatched,
             terminalSavePending: false,
+            evacuationConfirmationOrigin: 'none',
+            evacuationCommitted: state.evacuationCommitted,
           };
         }
         return state;
       }
       if (
         state.overlay === 'save-conflict' ||
-        state.overlay === 'terminal-exit-pause'
+        state.overlay === 'terminal-exit-pause' ||
+        state.overlay === 'evacuation-confirmation'
       ) {
         return state;
       }
@@ -346,6 +482,8 @@ export function combatLifecycleReducer(
         // clears the latch; Retry Save and focus restoration are not Resume.
         browserSafetyLatched: state.browserSafetyLatched,
         terminalSavePending: false,
+        evacuationConfirmationOrigin: 'none',
+        evacuationCommitted: state.evacuationCommitted,
       };
     case 'combat-terminal/recover':
       // V02-WI-04 C02/C03 + V02-WI-05 C03: dispatched only when a terminal
@@ -373,6 +511,8 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: true,
             terminalSavePending: false,
+            evacuationConfirmationOrigin: 'none',
+            evacuationCommitted: state.evacuationCommitted,
           };
         }
         // The write resolved; the pending flag is cleared even when this
@@ -388,6 +528,8 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: true,
           terminalSavePending: false,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
         };
       }
       return {
@@ -396,6 +538,8 @@ export function combatLifecycleReducer(
         debugRestoreOrigin: 'none',
         browserSafetyLatched: false,
         terminalSavePending: false,
+        evacuationConfirmationOrigin: 'none',
+        evacuationCommitted: state.evacuationCommitted,
       };
     case 'combat-lifecycle/browser-safety-event':
       // Blur, hidden tab, or an accepted resize during running Combat opens one
@@ -410,6 +554,15 @@ export function combatLifecycleReducer(
       // Defeat/Game Over is always held for Resume instead of presenting into
       // a hidden/blurred session. Outside the pending window ordinary-Pause
       // behaviour is unchanged.
+      // V02-WI-05 E01: while the Evacuation Confirmation is open, a
+      // browser-safety event latches manual Resume WITHOUT closing or replacing
+      // the confirmation (Epic §15.5). Cancel/Confirm then restore Pause (not
+      // running) under the latch; only the canonical explicit Resume clears it.
+      if (state.overlay === 'evacuation-confirmation') {
+        return state.browserSafetyLatched
+          ? state
+          : { ...state, browserSafetyLatched: true };
+      }
       if (state.running && state.overlay === 'none') {
         return {
           running: false,
@@ -417,6 +570,8 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: true,
           terminalSavePending: state.terminalSavePending,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
         };
       }
       if (
@@ -437,7 +592,13 @@ export function combatLifecycleReducer(
     case 'combat-terminal/pending':
       // V02-WI-05 C04: marks the pending atomic terminal write (dispatched by
       // the Combat entry immediately after the first authoritative terminal
-      // relay, before the write resolves). Idempotent.
+      // relay, before the write resolves). Idempotent. V02-WI-05 E01: while
+      // the Evacuation Confirmation is open no authoritative terminal exists
+      // (Combat is paused), so a stale/racing pending relay is a strict no-op
+      // that must not mark a write that cannot exist behind the confirmation.
+      if (state.overlay === 'evacuation-confirmation') {
+        return state;
+      }
       return state.terminalSavePending
         ? state
         : { ...state, terminalSavePending: true };
@@ -451,10 +612,14 @@ export function combatLifecycleReducer(
       // that re-runs the same originating mission + attempt cleanup. A
       // repeated outcome stays idempotent. Save Conflict remains Reload-only
       // and the Resume-only terminal-exit Pause is never demoted.
+      // V02-WI-05 E01: an open Evacuation Confirmation is a blocking Overlay
+      // that only Cancel/Confirm (and the browser-safety latch) may leave; a
+      // recovery-error relay cannot replace it.
       if (
         state.overlay === 'mission-start-recovery-error' ||
         state.overlay === 'save-conflict' ||
-        state.overlay === 'terminal-exit-pause'
+        state.overlay === 'terminal-exit-pause' ||
+        state.overlay === 'evacuation-confirmation'
       ) {
         return state;
       }
@@ -464,6 +629,124 @@ export function combatLifecycleReducer(
         debugRestoreOrigin: 'none',
         browserSafetyLatched: state.browserSafetyLatched,
         terminalSavePending: false,
+        evacuationConfirmationOrigin: 'none',
+        evacuationCommitted: state.evacuationCommitted,
+      };
+    case 'combat-lifecycle/open-evacuation-confirmation': {
+      // V02-WI-05 E01 (Epic §13.4, §15.5, V02-DEC-013/030): open the single
+      // blocking Evacuation Confirmation. V02-WI-05 E03 C01: the eligibility
+      // rule is the SAME application-owned pure selector the presentation
+      // consumes (`evacuationAvailability`), so UI and lifecycle can never
+      // disagree. It is accepted only when the selector reports an activation
+      // origin — eligible running Combat with no Overlay (it pauses and records
+      // origin `running`) or the Pause Overlay (it stays paused and records
+      // origin `pause`). Every other state — already committed, a pending
+      // terminal write, Save Error/Conflict, the Resume-only terminal-exit
+      // Pause, the Mission Start Recovery Error, Settings, Debug, or the open
+      // confirmation itself — is a strict no-op. Any existing browser-safety
+      // manual-Resume latch is preserved unchanged (origin and latch are
+      // independent; nothing here may clear a latch).
+      const availability = evacuationAvailability(state);
+      if (availability.origin === 'running') {
+        return {
+          running: false,
+          overlay: 'evacuation-confirmation',
+          debugRestoreOrigin: 'none',
+          browserSafetyLatched: false,
+          terminalSavePending: false,
+          evacuationConfirmationOrigin: 'running',
+          evacuationCommitted: false,
+        };
+      }
+      if (availability.origin === 'pause') {
+        return {
+          ...state,
+          overlay: 'evacuation-confirmation',
+          debugRestoreOrigin: 'none',
+          evacuationConfirmationOrigin: 'pause',
+        };
+      }
+      return state;
+    }
+    case 'combat-lifecycle/cancel-evacuation-confirmation':
+      // V02-WI-05 E01 (Epic §13.4 step 3, §15.5; Esc is equivalent to Cancel):
+      // closes the confirmation and restores the EXACT prior state recorded by
+      // the origin, subject to any browser-safety manual-Resume latch. A
+      // `running` origin resumes only when no latch exists; a `pause` origin,
+      // or any latched confirmation, returns to Pause (explicit Resume). A
+      // repeated/racing/out-of-state Cancel is a strict no-op.
+      if (state.overlay !== 'evacuation-confirmation') {
+        return state;
+      }
+      if (state.evacuationConfirmationOrigin === 'pause') {
+        return {
+          running: false,
+          overlay: 'pause',
+          debugRestoreOrigin: 'none',
+          browserSafetyLatched: state.browserSafetyLatched,
+          terminalSavePending: false,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
+        };
+      }
+      // `running` origin: restore running only without a browser-safety latch;
+      // any latch (including one latched while the confirmation was open)
+      // returns to Pause and requires explicit Resume.
+      return state.browserSafetyLatched
+        ? {
+            running: false,
+            overlay: 'pause',
+            debugRestoreOrigin: 'none',
+            browserSafetyLatched: true,
+            terminalSavePending: false,
+            evacuationConfirmationOrigin: 'none',
+            evacuationCommitted: state.evacuationCommitted,
+          }
+        : {
+            running: true,
+            overlay: 'none',
+            debugRestoreOrigin: 'none',
+            browserSafetyLatched: false,
+            terminalSavePending: false,
+            evacuationConfirmationOrigin: 'none',
+            evacuationCommitted: state.evacuationCommitted,
+          };
+    case 'combat-lifecycle/confirm-evacuation':
+      // V02-WI-05 E01 (Epic §13.4, §15.5, V02-DEC-027): the single accepted
+      // Confirm clears the origin exactly once and records the irreversible
+      // commitment-eligibility fact (`evacuationCommitted`) so no later UI can
+      // re-offer Evacuation. Combat returns to running (the E02 authoritative
+      // `beginEvacuation` countdown boundary consumes the committed+resumed
+      // state exactly once) unless a browser-safety latch requires Pause and
+      // explicit Resume. Repeated/racing/out-of-state Confirm is a strict
+      // no-op; nothing here clears an existing safety latch.
+      if (state.overlay !== 'evacuation-confirmation') {
+        return state;
+      }
+      if (state.evacuationConfirmationOrigin === 'none') {
+        // Defensive: the confirmation cannot be open without a recorded
+        // origin; an inconsistent state is never silently accepted.
+        return state;
+      }
+      if (state.browserSafetyLatched) {
+        return {
+          running: false,
+          overlay: 'pause',
+          debugRestoreOrigin: 'none',
+          browserSafetyLatched: true,
+          terminalSavePending: false,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: true,
+        };
+      }
+      return {
+        running: true,
+        overlay: 'none',
+        debugRestoreOrigin: 'none',
+        browserSafetyLatched: false,
+        terminalSavePending: false,
+        evacuationConfirmationOrigin: 'none',
+        evacuationCommitted: true,
       };
   }
 }

@@ -414,6 +414,20 @@
   width: clamp(20rem, 30vw, 26rem);
 }
 
+/* --- Evacuation Confirmation Overlay (Epic §15.5, V02-DEC-030; DS §8.26
+ * --- `v0.2 Evacuation actions and confirmation`): the canonical
+ * --- `clamp(20rem, 30vw, 26rem)` Overlay width with the exact approved copy.
+ * --- Reached from active Combat and from the Pause Overlay. --- */
+.ds-evacuation-confirmation {
+  width: clamp(20rem, 30vw, 26rem);
+}
+
+.ds-evacuation-confirmation .ds-overlay__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
 /* --- Debug Overlay (DS §8.24, S13; development builds only) --- */
 .ds-debug-overlay {
   width: clamp(32rem, 50vw, 44rem);
@@ -619,14 +633,23 @@
   z-index: var(--layer-utility);
 }
 
-/* --- Combat HUD bridge (Combat §4.3, Technical Foundation §6.1): the
- * --- imperative Hull Integrity bar element owned by CombatHudBridge. --- */
+/* --- Combat HUD bridge (Combat §4.3, Technical Foundation §6.1; v0.2
+ * --- §15.2–15.3, DS §8.26): ONE viewport-anchored HUD layer owned by
+ * --- CombatHudBridge. The Hull bar is the only child with per-frame geometry;
+ * --- the system column below is positioned by the stylesheet alone. --- */
 .ds-combat-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--layer-hud);
+}
+
+/* The Hull Integrity bar follows the Aircraft: `left`/`top`/`width` are set
+ * imperatively each frame by CombatHudBridge. */
+.ds-combat-hud__bar {
   position: absolute;
   left: 0;
   top: 0;
-  pointer-events: none;
-  z-index: var(--layer-hud);
 }
 
 .ds-combat-hud__track {
@@ -643,36 +666,40 @@
   background-color: var(--color-accent);
 }
 
-/* --- v0.2 Combat Countdown (Epic §15.2, DS §8.26): horizontally centred at
- * --- space-4 from the top viewport edge, canonical text styling, updated
- * --- imperatively by the CombatHudBridge each frame. --- */
-.ds-combat-countdown {
+/* v0.2 Combat Countdown and one-shot CRITICAL HULL (Epic §15.2–15.3,
+ * DS §8.26): one system column anchored to the viewport — the Countdown is
+ * horizontally centred at the exact space-4 top offset, and CRITICAL HULL sits
+ * directly below it with the exact space-2 gap. Neither element is repositioned
+ * per frame, so the Aircraft HUD bar can never move, clip, or wrap them. */
+.ds-combat-hud__system {
   position: absolute;
-  left: 50%;
   top: var(--space-4);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
   transform: translateX(-50%);
+}
+
+.ds-combat-countdown {
+  white-space: nowrap;
   font-family: var(--font-family);
   font-size: var(--text-body-size);
   font-weight: var(--text-body-weight);
   line-height: var(--text-body-line-height);
   color: var(--color-text-primary);
-  pointer-events: none;
 }
 
-/* --- v0.2 CRITICAL HULL (Epic §15.3, DS §8.26): danger-tone Text directly
- * --- below the Countdown with the canonical space-2 gap; visibility is owned
- * --- by the one-shot simulation latch and applied imperatively. --- */
+/* v0.2 CRITICAL HULL: danger-tone Text directly below the Countdown; visibility
+ * is owned by the one-shot simulation latch and applied imperatively. */
 .ds-combat-critical-hull {
-  position: absolute;
-  left: 50%;
-  top: calc(var(--space-4) + var(--space-2));
-  transform: translateX(-50%);
+  white-space: nowrap;
   font-family: var(--font-family);
   font-size: var(--text-control-size);
   font-weight: var(--text-control-weight);
   line-height: var(--text-control-line-height);
   color: var(--color-danger);
-  pointer-events: none;
 }
 
 .ds-boot-view {

@@ -7,7 +7,6 @@ import {
 import { createInitializedTestApplication } from '@test-support/persistence';
 import type { InitializedTestApplication } from '@test-support/persistence';
 import { SEAM_MISSION_ID } from './compatibility-seam';
-import { abortMission } from './abort-mission';
 import { commitMissionResult } from './commit-mission-result';
 import { startMission } from './start-mission';
 import type { CampaignStorePort } from '../persistence';
@@ -303,44 +302,6 @@ describe('commitMissionResult (Epic §13, V02-AC-020)', () => {
     expect(app.store.getState()?.activeMission).not.toBe('none');
     expect(app.store.getState()?.credits).toBe(V02_STARTING_CREDITS);
     expect(app.store.getState()?.missionResult).toBeNull();
-  });
-});
-
-describe('abortMission (temporary v0.1 Return to Base seam)', () => {
-  it('persists the marker clear, retains Hull, and opens Operations without a Result', async () => {
-    const app = createInitializedTestApplication();
-    await startMissionIn(app);
-    const outcome = await abortMission(
-      { store: app.store, campaignStore: app.campaignStore },
-      55,
-      0,
-      0,
-    );
-    expect(outcome).toBe('committed');
-    expect(app.campaignStore.current?.missionInProgress).toBeNull();
-    expect(app.campaignStore.current?.hullIntegrity).toBe(55);
-    expect(app.store.getState()?.activeMission).toBe('none');
-    expect(app.store.getState()?.missionResult).toBeNull();
-  });
-
-  it('a repeated Aborted command is inert once the marker is cleared', async () => {
-    const app = createInitializedTestApplication();
-    await startMissionIn(app);
-    await abortMission(
-      { store: app.store, campaignStore: app.campaignStore },
-      55,
-      0,
-      0,
-    );
-    expect(
-      await abortMission(
-        { store: app.store, campaignStore: app.campaignStore },
-        55,
-        0,
-        0,
-      ),
-    ).toBe('inert');
-    expect(app.store.getState()?.hullIntegrity).toBe(55);
   });
 });
 

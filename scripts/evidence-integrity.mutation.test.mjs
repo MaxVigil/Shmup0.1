@@ -11,7 +11,14 @@
  *   - a leaked counter symbol in a scanned artifact fails the
  *     counter-elimination checks (delta 3);
  *   - a mismatched runId or source fingerprint fails the coherence checks
- *     (delta 4).
+ *     (delta 4);
+ *   - a Pass B record whose RAW probe array is tampered — one altered probe
+ *     only, with every summary boolean/count deliberately left valid (missing
+ *     canvas/HUD/Combat Screen, non-final countdown, terminal/Result
+ *     Overlay/Game Over, Operations/Base, malformed or missing probe,
+ *     probe-count or label-order inconsistency) — fails the raw probe checks,
+ *     and a summary that disagrees with healthy raw probes fails the
+ *     consistency check (V02-WI-05 E02 C04);
  * A baseline run over the unmutated records must pass every check, so this
  * suite also confirms the real evidence is intact before mutation.
  *
@@ -215,6 +222,69 @@ test('C05 delta 4: a mismatched runId fails pass-a-run-id', () => {
   }
 });
 
+/**
+ * V02-WI-05 E02 C04 raw-evidence mutation helper. It mutates the RAW Pass B
+ * probe array only and deliberately leaves every summary boolean/count exactly
+ * as the real accepted record has it, so a passing summary can never mask the
+ * tampered raw fact. Summary-mutation counter-cases pass
+ * `{ expectSummariesValid: false }`.
+ */
+function runPassBRawProbeMutation(
+  label,
+  mutate,
+  expectedFailure,
+  { expectSummariesValid = true } = {},
+) {
+  const dir = makeTempEvidenceDir();
+  try {
+    mutateRecord(
+      dir,
+      'v02-wi-04-uninstrumented-regular-workload.json',
+      (record) => {
+        mutate(record);
+        return record;
+      },
+    );
+    const mutated = JSON.parse(
+      readFileSync(
+        join(dir, 'v02-wi-04-uninstrumented-regular-workload.json'),
+        'utf8',
+      ),
+    );
+    // The deliberately untouched reporting flags stay as the valid record has
+    // them, so the rejection must come from the recomputed raw-probe facts.
+    if (expectSummariesValid) {
+      assert.equal(
+        mutated.workloadValidity.combatActiveThroughout,
+        true,
+        label,
+      );
+      assert.equal(
+        mutated.workloadValidity.countdownRemainedFinal,
+        true,
+        label,
+      );
+      assert.equal(mutated.workloadValidity.terminalOrResultSeen, false, label);
+      assert.equal(mutated.workloadValidity.baseOrOperationsSeen, false, label);
+      assert.equal(mutated.workloadValidity.valid, true, label);
+    }
+
+    const result = evaluateEvidenceComparison({
+      evidenceDir: dir,
+      distDir: REAL_DIST,
+      uninstrumentedDir: REAL_UNINSTRUMENTED,
+      writePackage: false,
+    });
+    const names = failureNames(result);
+    assert.ok(
+      names.includes(expectedFailure),
+      `${label}: expected ${expectedFailure} failure, got ${names.join(', ')}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 test('C05 delta 4: a mismatched source fingerprint fails post-legacy-fingerprint-current', () => {
   const dir = makeTempEvidenceDir();
   try {
@@ -232,6 +302,184 @@ test('C05 delta 4: a mismatched source fingerprint fails post-legacy-fingerprint
     assert.ok(
       names.includes('post-legacy-fingerprint-current'),
       `expected post-legacy-fingerprint-current failure, got ${names.join(', ')}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('C04: a raw probe without a canvas fails pass-b-probe-active-combat while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'raw canvas',
+    (record) => {
+      record.workloadValidity.probes[1].canvasCount = 0;
+    },
+    'pass-b-probe-active-combat',
+  );
+});
+
+test('C04: a raw probe without the Combat HUD fails pass-b-probe-active-combat while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'raw combat HUD',
+    (record) => {
+      record.workloadValidity.probes[2].combatHudCount = 0;
+    },
+    'pass-b-probe-active-combat',
+  );
+});
+
+test('C04: a raw probe without the Combat Screen fails pass-b-probe-active-combat while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'raw combat screen',
+    (record) => {
+      record.workloadValidity.probes[0].combatScreenVisible = false;
+    },
+    'pass-b-probe-active-combat',
+  );
+});
+
+test('C04: a raw probe with a non-final countdown fails pass-b-probe-countdown-final while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'raw countdown',
+    (record) => {
+      record.workloadValidity.probes[3].countdownText = '00:01';
+    },
+    'pass-b-probe-countdown-final',
+  );
+});
+
+test('C04: a raw probe with a Mission Result Overlay fails pass-b-probe-no-terminal while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'raw result overlay',
+    (record) => {
+      record.workloadValidity.probes[1].resultOverlayCount = 1;
+    },
+    'pass-b-probe-no-terminal',
+  );
+});
+
+test('C04: a raw probe with a dialog fails pass-b-probe-no-terminal while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'raw dialog',
+    (record) => {
+      record.workloadValidity.probes[0].dialogCount = 1;
+    },
+    'pass-b-probe-no-terminal',
+  );
+});
+
+test('C04: a raw probe with a Game Over Screen fails pass-b-probe-no-terminal while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'raw game over',
+    (record) => {
+      record.workloadValidity.probes[2].gameOverScreenCount = 1;
+    },
+    'pass-b-probe-no-terminal',
+  );
+});
+
+test('C04: a raw probe showing Operations/Base fails pass-b-probe-no-base while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'raw operations',
+    (record) => {
+      record.workloadValidity.probes[3].operationsScreenCount = 1;
+    },
+    'pass-b-probe-no-base',
+  );
+});
+
+test('C04: a malformed raw probe fails pass-b-probe-structure while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'malformed probe',
+    (record) => {
+      record.workloadValidity.probes[2] = 'not-a-probe';
+    },
+    'pass-b-probe-structure',
+  );
+});
+
+test('C04: a raw probe missing a contract key fails pass-b-probe-structure while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'missing probe key',
+    (record) => {
+      delete record.workloadValidity.probes[1].combatHudCount;
+    },
+    'pass-b-probe-structure',
+  );
+});
+
+test('C04: a missing raw probe (probe-count inconsistency) fails pass-b-probe-structure while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'missing probe',
+    (record) => {
+      record.workloadValidity.probes.pop();
+    },
+    'pass-b-probe-structure',
+  );
+});
+
+test('C04: an extra raw probe (probe-count inconsistency) fails pass-b-probe-structure while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'extra probe',
+    (record) => {
+      record.workloadValidity.probes.push({
+        ...record.workloadValidity.probes[3],
+      });
+    },
+    'pass-b-probe-structure',
+  );
+});
+
+test('C04: a swapped raw-probe label order fails pass-b-probe-structure while every summary stays valid', () => {
+  runPassBRawProbeMutation(
+    'probe order',
+    (record) => {
+      record.workloadValidity.probes[0].label = 'sample-start';
+    },
+    'pass-b-probe-structure',
+  );
+});
+
+test('C04: a summary probe count that disagrees with the raw probes fails pass-b-probe-summary-consistency', () => {
+  runPassBRawProbeMutation(
+    'summary probe count',
+    (record) => {
+      // Raw probes stay healthy; only the reporting count lies.
+      record.workloadValidity.probeCount = 3;
+    },
+    'pass-b-probe-summary-consistency',
+  );
+});
+
+test('C04: a summary that contradicts healthy raw probes fails pass-b-probe-summary-consistency', () => {
+  runPassBRawProbeMutation(
+    'summary contradiction',
+    (record) => {
+      record.workloadValidity.combatActiveThroughout = false;
+    },
+    'pass-b-probe-summary-consistency',
+    { expectSummariesValid: false },
+  );
+});
+
+test('C04: a Pass B record without the authored final arrival fails pass-b-workload-arrival', () => {
+  const dir = makeTempEvidenceDir();
+  try {
+    mutateRecord(dir, 'v02-wi-04-uninstrumented-regular-workload.json', (r) => {
+      r.workloadValidity.arrivalReached = false;
+      r.workloadValidity.valid = false;
+      return r;
+    });
+    const result = evaluateEvidenceComparison({
+      evidenceDir: dir,
+      distDir: REAL_DIST,
+      uninstrumentedDir: REAL_UNINSTRUMENTED,
+      writePackage: false,
+    });
+    const names = failureNames(result);
+    assert.ok(
+      names.includes('pass-b-workload-arrival'),
+      `expected pass-b-workload-arrival failure, got ${names.join(', ')}`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

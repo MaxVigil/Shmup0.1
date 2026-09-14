@@ -173,14 +173,14 @@ export function sessionReducer(
       // Mission Instance (Base §9.5, AC-032/033/034; Epic §13, V02-AC-020).
       // Ignored when no active mission remains OR when the command's
       // missionInstanceOrdinal does not exactly match the active Mission
-      // Snapshot, so a delayed or duplicated terminal/Aborted command from an
-      // older mission can never resolve, reward, recover, or abort another
-      // Mission Instance. V02-WI-02: the result carries the pre-committed
-      // persisted campaign values (`creditsAfter`, `hullIntegrityAfter`)
-      // computed by the domain transition inside the campaign transaction;
-      // this reducer only applies them defensively and never computes economy
-      // as a parallel authority. Success/Defeat record the presented Result;
-      // Aborted opens Operations directly.
+      // Snapshot, so a delayed or duplicated terminal command from an older
+      // mission can never resolve or reward another Mission Instance.
+      // V02-WI-02: the result carries the pre-committed persisted campaign
+      // values (`creditsAfter`, `hullIntegrityAfter`) computed by the domain
+      // transition inside the campaign transaction; this reducer only applies
+      // them defensively and never computes economy as a parallel authority.
+      // Success/Defeat (after affordable Repair) record the presented Result;
+      // Game Over presents no mission Result.
       if (
         state === null ||
         state.activeMission === 'none' ||
@@ -278,15 +278,9 @@ export function sessionReducer(
           combatLifecycle: IDLE_COMBAT_LIFECYCLE,
         };
       }
-      // Aborted: no Overlay is presented; Operations opens directly.
-      return {
-        ...state,
-        activeMission: 'none',
-        credits: action.result.creditsAfter,
-        hullIntegrity: action.result.hullIntegrityAfter,
-        missionResult: null,
-        combatLifecycle: IDLE_COMBAT_LIFECYCLE,
-      };
+      // The MissionResult union is exhaustively success/evacuated/defeat here;
+      // defensive so a future kind can never fall through into the next case.
+      return state;
     case 'mission/result-consumed':
       // Continue performed navigation/cleanup only for the presented result.
       // The command must exactly match the presented result's originating
@@ -308,6 +302,9 @@ export function sessionReducer(
     case 'combat-lifecycle/open-debug':
     case 'combat-lifecycle/close-debug':
     case 'combat-lifecycle/browser-safety-event':
+    case 'combat-lifecycle/open-evacuation-confirmation':
+    case 'combat-lifecycle/cancel-evacuation-confirmation':
+    case 'combat-lifecycle/confirm-evacuation':
     case 'combat-terminal/pending':
     case 'combat-terminal/save-error':
     case 'combat-terminal/save-conflict':

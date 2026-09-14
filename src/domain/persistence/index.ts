@@ -16,7 +16,6 @@ export {
   applyMissionDefeat,
   applyMissionEvacuation,
   applyMissionSuccess,
-  applySeamAbort,
   beginMission,
   clearMissionInProgress,
 } from './campaign-transitions';

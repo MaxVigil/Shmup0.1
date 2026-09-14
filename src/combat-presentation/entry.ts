@@ -327,10 +327,10 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
       );
       if (plan.kind === 'authorize-exit') {
         pendingExitResult = plan.result;
-        // V02-WI-04 C01 / V02-WI-05: the deterministic bounded exit advances
+        // V02-WI-04 C01 / V02-WI-05 E02: the deterministic bounded exit advances
         // only after the campaign transaction has committed the Success or
         // Evacuation result (Epic §13.3–13.4 order: freeze → commit → exit).
-        runtime.authorizeSuccessExit();
+        runtime.authorizeCommittedExit();
         // Close Save Error, or hold the committed exit behind the Resume-only
         // terminal-exit Pause when the manual-resume latch is set.
         input.store.dispatch({
@@ -420,7 +420,7 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
       if (
         exitResultDispatched ||
         pendingExitResult === null ||
-        state.successExitPhase !== 'complete'
+        state.exitPhase !== 'complete'
       ) {
         return;
       }
@@ -464,6 +464,34 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     // command was committed, so no paused/blocking state can keep advancing even
     // for a frame.
     let paused = false;
+    // V02-WI-05 E02: the local owner relays the authoritative `beginEvacuation`
+    // runtime command exactly once per Mission Instance. The relay is driven by
+    // the E01 lifecycle commitment fact (`evacuationCommitted`) on the ONE
+    // Session Store — never by React-local timing, a per-frame poll, or a
+    // mutable global/test command. It fires when the store transitions to
+    // committed (including when Confirm leaves the lifecycle paused under a
+    // browser-safety manual-Resume latch — the runtime records the commitment
+    // immediately, but the countdown advances only once the lifecycle resumes)
+    // and again for the initial state so an entry created AFTER the store
+    // already contains committed=true still begins exactly once.
+    let evacuationBeginRelayed = false;
+    const relayEvacuationBegin = (): void => {
+      if (disposed || evacuationBeginRelayed) {
+        return;
+      }
+      const session = input.store.getState();
+      if (
+        session === null ||
+        session.activeMission === 'none' ||
+        !session.combatLifecycle.evacuationCommitted ||
+        session.activeMission.missionInstanceOrdinal !==
+          input.snapshot.missionInstanceOrdinal
+      ) {
+        return;
+      }
+      evacuationBeginRelayed = true;
+      runtime.beginEvacuation();
+    };
     const applyLifecycle = (): void => {
       const session = input.store.getState();
       const nextPaused =
@@ -472,6 +500,7 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
         !session.combatLifecycle.running;
       paused = nextPaused;
       runtime.setPaused(nextPaused);
+      relayEvacuationBegin();
     };
     unsubscribeLifecycle = input.store.subscribe(applyLifecycle);
     subscribed = true;
@@ -565,27 +594,6 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     }
 
     return {
-      requestReturnToBase() {
-        if (disposed) {
-          return;
-        }
-        // V02-WI-05 C03: once the authoritative terminal trigger exists or its
-        // persistence is pending/held/frozen, the temporary abort seam is
-        // blocked — terminal commitment and recovery own the boundary and the
-        // abort can never bypass a committed/held Defeat or Game Over.
-        if (terminalDispatched || runtime.getState().terminalResult !== null) {
-          return;
-        }
-        // S12 abortMission seam through the WI-02 persisted command: the
-        // originating Mission Instance ordinal plus the current authoritative
-        // Combat Hull; no reward, recovery, or Result Overlay, and Operations
-        // opens directly. The command persists the marker clear first.
-        input.abortMission(
-          runtime.getState().playerHullIntegrity,
-          input.snapshot.missionAttemptId,
-          input.snapshot.missionInstanceOrdinal,
-        );
-      },
       setControlMode(mode) {
         if (disposed) {
           return;
@@ -628,7 +636,7 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
         // holds the runtime paused, so it is closed through the authoritative
         // lifecycle (unpausing when Debug opened from running Combat) before the
         // committed exit advances; the exit itself still waits for the campaign
-        // transaction to commit through the `authorizeSuccessExit` seam.
+        // transaction to commit through the `authorizeCommittedExit` seam.
         if (after.terminalResult?.kind === 'success') {
           input.store.dispatch({
             type: 'combat-lifecycle/close-debug',

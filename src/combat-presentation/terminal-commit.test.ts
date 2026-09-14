@@ -327,6 +327,70 @@ describe('V02-WI-05 C04 terminal boundary plan (planCommittedTerminal)', () => {
     ).toEqual({ kind: 'save-error' });
   });
 
+  it('authorizes the committed Evacuation exit even under the manual-resume latch (the entry holds it behind Resume)', () => {
+    // V02-WI-05 E02: a committed Evacuated result always authorizes the shared
+    // deterministic exit. The entry's `combat-terminal/recover` path decides
+    // whether that exit runs immediately or is held behind the Resume-only
+    // terminal-exit Pause when the browser-safety latch is set — never here.
+    const evacuated = { status: 'committed', result: evacuatedResult } as const;
+    expect(planCommittedTerminal(evacuated, sessionWith(), identity)).toEqual({
+      kind: 'authorize-exit',
+      result: evacuatedResult,
+    });
+    expect(
+      planCommittedTerminal(
+        evacuated,
+        sessionWith(1, 7, 'interception-01', true),
+        identity,
+      ),
+    ).toEqual({ kind: 'authorize-exit', result: evacuatedResult });
+    // A failed/rejected Evacuation write freezes the same payload behind Save
+    // Error and never advances any exit.
+    expect(
+      planCommittedTerminal({ status: 'failed' }, sessionWith(), identity),
+    ).toEqual({ kind: 'save-error' });
+    expect(
+      planCommittedTerminal(
+        { status: 'rejected', error: new Error('boom') },
+        sessionWith(),
+        identity,
+      ),
+    ).toEqual({ kind: 'save-error' });
+  });
+
+  it('freezes the first Evacuation economy relay exactly once so Retry Save reuses the same payload', () => {
+    const payload = createFrozenTerminalPayload();
+    const relay: SuccessEconomyRelay = {
+      combatRewards: 12,
+      escapePenalties: 2,
+      destroyedCounts: {
+        'basic-drone': 3,
+        'ranged-drone': 1,
+        'hunter-drone': 0,
+        'elite-drone': 0,
+      },
+      escapedCounts: {
+        'basic-drone': 0,
+        'ranged-drone': 0,
+        'hunter-drone': 0,
+        'elite-drone': 0,
+      },
+    };
+    const lateRelay: SuccessEconomyRelay = {
+      ...relay,
+      combatRewards: 99,
+      escapedCounts: {
+        'basic-drone': 1,
+        'ranged-drone': 0,
+        'hunter-drone': 0,
+        'elite-drone': 0,
+      },
+    };
+    expect(payload.freezeEconomy(relay)).toBe(relay);
+    expect(payload.freezeEconomy(lateRelay)).toBe(relay);
+    expect(payload.currentEconomy()).toBe(relay);
+  });
+
   it('mayPresentHeldDefeat is true only after an explicit Resume on the exact snapshot', () => {
     // Held behind the terminal-exit Pause: not presentable yet.
     expect(

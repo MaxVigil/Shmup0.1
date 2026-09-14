@@ -71,7 +71,7 @@ test('Combat shows the v0.2 HUD: top-centred Countdown, Hull Bar, and CRITICAL H
   await expect(track).toHaveAttribute('aria-valuenow', '100');
 
   const geometry = await page.evaluate(() => {
-    const hudElement = document.querySelector('.ds-combat-hud');
+    const hudElement = document.querySelector('.ds-combat-hud__bar');
     const fillElement = document.querySelector('.ds-combat-hud__fill');
     if (hudElement === null || fillElement === null) {
       return null;
@@ -113,6 +113,257 @@ test('Combat shows the v0.2 HUD: top-centred Countdown, Hull Bar, and CRITICAL H
   );
 });
 
+test('the v0.2 HUD anchors the Countdown to the viewport and the Hull bar to the Aircraft at 1280x600 (V02-AC-022, Epic §15.2–15.3, DS §8.26)', async ({
+  page,
+}) => {
+  await startMission(page);
+
+  interface HudBox {
+    readonly left: number;
+    readonly top: number;
+    readonly right: number;
+    readonly bottom: number;
+    readonly width: number;
+    readonly height: number;
+    readonly lineCount: number;
+    readonly whiteSpace: string;
+    readonly lineHeight: number;
+  }
+
+  interface HudGeometry {
+    readonly viewportWidth: number;
+    readonly countdown: HudBox | null;
+    readonly bar: HudBox | null;
+  }
+
+  const readHud = (): Promise<HudGeometry> =>
+    page.evaluate(() => {
+      const read = (selector: string) => {
+        const element = document.querySelector(selector);
+        if (element === null) {
+          return null;
+        }
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+          lineCount: range.getClientRects().length,
+          whiteSpace: style.whiteSpace,
+          lineHeight: Number.parseFloat(style.lineHeight),
+        };
+      };
+      return {
+        viewportWidth: window.innerWidth,
+        countdown: read('.ds-combat-countdown'),
+        bar: read('.ds-combat-hud__bar'),
+      };
+    });
+
+  // Ordinary Combat Countdown: viewport-centred at the exact space-4 top offset
+  // and exactly one line (the number that a nested-in-the-bar layout breaks).
+  // space-4 is `1rem` = 16px at the approved 16px base font (DS §6.2).
+  const initial = await readHud();
+  expect(initial.countdown).not.toBeNull();
+  const countdown = initial.countdown as HudBox;
+  expect(countdown.width).toBeGreaterThan(0);
+  expect(countdown.lineCount).toBe(1);
+  expect(countdown.whiteSpace).toBe('nowrap');
+  expect(Math.abs(countdown.height - countdown.lineHeight)).toBeLessThan(1);
+  expect(Math.abs(countdown.top - 16)).toBeLessThan(1);
+  expect(
+    Math.abs(
+      (countdown.left + countdown.right) / 2 - initial.viewportWidth / 2,
+    ),
+  ).toBeLessThan(1);
+
+  // The Aircraft moves (pointer mode): the Hull bar follows it, while the
+  // Countdown geometry stays exactly where it was.
+  await page.mouse.move(320, 500);
+  await expect
+    .poll(async () => (await readHud()).bar?.left ?? 0)
+    .toBeLessThan(500);
+  const movedLeft = await readHud();
+  await page.mouse.move(960, 500);
+  await expect
+    .poll(async () => (await readHud()).bar?.left ?? 0)
+    .toBeGreaterThan(900);
+  const movedRight = await readHud();
+
+  expect(movedLeft.bar).not.toBeNull();
+  expect(movedRight.bar).not.toBeNull();
+  const leftBar = movedLeft.bar as HudBox;
+  const rightBar = movedRight.bar as HudBox;
+  // The bar tracked the Aircraft across more than 300 px of travel and stayed in
+  // the lower half of the viewport, below the aircraft. 1280x600: short side
+  // 600 → aircraft height 48, width 48 * 1278/1231 ≈ 49.8, bar 65% ≈ 32.4.
+  expect(rightBar.left - leftBar.left).toBeGreaterThan(300);
+  expect(Math.abs(leftBar.width - 32.4)).toBeLessThan(6);
+  expect(Math.abs(rightBar.width - 32.4)).toBeLessThan(6);
+  expect(leftBar.top).toBeGreaterThan(400);
+  expect(rightBar.top).toBeGreaterThan(400);
+
+  const movedCountdown = movedRight.countdown as HudBox;
+  expect(movedCountdown.lineCount).toBe(1);
+  for (const key of ['left', 'top', 'right', 'bottom', 'width', 'height']) {
+    expect(Math.abs(movedCountdown[key] - countdown[key])).toBeLessThan(0.5);
+  }
+
+  console.log(
+    'V02-WI-05-E04-HUD-GEOMETRY',
+    JSON.stringify({
+      viewport: [initial.viewportWidth, 600],
+      countdownTop: countdown.top,
+      countdownCentreX: (countdown.left + countdown.right) / 2,
+      countdownLines: countdown.lineCount,
+      countdownHeight: countdown.height,
+      barLeft: [leftBar.left, rightBar.left],
+      barWidth: [leftBar.width, rightBar.width],
+      barTop: [leftBar.top, rightBar.top],
+    }),
+  );
+});
+
+test('CRITICAL HULL sits directly below the Countdown with the exact space-2 gap at 1280x600 (Epic §15.3, DS §8.26)', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+
+  // Persist a surviving Hull below 25 through the persisted campaign row so the
+  // real once-per-Mission-Instance CRITICAL HULL latch opens immediately on
+  // Combat entry (Epic §15.3) — no production hook and no simulated message.
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('shmup-v0.2');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('campaign', 'readwrite');
+      const store = transaction.objectStore('campaign');
+      const get = store.get('current');
+      get.onsuccess = () => {
+        const row = get.result as {
+          id: string;
+          value: { hullIntegrity: number };
+        };
+        store.put({ ...row, value: { ...row.value, hullIntegrity: 20 } });
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  });
+  await page.reload();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+
+  // Capture the geometry while the real latch is visible from an in-page
+  // frame sampler, so a slow boot can never turn a visible message into a
+  // missed measurement.
+  await page.evaluate(() => {
+    const target = window as Window & { __criticalHullProbe__?: unknown };
+    target.__criticalHullProbe__ = null;
+    const sample = (): void => {
+      const countdown = document.querySelector('.ds-combat-countdown');
+      const critical = document.querySelector('.ds-combat-critical-hull');
+      if (
+        countdown !== null &&
+        critical instanceof HTMLElement &&
+        !critical.hidden
+      ) {
+        const countdownRect = countdown.getBoundingClientRect();
+        const criticalRect = critical.getBoundingClientRect();
+        if (countdownRect.height > 0 && criticalRect.height > 0) {
+          target.__criticalHullProbe__ = {
+            countdown: {
+              left: countdownRect.left,
+              top: countdownRect.top,
+              right: countdownRect.right,
+              bottom: countdownRect.bottom,
+              height: countdownRect.height,
+            },
+            critical: {
+              left: criticalRect.left,
+              top: criticalRect.top,
+              right: criticalRect.right,
+              bottom: criticalRect.bottom,
+              height: criticalRect.height,
+            },
+          };
+          return;
+        }
+      }
+      window.requestAnimationFrame(sample);
+    };
+    window.requestAnimationFrame(sample);
+  });
+
+  await page.getByRole('button', { name: 'Interception 01' }).click();
+  await page.getByRole('button', { name: 'Start Mission' }).click();
+  const criticalHull = page.locator('.ds-combat-critical-hull');
+  await expect(criticalHull).toBeVisible({ timeout: 15000 });
+
+  const probe = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          __criticalHullProbe__?: {
+            readonly countdown: {
+              readonly left: number;
+              readonly top: number;
+              readonly right: number;
+              readonly bottom: number;
+              readonly height: number;
+            };
+            readonly critical: {
+              readonly left: number;
+              readonly top: number;
+              readonly right: number;
+              readonly bottom: number;
+              readonly height: number;
+            };
+          } | null;
+        }
+      ).__criticalHullProbe__ ?? null,
+  );
+  expect(probe).not.toBeNull();
+  const measured = probe as NonNullable<typeof probe>;
+
+  // Directly below the Countdown with the exact space-2 gap and no overlap.
+  // space-2 is `0.5rem` = 8px at the approved 16px base font (DS §6.2).
+  expect(measured.critical.height).toBeGreaterThan(0);
+  expect(measured.critical.top).toBeGreaterThanOrEqual(
+    measured.countdown.bottom,
+  );
+  expect(
+    Math.abs(measured.critical.top - measured.countdown.bottom - 8),
+  ).toBeLessThan(1);
+  // Both lines share the viewport centre.
+  expect(
+    Math.abs(
+      (measured.critical.left + measured.critical.right) / 2 -
+        (measured.countdown.left + measured.countdown.right) / 2,
+    ),
+  ).toBeLessThan(1);
+
+  console.log(
+    'V02-WI-05-E04-CRITICAL-HULL-GEOMETRY',
+    JSON.stringify({
+      countdownBottom: measured.countdown.bottom,
+      criticalTop: measured.critical.top,
+      gap: measured.critical.top - measured.countdown.bottom,
+      criticalHeight: measured.critical.height,
+    }),
+  );
+});
+
 test('Combat recalibrates the canvas, aircraft, and Hull bar on viewport resize with no repeated asset requests (Combat AC-001, AC-053, AC-057, AC-081, AC-082, MASTER-AC-010)', async ({
   page,
 }) => {
@@ -137,7 +388,7 @@ test('Combat recalibrates the canvas, aircraft, and Hull bar on viewport resize 
   const readCombat = () =>
     page.evaluate(() => {
       const canvas = document.querySelector('.ds-combat-canvas canvas');
-      const hud = document.querySelector('.ds-combat-hud');
+      const hud = document.querySelector('.ds-combat-hud__bar');
       const fill = document.querySelector('.ds-combat-hud__fill');
       const track = document.querySelector('.ds-combat-hud__track');
       if (canvas === null || hud === null || fill === null || track === null) {

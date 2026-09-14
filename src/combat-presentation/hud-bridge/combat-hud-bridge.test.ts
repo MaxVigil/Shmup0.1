@@ -42,9 +42,12 @@ describe('createCombatHudBridge', () => {
     const bridge = createCombatHudBridge();
     document.body.appendChild(bridge.element);
     bridge.update(values());
-    expect(bridge.element.style.left).toBe(`${640 - (74.7 * 0.65) / 2}px`);
-    expect(bridge.element.style.top).toBe(`${516 + 600 * 0.01}px`);
-    expect(bridge.element.style.width).toBe(`${74.7 * 0.65}px`);
+    const bar = bridge.element.querySelector(
+      '.ds-combat-hud__bar',
+    ) as HTMLElement;
+    expect(bar.style.left).toBe(`${640 - (74.7 * 0.65) / 2}px`);
+    expect(bar.style.top).toBe(`${516 + 600 * 0.01}px`);
+    expect(bar.style.width).toBe(`${74.7 * 0.65}px`);
     const fill = bridge.element.querySelector(
       '.ds-combat-hud__fill',
     ) as HTMLElement;
@@ -59,6 +62,41 @@ describe('createCombatHudBridge', () => {
       '.ds-combat-countdown',
     ) as HTMLElement;
     expect(countdown.textContent).toBe('03:10');
+  });
+
+  it('keeps Countdown and CRITICAL HULL out of the aircraft-anchored bar and free of per-frame geometry (V02-WI-05 E04 C01)', () => {
+    const bridge = createCombatHudBridge();
+    document.body.appendChild(bridge.element);
+    bridge.update(values({ criticalHullVisible: true }));
+    const system = bridge.element.querySelector(
+      '.ds-combat-hud__system',
+    ) as HTMLElement;
+    const countdown = bridge.element.querySelector(
+      '.ds-combat-countdown',
+    ) as HTMLElement;
+    const critical = bridge.element.querySelector(
+      '.ds-combat-critical-hull',
+    ) as HTMLElement;
+    // The defect this guard prevents: a Countdown nested inside the Hull bar
+    // inherits the aircraft-following offset, the 65% bar width, and the
+    // resulting wrapping (v0.2 §15.2–15.3, DS §8.26).
+    expect(countdown.closest('.ds-combat-hud__bar')).toBeNull();
+    expect(critical.closest('.ds-combat-hud__bar')).toBeNull();
+    expect(system.contains(countdown)).toBe(true);
+    expect(system.contains(critical)).toBe(true);
+    // Neither the layer root nor the system column is repositioned per frame:
+    // only the Hull bar carries inline geometry.
+    expect(bridge.element.style.left).toBe('');
+    expect(bridge.element.style.top).toBe('');
+    expect(bridge.element.style.width).toBe('');
+    expect(system.style.left).toBe('');
+    expect(system.style.top).toBe('');
+    expect(system.style.transform).toBe('');
+    expect(countdown.style.left).toBe('');
+    expect(countdown.style.top).toBe('');
+    expect(countdown.style.width).toBe('');
+    expect(critical.style.left).toBe('');
+    expect(critical.style.top).toBe('');
   });
 
   it('uses the danger fill strictly below 25 Hull and toggles CRITICAL HULL visibility', () => {

@@ -232,14 +232,11 @@ test('records the legacy five-Basic production proxy with exact concurrent workl
   expect(evidence.minimumSustainedWindowFps).toBeGreaterThanOrEqual(50);
   expect(pageErrors).toEqual([]);
 
-  // Post-run cleanup facts: no Combat residue after resolving to Operations.
-  if ((await page.getByRole('dialog').count()) > 0) {
-    await page.getByRole('button', { name: 'Continue' }).click();
-  } else {
-    await page.keyboard.press('KeyP');
-    await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
-    await page.getByRole('button', { name: 'Return to Base' }).click();
-  }
+  // Post-run cleanup facts (V02-WI-05 E01): no Combat residue after resolving
+  // the running mission. The temporary Return to Base seam is removed, so the
+  // canonical active-mission refresh Defeat recovery (V02-AC-018) resolves the
+  // persisted marker exactly once and opens Operations with no residue.
+  await page.reload();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await expect(page.locator('canvas')).toHaveCount(0);
   await expect(page.locator('.ds-combat-hud')).toHaveCount(0);

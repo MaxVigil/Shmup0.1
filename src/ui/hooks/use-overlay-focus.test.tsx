@@ -1,24 +1,27 @@
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useRef } from 'react';
-import type { ReactElement } from 'react';
+import type { ReactElement, RefObject } from 'react';
 import { useOverlayFocus } from './use-overlay-focus';
 
 interface OverlayHarnessProps {
   readonly open: boolean;
   readonly onClose?: () => void;
   readonly firstLabel?: string;
+  readonly restoreFocusRef?: RefObject<HTMLElement | null>;
 }
 
 function OverlayHarness({
   open,
   onClose,
   firstLabel = 'First',
+  restoreFocusRef,
 }: OverlayHarnessProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   useOverlayFocus({
     open,
     containerRef,
+    ...(restoreFocusRef === undefined ? {} : { restoreFocusRef }),
     ...(onClose === undefined ? {} : { onClose }),
   });
   return (
@@ -97,5 +100,54 @@ describe('useOverlayFocus', () => {
     rerender(<OverlayHarness open={false} onClose={vi.fn()} />);
     expect(document.activeElement).toBe(opener);
     document.body.removeChild(opener);
+  });
+
+  it('restores focus to an explicitly supplied opener the browser already blurred (V02-WI-05 E04)', () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'Evacuate';
+    document.body.appendChild(opener);
+    // The opener is disabled by the same commit that opens the Overlay, so the
+    // browser has already blurred it and `document.activeElement` is `<body>`.
+    (document.activeElement as HTMLElement | null)?.blur();
+    const restoreFocusRef = { current: opener };
+    const { rerender } = render(
+      <OverlayHarness
+        open
+        onClose={vi.fn()}
+        restoreFocusRef={restoreFocusRef}
+      />,
+    );
+    expect(document.activeElement?.textContent).toBe('First');
+    rerender(
+      <OverlayHarness
+        open={false}
+        onClose={vi.fn()}
+        restoreFocusRef={restoreFocusRef}
+      />,
+    );
+    expect(document.activeElement).toBe(opener);
+    document.body.removeChild(opener);
+  });
+
+  it('repairs an inert content focus loss back inside the Overlay (V02-WI-05 E04 C01)', () => {
+    render(<OverlayHarness open onClose={vi.fn()} />);
+    const first = document.querySelectorAll('button')[0] as HTMLButtonElement;
+    expect(document.activeElement).toBe(first);
+    // A real browser moves focus to `<body>` on a mousedown over non-focusable
+    // Overlay content; without the containment repair `Esc`/`Tab` would stop
+    // working because the key handler lives on the Surface.
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(first);
+  });
+
+  it('defers the containment repair until a pointer gesture ends so native drag/selection is untouched (V02-WI-05 E04 C01)', () => {
+    render(<OverlayHarness open onClose={vi.fn()} />);
+    const first = document.querySelectorAll('button')[0] as HTMLButtonElement;
+    document.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    (document.activeElement as HTMLElement).blur();
+    // The gesture is still active: no focus steal while the player drags.
+    expect(document.activeElement).toBe(document.body);
+    document.dispatchEvent(new Event('pointerup', { bubbles: true }));
+    expect(document.activeElement).toBe(first);
   });
 });

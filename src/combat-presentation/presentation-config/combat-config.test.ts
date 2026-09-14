@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { COMBAT_RENDER_DEPTH, resolveCombatGeometry } from './combat-config';
+import {
+  COMBAT_RENDER_DEPTH,
+  formatCombatCountdown,
+  formatEvacuationCountdown,
+  resolveCombatGeometry,
+} from './combat-config';
 
 describe('resolveCombatGeometry', () => {
   it('derives aircraft height from the viewport short side', () => {
@@ -34,5 +39,24 @@ describe('COMBAT_RENDER_DEPTH', () => {
     expect(COMBAT_RENDER_DEPTH.projectile).toBeLessThan(
       COMBAT_RENDER_DEPTH.aircraft,
     );
+  });
+
+  describe('countdown formatting (Epic §15.2, §13.4 step 5; V02-WI-05 E03)', () => {
+    it('formats the Combat Countdown as MM:SS', () => {
+      expect(formatCombatCountdown(190)).toBe('03:10');
+      expect(formatCombatCountdown(0)).toBe('00:00');
+      expect(formatCombatCountdown(-5)).toBe('00:00');
+    });
+
+    it('formats the Evacuation Countdown as EVACUATION MM:SS at the canonical boundaries', () => {
+      // 300 and 299 steps both display 00:05, 240 displays 00:04, 1 displays
+      // 00:01, and the zero step displays 00:00 (Epic §13.4 step 5).
+      expect(formatEvacuationCountdown(5)).toBe('EVACUATION 00:05');
+      expect(formatEvacuationCountdown(4)).toBe('EVACUATION 00:04');
+      expect(formatEvacuationCountdown(1)).toBe('EVACUATION 00:01');
+      expect(formatEvacuationCountdown(0)).toBe('EVACUATION 00:00');
+      // Formatting only: a whole-second value is rendered, never re-derived.
+      expect(formatEvacuationCountdown(65)).toBe('EVACUATION 01:05');
+    });
   });
 });

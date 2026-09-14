@@ -10,7 +10,6 @@ import {
   applyDefeatRecoveryOrGameOver,
   applyMissionDefeat,
   applyMissionEvacuation,
-  applySeamAbort,
   beginMission,
   clearMissionInProgress,
 } from './campaign-transitions';
@@ -302,23 +301,9 @@ describe('canonical terminal transitions (v0.2)', () => {
     ).toEqual({ kind: 'rejected', reason: 'invalid-evacuation-result-values' });
   });
 
-  it('Aborted retains Combat Hull with no reward or recovery for the exact attempt', () => {
-    const result = applySeamAbort(inProgress(), 0, 55);
-    expect(result.kind).toBe('applied');
-    if (result.kind === 'applied') {
-      expect(result.campaign.credits).toBe(V02_STARTING_CREDITS);
-      expect(result.campaign.hullIntegrity).toBe(55);
-      expect(result.campaign.missionInProgress).toBeNull();
-    }
-  });
-
   it('a stale terminal for a different campaign attempt is a strict attempt-does-not-match rejection before any reward or Hull change', () => {
     const newerMarker = withMarker(newGame(), 'interception-01', 1);
     expect(applyMissionDefeat(newerMarker, 0, 'interception-01')).toEqual({
-      kind: 'rejected',
-      reason: 'attempt-does-not-match',
-    });
-    expect(applySeamAbort(newerMarker, 0, 55)).toEqual({
       kind: 'rejected',
       reason: 'attempt-does-not-match',
     });
@@ -327,10 +312,6 @@ describe('canonical terminal transitions (v0.2)', () => {
   it('a stale terminal transition after the marker cleared is a strict rejection', () => {
     const cleared = { ...inProgress(), missionInProgress: null };
     expect(applyMissionDefeat(cleared, 0, 'interception-01')).toEqual({
-      kind: 'rejected',
-      reason: 'no-mission-in-progress',
-    });
-    expect(applySeamAbort(cleared, 0, 55)).toEqual({
       kind: 'rejected',
       reason: 'no-mission-in-progress',
     });

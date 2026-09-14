@@ -78,7 +78,6 @@ async function buildInput(): Promise<{
       store: app.store,
       debugMode: true,
       commitTerminalResult: vi.fn(),
-      abortMission: vi.fn(),
     } as CombatSessionInput,
     container,
     store: app.store,

@@ -215,15 +215,11 @@ test('Pass A records exact simultaneous-state e5 workload evidence with the cano
     pageErrors: pageErrors.length,
   };
 
-  // Post-run cleanup: no Combat residue after resolving the running mission to
-  // Operations (a natural result or Pause → Return to Base).
-  if ((await page.getByRole('dialog').count()) > 0) {
-    await page.getByRole('button', { name: 'Continue' }).click();
-  } else {
-    await page.keyboard.press('KeyP');
-    await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
-    await page.getByRole('button', { name: 'Return to Base' }).click();
-  }
+  // Post-run cleanup (V02-WI-05 E01): the temporary Return to Base abort seam
+  // is removed, so the running mission is resolved through the canonical
+  // active-mission refresh Defeat recovery (V02-AC-018). Reloading opens
+  // Operations with no Combat entity, canvas, HUD bridge, or overlay residue.
+  await page.reload();
   await expect(page.getByTestId('operations-screen')).toBeVisible();
   await expect(page.locator('canvas')).toHaveCount(0);
   await expect(page.locator('.ds-combat-hud')).toHaveCount(0);

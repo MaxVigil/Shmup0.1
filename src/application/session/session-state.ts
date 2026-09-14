@@ -27,7 +27,7 @@ export type BaseScreenId = 'operations' | 'hangar';
  * pre-committed progression so the Result Overlay (Epic §15.4) presents
  * committed values only. Evacuated carries the frozen run facts and retained
  * payout; Defeat after an affordable Repair carries the Repair cost; Game Over
- * and Aborted present no mission Result. The `missionInstanceOrdinal` binds
+ * presents no mission Result. The `missionInstanceOrdinal` binds
  * consumption to the originating mission.
  */
 export type PresentedMissionResult =

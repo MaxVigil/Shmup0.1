@@ -251,38 +251,6 @@ export function applyMissionDefeat(
   };
 }
 
-/**
- * Temporary v0.1 Aborted (Return to Base) through the compatibility seam: no
- * reward or recovery; current Combat Hull retained and the marker cleared —
- * only for the exact campaign attempt id (V02-WI-02 correction C03), so a
- * stale Aborted callback from an older attempt is inert. The v0.2 spec removes
- * `Aborted` (Evacuation is the only voluntary exit); this transition exists
- * only until V02-WI-05 replaces the v0.1 seam flow.
- */
-export function applySeamAbort(
-  campaign: CampaignStateV1,
-  attemptId: number,
-  combatHullIntegrity: number,
-): CampaignTransitionResult {
-  if (campaign.missionInProgress === null) {
-    return { kind: 'rejected', reason: 'no-mission-in-progress' };
-  }
-  if (!exactMarkerMatch(campaign, attemptId)) {
-    return { kind: 'rejected', reason: 'attempt-does-not-match' };
-  }
-  if (!isHullIntegrity(combatHullIntegrity)) {
-    return { kind: 'rejected', reason: 'invalid-abort-hull' };
-  }
-  return {
-    kind: 'applied',
-    campaign: {
-      ...campaign,
-      hullIntegrity: combatHullIntegrity,
-      missionInProgress: null,
-    },
-  };
-}
-
 export type DefeatRecoveryOutcome = 'repaired' | 'game-over';
 
 export interface DefeatRecoveryResult {

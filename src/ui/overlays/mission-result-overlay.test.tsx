@@ -143,12 +143,45 @@ describe('MissionResultOverlay (Base §9.5, S12)', () => {
     expect(screen.getByRole('heading', { name: 'EVACUATED' })).toBeDefined();
     expect(screen.getByText('Destroyed')).toBeDefined();
     expect(screen.getByText('Escaped')).toBeDefined();
+    expect(screen.getByText('Net combat rewards')).toBeDefined();
     expect(screen.getByText('Retained 50%')).toBeDefined();
+    expect(screen.getByText('Credits earned')).toBeDefined();
     expect(screen.getByText('+2 Credits')).toBeDefined();
     expect(screen.getByText('Mission not completed')).toBeDefined();
-    // No completion reward or unlock rows exist for an Evacuation.
+    const continueButton = screen.getByRole('button', { name: 'Continue' });
+    expect(document.activeElement).toBe(continueButton);
+    // No completion reward, unlock, Escape-penalty, or speculative statistic
+    // rows exist for an Evacuation (Epic §15.4 exclusions).
     expect(screen.queryByText('Completion reward')).toBeNull();
     expect(screen.queryByText('Mission unlocked')).toBeNull();
+    expect(screen.queryByText('Escape penalties')).toBeNull();
+    for (const prohibited of ['Duration', 'Score', 'DPS', 'Wave', 'Enemy HP']) {
+      expect(screen.queryByText(prohibited)).toBeNull();
+    }
+    expect(screen.queryByText('Retry')).toBeNull();
+  });
+
+  it('Continue consumes the presented Evacuation exactly once without mutating the committed campaign', () => {
+    const store = storeWithResult('evacuated');
+    renderOverlay(store);
+    const before = store.getState()!;
+    const creditsBefore = before.credits;
+    const resultOrdinal = before.missionResult?.missionInstanceOrdinal ?? -1;
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    });
+    expect(store.getState()!.missionResult).toBeNull();
+    expect(store.getState()!.credits).toBe(creditsBefore);
+    // A stale/repeated Continue for the same consumed instance is a no-op.
+    const consumed = store.getState();
+    act(() => {
+      store.dispatch({
+        type: 'mission/result-consumed',
+        missionInstanceOrdinal: resultOrdinal,
+      });
+    });
+    expect(store.getState()).toBe(consumed);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('renders nothing when no result is pending', () => {

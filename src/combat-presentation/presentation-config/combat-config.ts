@@ -93,6 +93,18 @@ export function formatCombatCountdown(wholeSeconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+/**
+ * V02-WI-05 E03 Evacuation Countdown presentation (Epic §13.4 step 5,
+ * V02-AC-014, DS §8.26): `EVACUATION MM:SS` where the whole seconds are the
+ * canonical `ceil(max(0, remainingSteps) / 60)` value carried by the E02
+ * `buildEvacuationCountdownReadModel`. This is formatting only — the HUD owns
+ * no timer, countdown state, or transition, and it replaces (never joins) the
+ * Combat Countdown on the same single element.
+ */
+export function formatEvacuationCountdown(displaySeconds: number): string {
+  return `EVACUATION ${formatCombatCountdown(displaySeconds)}`;
+}
+
 export function readColorToken(token: string, fallback: string): string {
   if (typeof document === 'undefined') {
     return fallback;

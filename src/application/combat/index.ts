@@ -18,8 +18,15 @@ export {
   submitCombatCommand,
   advanceSimulationFrames,
   applyDebugCommand,
+  beginEvacuation,
+  buildEvacuationCountdownReadModel,
+  evacuationCountdownDisplaySeconds,
+  evacuationEnemyOpacity,
   FIXED_STEP_SECONDS,
+  FIXED_STEPS_PER_SECOND,
   MAX_STEPS_PER_FRAME,
+  EVACUATION_COUNTDOWN_STEPS,
+  EXIT_CENTRE_STEPS,
 } from './combat-simulation';
 export type {
   CombatSimulationState,
@@ -29,10 +36,12 @@ export type {
   CombatBounds,
   CombatBoundsSize,
   CombatPoint,
+  EvacuationCountdownReadModel,
   SimulationFrameResult,
 } from './combat-simulation';
 export {
   combatLifecycleReducer,
+  evacuationAvailability,
   IDLE_COMBAT_LIFECYCLE,
   RUNNING_COMBAT_LIFECYCLE,
 } from './lifecycle';
@@ -41,6 +50,8 @@ export type {
   CombatLifecycleState,
   CombatOverlayId,
   DebugRestoreOrigin,
+  EvacuationAvailability,
+  EvacuationConfirmationOrigin,
 } from './lifecycle';
 export {
   EVIDENCE_MODE,

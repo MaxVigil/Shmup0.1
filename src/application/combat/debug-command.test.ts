@@ -218,9 +218,9 @@ describe('S13 Debug: forced results reuse the S12 terminal path (Combat §11.6)'
     // centre-and-up exit. The Debug pause is closed through the authoritative
     // lifecycle so forced Success runs the same committed 0.5 s centre phase
     // and 60% VH/s upward exit as natural Success before result presentation;
-    // the exit still waits for the campaign transaction (`authorizeSuccessExit`).
-    expect(won.successExitPhase).toBe('centre');
-    expect(won.successExitAuthorized).toBe(false);
+    // the exit still waits for the campaign transaction (`authorizeCommittedExit`).
+    expect(won.exitPhase).toBe('centre');
+    expect(won.exitAuthorized).toBe(false);
     expect(won.arrivalGroupIndex).toBe(won.arrivalGroups.length);
     expect(won.enemies).toHaveLength(0);
     // Terminal freeze: no further advancement or Debug mutation.

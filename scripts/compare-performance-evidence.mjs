@@ -23,6 +23,14 @@
  *     uninstrumented);
  *   - a machine-readable cleanup object is missing, malformed, or non-zero in
  *     Pass B and both legacy timing records;
+ *   - the Pass B workload-validity facts are missing or invalid: the authored
+ *     `03:10` final arrival was not proven; the raw ordered probe array
+ *     (pre-sample plus sample start/middle/end) is missing, malformed, has the
+ *     wrong count or order, does not show exactly one canvas / one Combat HUD /
+ *     the Combat Screen / the `00:00` Combat Countdown, or shows a dialog,
+ *     Mission Result Overlay, Game Over Screen, or Operations Screen; the
+ *     record's summary flags disagree with the facts recomputed from the raw
+ *     probes (V02-WI-05 E02 C03–C04);
  *   - required percentile/minimum-window/heap/cleanup fields are missing;
  *   - artifact scans show counter symbols compiled into the ordinary Pass B
  *     bundle or the uninstrumented-scenario bundle (allowed scenario identity
@@ -151,6 +159,107 @@ export function isValidCleanupObject(cleanup) {
     typeof cleanup.dialogOverlayCount === 'number' &&
     cleanup.dialogOverlayCount === 0
   );
+}
+
+/** V02-WI-05 E02 C04: the fixed, ordered Pass B observation contract — one
+ *  pre-sample probe plus the timing sample's start/middle/end probes. The
+ *  accepted workload facts are ALWAYS recomputed from these raw probes; the
+ *  record's summary booleans are reporting conveniences only. */
+export const PASS_B_PROBE_ORDER = [
+  'pre-sample',
+  'sample-start',
+  'sample-mid',
+  'sample-end',
+];
+
+/** The complete required key set of one raw Combat DOM probe. */
+const PASS_B_PROBE_KEYS = [
+  'label',
+  'combatScreenVisible',
+  'canvasCount',
+  'combatHudCount',
+  'countdownText',
+  'dialogCount',
+  'resultOverlayCount',
+  'gameOverScreenCount',
+  'operationsScreenCount',
+];
+
+function isNonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+/** One raw probe is usable only when it has exactly the contract keys, carries
+ *  the expected contract label, and every value has its exact type/domain. */
+export function isValidCombatProbe(probe, expectedLabel) {
+  if (probe === null || typeof probe !== 'object' || Array.isArray(probe)) {
+    return false;
+  }
+  const keys = Object.keys(probe);
+  if (
+    keys.length !== PASS_B_PROBE_KEYS.length ||
+    !PASS_B_PROBE_KEYS.every((key) => keys.includes(key))
+  ) {
+    return false;
+  }
+  return (
+    probe.label === expectedLabel &&
+    typeof probe.combatScreenVisible === 'boolean' &&
+    isNonNegativeInteger(probe.canvasCount) &&
+    isNonNegativeInteger(probe.combatHudCount) &&
+    (probe.countdownText === null || typeof probe.countdownText === 'string') &&
+    isNonNegativeInteger(probe.dialogCount) &&
+    isNonNegativeInteger(probe.resultOverlayCount) &&
+    isNonNegativeInteger(probe.gameOverScreenCount) &&
+    isNonNegativeInteger(probe.operationsScreenCount)
+  );
+}
+
+/**
+ * Recomputes every accepted Pass B workload fact from the raw probe array only.
+ * A tampered or contradictory summary cannot make these facts pass; a
+ * disagreement between a summary and these recomputed facts is itself a
+ * failure.
+ */
+export function derivePassBWorkloadFacts(probes) {
+  const list = Array.isArray(probes) ? probes : [];
+  const structureValid =
+    list.length === PASS_B_PROBE_ORDER.length &&
+    list.every((probe, index) =>
+      isValidCombatProbe(probe, PASS_B_PROBE_ORDER[index]),
+    );
+  const usable = list.every(
+    (probe) =>
+      probe !== null && typeof probe === 'object' && !Array.isArray(probe),
+  )
+    ? list
+    : [];
+  const complete =
+    structureValid && usable.length === PASS_B_PROBE_ORDER.length;
+  return {
+    structureValid,
+    probeCount: list.length,
+    activeCombat:
+      complete &&
+      usable.every(
+        (probe) =>
+          probe.combatScreenVisible === true &&
+          probe.canvasCount === 1 &&
+          probe.combatHudCount === 1,
+      ),
+    countdownFinal:
+      complete && usable.every((probe) => probe.countdownText === '00:00'),
+    terminalSeen:
+      complete &&
+      usable.some(
+        (probe) =>
+          probe.dialogCount > 0 ||
+          probe.resultOverlayCount > 0 ||
+          probe.gameOverScreenCount > 0,
+      ),
+    baseSeen:
+      complete && usable.some((probe) => probe.operationsScreenCount > 0),
+  };
 }
 
 function requiredTimingFields(check, record, prefix) {
@@ -356,6 +465,92 @@ export function evaluateEvidenceComparison(options = {}) {
   );
 
   // -------------------------------------------------------------------------
+  // 3b. V02-WI-05 E02 C04 Pass B workload integrity: the uninstrumented timing
+  //     record is accepted only when the authored `03:10` final arrival was
+  //     actually executed AND the RAW ordered probe array independently proves
+  //     real active Combat (the Combat Screen, exactly one canvas, the Combat
+  //     HUD, and the `00:00` Combat Countdown) with no terminal/Result
+  //     Overlay/Game Over/Base frame at the pre-sample, sample start, sample
+  //     middle, and sample end observations. Every accepted fact is recomputed
+  //     from `workloadValidity.probes`; the record's summary flags are only
+  //     reporting conveniences and any disagreement with the recomputed facts
+  //     fails.
+  // -------------------------------------------------------------------------
+  const validity = passB?.workloadValidity;
+  const probeFacts = derivePassBWorkloadFacts(validity?.probes);
+  const probeCountText = JSON.stringify(probeFacts.probeCount);
+  check(
+    probeFacts.structureValid,
+    'pass-b-probe-structure',
+    `Pass B raw probes must be exactly ${JSON.stringify(PASS_B_PROBE_ORDER)} with every contract key and value type (got ${probeCountText} probe(s): ${JSON.stringify(validity?.probes)})`,
+  );
+  check(
+    probeFacts.activeCombat,
+    'pass-b-probe-active-combat',
+    `Every Pass B raw probe must show the Combat Screen, exactly one canvas, and exactly one Combat HUD (got ${JSON.stringify(validity?.probes)})`,
+  );
+  check(
+    probeFacts.countdownFinal,
+    'pass-b-probe-countdown-final',
+    `Every Pass B raw probe must show the 00:00 Combat Countdown (got ${JSON.stringify((validity?.probes ?? []).map((probe) => probe?.countdownText))})`,
+  );
+  check(
+    !probeFacts.terminalSeen,
+    'pass-b-probe-no-terminal',
+    `No Pass B raw probe may show a dialog, Mission Result Overlay, or Game Over Screen (got ${JSON.stringify(validity?.probes)})`,
+  );
+  check(
+    !probeFacts.baseSeen,
+    'pass-b-probe-no-base',
+    `No Pass B raw probe may show the Operations/Base Screen (got ${JSON.stringify(validity?.probes)})`,
+  );
+  check(
+    validity != null && validity.arrivalReached === true,
+    'pass-b-workload-arrival',
+    `Pass B must prove the authored 03:10 final arrival was executed (got ${JSON.stringify(validity?.arrivalReached)})`,
+  );
+  check(
+    probeFacts.structureValid &&
+      probeFacts.activeCombat &&
+      probeFacts.countdownFinal,
+    'pass-b-workload-active',
+    `Pass B probes must prove the Combat Screen, exactly one canvas, the Combat HUD, and the 00:00 Countdown at the start, middle, and end of the sample (got ${JSON.stringify(probeFacts)})`,
+  );
+  check(
+    probeFacts.structureValid &&
+      !probeFacts.terminalSeen &&
+      !probeFacts.baseSeen &&
+      validity?.valid === true,
+    'pass-b-workload-no-terminal',
+    `Pass B must prove no terminal/Result Overlay/Base frame appeared during the sample (got ${JSON.stringify(probeFacts)})`,
+  );
+  // Summary agreement: the recorded reporting flags must equal the facts
+  // recomputed from the raw probes, and `valid` must equal the derived
+  // acceptance of the same raw facts.
+  const derivedAccepted =
+    probeFacts.structureValid &&
+    probeFacts.activeCombat &&
+    probeFacts.countdownFinal &&
+    !probeFacts.terminalSeen &&
+    !probeFacts.baseSeen &&
+    validity?.arrivalReached === true &&
+    (validity?.flightInputError === null ||
+      validity?.flightInputError === undefined);
+  check(
+    validity != null &&
+      validity.combatActiveThroughout === probeFacts.activeCombat &&
+      validity.countdownRemainedFinal === probeFacts.countdownFinal &&
+      validity.terminalOrResultSeen === probeFacts.terminalSeen &&
+      validity.baseOrOperationsSeen === probeFacts.baseSeen &&
+      validity.probeCount === probeFacts.probeCount &&
+      Array.isArray(validity.probeOrder) &&
+      validity.probeOrder.join('|') === PASS_B_PROBE_ORDER.join('|') &&
+      validity.valid === derivedAccepted,
+    'pass-b-probe-summary-consistency',
+    `Pass B summary flags must equal the facts recomputed from the raw probes: summary ${JSON.stringify({ combatActiveThroughout: validity?.combatActiveThroughout, countdownRemainedFinal: validity?.countdownRemainedFinal, terminalOrResultSeen: validity?.terminalOrResultSeen, baseOrOperationsSeen: validity?.baseOrOperationsSeen, probeCount: validity?.probeCount, probeOrder: validity?.probeOrder, valid: validity?.valid })} vs recomputed ${JSON.stringify({ ...probeFacts, derivedAccepted })}`,
+  );
+
+  // -------------------------------------------------------------------------
   // 4. Build identity + same benchmark method + fixed seed.
   // -------------------------------------------------------------------------
   check(
@@ -558,6 +753,10 @@ export function evaluateEvidenceComparison(options = {}) {
         canonicalSeed: passB?.canonicalSeed ?? null,
         runId: readRecordOwnership(passB).runId,
         sourceFingerprint: readRecordOwnership(passB).sourceFingerprint,
+        workloadIdentity: passB?.workloadIdentity ?? null,
+        inputPath: passB?.inputPath ?? null,
+        workloadValidity: passB?.workloadValidity ?? null,
+        derivedWorkloadFacts: probeFacts,
         cleanup: passB?.cleanup ?? null,
         frameTimeMs: passB?.frameTimeMs ?? null,
         sustainedFps: passB?.sustainedFps ?? null,

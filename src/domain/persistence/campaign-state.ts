@@ -27,7 +27,7 @@ export type CampaignRunStatus = 'active' | 'game-over';
  * in another tab/application instance and after reload) and never a
  * campaign-carried counter (confirmed New Game and corruption recovery replace
  * the campaign record and would reuse old identities) — so a stale failure,
- * Success, Defeat, or Aborted callback can only affect the exact attempt that
+ * Success, or Defeat callback can only affect the exact attempt that
  * started it.
  */
 export interface MissionInProgressMarker {

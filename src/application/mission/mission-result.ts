@@ -82,10 +82,4 @@ export type MissionResult =
       /** Credits deducted by the full Repair when affordable (`0` on
        *  Game Over, where no partial deduction occurs). */
       readonly repairCostCredits: number;
-    }
-  | {
-      readonly kind: 'aborted';
-      readonly missionInstanceOrdinal: number;
-      readonly creditsAfter: number;
-      readonly hullIntegrityAfter: number;
     };

@@ -173,4 +173,40 @@ describe('Overlay', () => {
     );
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('does not cancel native pointer defaults for the Scrim, content, or controls (V02-WI-05 E04 C01, DS §8.5)', () => {
+    render(
+      <Overlay
+        open
+        labelledBy="title"
+        onClose={vi.fn()}
+        header={<span id="title">Evacuate?</span>}
+        actions={<Button>Cancel</Button>}
+      >
+        <Text style="body">Content</Text>
+        <Checkbox
+          checked={false}
+          onCheckedChange={() => undefined}
+          label="Mouse Movement Enabled"
+        />
+      </Overlay>,
+    );
+    // Focus containment is owned by the overlay focus hook: this primitive must
+    // leave native pointer defaults (text selection, scrollbar dragging,
+    // control focus) untouched, so no mousedown is ever cancelled here.
+    const scrim = document.querySelector('.ds-overlay__scrim') as Element;
+    expect(fireEvent.mouseDown(scrim)).toBe(true);
+    expect(fireEvent.mouseDown(screen.getByText('Content'))).toBe(true);
+    expect(
+      fireEvent.mouseDown(screen.getByRole('button', { name: 'Cancel' })),
+    ).toBe(true);
+    expect(
+      fireEvent.mouseDown(
+        screen.getByRole('checkbox', { name: 'Mouse Movement Enabled' }),
+      ),
+    ).toBe(true);
+    expect(
+      fireEvent.mouseDown(screen.getByText('Mouse Movement Enabled')),
+    ).toBe(true);
+  });
 });

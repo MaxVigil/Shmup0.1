@@ -2,6 +2,7 @@
 import { Suspense, lazy, useEffect, useRef } from 'react';
 import type { ReactElement } from 'react';
 import {
+  evacuationAvailability,
   loadCombatSession,
   resolveEquippedWeapon,
   resolveGermanFighter,
@@ -14,7 +15,6 @@ import type {
   TerminalCommitOutcome,
 } from '@application/combat';
 import {
-  abortMission as abortMissionCommand,
   commitMissionResult as commitMissionResultCommand,
   createMissionStartRecoveryController,
 } from '@application/mission';
@@ -28,6 +28,7 @@ import { useApplication } from '../application-context';
 import { SettingsButton } from '../components';
 import { useSessionState } from '../hooks';
 import {
+  EvacuationConfirmationOverlay,
   MissionStartRecoveryErrorOverlay,
   PauseOverlay,
   SaveConflictOverlay,
@@ -71,6 +72,12 @@ export function CombatScreen(): ReactElement | null {
   const { store, preparedAssets, content, campaignStore } = useApplication();
   const session = useSessionState();
   const containerRef = useRef<HTMLDivElement>(null);
+  // V02-WI-05 E04: the still-existing opening control for the active-Combat
+  // Evacuate confirmation. It is disabled by the same commit that opens the
+  // Overlay, so the browser blurs it before the Overlay mounts and the Overlay's
+  // own opener capture would see `<body>`; the explicit ref keeps canonical focus
+  // restoration (DS §8.5, DS-AC-005) exact for both entry origins.
+  const evacuateButtonRef = useRef<HTMLButtonElement>(null);
   const sessionRef = useRef<CombatSession | null>(null);
   const recoveryControllerRef = useRef<MissionStartRecoveryController | null>(
     null,
@@ -104,18 +111,6 @@ export function CombatScreen(): ReactElement | null {
       (error) => {
         onComplete({ status: 'rejected', error });
       },
-    );
-  };
-  const abortMission = (
-    combatHullIntegrity: number,
-    missionAttemptId: number,
-    missionInstanceOrdinal: number,
-  ): void => {
-    void abortMissionCommand(
-      { store, campaignStore },
-      combatHullIntegrity,
-      missionAttemptId,
-      missionInstanceOrdinal,
     );
   };
 
@@ -169,11 +164,11 @@ export function CombatScreen(): ReactElement | null {
           debugMode: DEV_MODE,
           // WI-02 persisted command ports bound to this Mission Instance.
           commitTerminalResult,
-          abortMission,
         },
         // The dynamic import cannot be cancelled. Check ownership after it
-        // resolves and immediately before synchronous owner creation so an
-        // early Abort creates no late runtime, canvas, or listener.
+        // resolves and immediately before synchronous owner creation so a
+        // mission that resolved, was disposed, or was replaced while the lazy
+        // chunk loaded creates no late runtime, canvas, or listener.
         () => {
           if (disposed) {
             return false;
@@ -385,35 +380,52 @@ export function CombatScreen(): ReactElement | null {
       missionInstanceOrdinal: activeMissionOrdinal,
     });
   };
+  // V02-WI-05 E03 Evacuation wiring (Epic §13.4, §15.5, V02-DEC-013/030): the
+  // UI relays exactly three semantic lifecycle commands for the active Mission
+  // Instance and consumes the ONE application-owned availability selector, so
+  // the affordance rule can never drift from the lifecycle reducer that accepts
+  // or rejects the command. React never owns confirmation state, the
+  // commitment, the countdown, the terminal result, or the exit; the E01
+  // lifecycle reducer is the exactly-once authority (repeated, racing, or
+  // out-of-state commands are strict no-ops) and the E02 entry relays
+  // `beginEvacuation` exactly once from the committed fact. V02-WI-05 E03 C01:
+  // the selector hides the affordance while a terminal/recovery state owns the
+  // screen (pending terminal write, Save Error, Save Conflict, terminal-exit
+  // Pause, Mission Start Recovery Error) and keeps it visible-but-disabled
+  // behind ordinary blocking Overlays (Pause, Settings, Debug, the open
+  // confirmation).
+  const evacuation = evacuationAvailability(lifecycle);
+  const dispatchOpenEvacuation = (): void => {
+    if (activeMissionOrdinal === null) {
+      return;
+    }
+    store.dispatch({
+      type: 'combat-lifecycle/open-evacuation-confirmation',
+      missionInstanceOrdinal: activeMissionOrdinal,
+    });
+  };
+  const dispatchCancelEvacuation = (): void => {
+    if (activeMissionOrdinal === null) {
+      return;
+    }
+    store.dispatch({
+      type: 'combat-lifecycle/cancel-evacuation-confirmation',
+      missionInstanceOrdinal: activeMissionOrdinal,
+    });
+  };
+  const dispatchConfirmEvacuation = (): void => {
+    if (activeMissionOrdinal === null) {
+      return;
+    }
+    store.dispatch({
+      type: 'combat-lifecycle/confirm-evacuation',
+      missionInstanceOrdinal: activeMissionOrdinal,
+    });
+  };
   const getObservability = (): CombatObservability | null =>
     sessionRef.current?.getObservability() ?? null;
   const submitDebugAction = (command: CombatDebugCommand): void => {
     sessionRef.current?.submitDebugCommand(command);
-  };
-  // S13-WI01: Return to Base remains effective even if selected before the
-  // Combat owner finishes loading. With the owner, its current authoritative
-  // Hull is used through the S12 seam; without it, the immutable snapshot Hull
-  // is the authoritative pre-runtime fallback. The late-resolving owner is
-  // disposed by the effect cleanup and can never create a canvas, result,
-  // listener, or state mutation after the Aborted resolution.
-  const handleReturnToBase = (): void => {
-    const owner = sessionRef.current;
-    if (owner !== null) {
-      owner.requestReturnToBase();
-      return;
-    }
-    const snapshot = session.activeMission;
-    if (snapshot !== 'none') {
-      // WI-02: the persisted Aborted command through the composition-root
-      // binding (fire-and-forget; the command is idempotent and inert for
-      // stale/duplicate activations). The exact campaign attempt id binds the
-      // durable marker clear (V02-WI-02 C03).
-      abortMission(
-        snapshot.hullIntegrity,
-        snapshot.missionAttemptId,
-        snapshot.missionInstanceOrdinal,
-      );
-    }
   };
 
   const handleRetryCleanup = (): void => {
@@ -426,6 +438,16 @@ export function CombatScreen(): ReactElement | null {
     <div data-testid="combat-screen" className="ds-combat-screen">
       <div ref={containerRef} className="ds-combat-canvas" />
       <div className="ds-combat-utility" data-testid="combat-utility">
+        {evacuation.visible ? (
+          <Button
+            ref={evacuateButtonRef}
+            variant="destructive"
+            disabled={!evacuation.enabled}
+            onClick={dispatchOpenEvacuation}
+          >
+            Evacuate
+          </Button>
+        ) : null}
         {pauseIconReady ? (
           <Button
             variant="secondary"
@@ -453,7 +475,19 @@ export function CombatScreen(): ReactElement | null {
       <PauseOverlay
         open={lifecycle.overlay === 'pause'}
         onResume={dispatchResume}
-        onReturnToBase={handleReturnToBase}
+        onEvacuate={dispatchOpenEvacuation}
+        evacuationEligible={evacuation.visible}
+      />
+      {/* V02-WI-05 E03: the single blocking `Evacuate?` confirmation shared by
+          active Combat and Pause. Cancel restores the exact recorded origin;
+          Confirm records the irreversible commitment exactly once (the E02
+          entry then relays the authoritative `beginEvacuation`). Esc is
+          Cancel, the Scrim is inert, and focus is trapped. */}
+      <EvacuationConfirmationOverlay
+        open={lifecycle.overlay === 'evacuation-confirmation'}
+        onCancel={dispatchCancelEvacuation}
+        onConfirm={dispatchConfirmEvacuation}
+        restoreFocusRef={evacuateButtonRef}
       />
       <SettingsOverlay
         open={lifecycle.overlay === 'settings'}

@@ -18,17 +18,6 @@ import type { WeaponType } from '@domain/index';
 
 export interface CombatSession {
   /**
-   * S13 Return to Base seam: resolves the active mission as Aborted through the
-   * S12 application seam with the originating `missionInstanceOrdinal` and the
-   * current authoritative Combat Hull, then discards the Combat runtime. No
-   * reward, recovery, or Mission Result Overlay is produced; Operations opens
-   * directly. Retained unexpanded until V02-WI-05 removes the v0.1 seam.
-   * V02-WI-05 C03: once the authoritative terminal result exists or its
-   * persistence is pending/held/frozen, this seam is blocked — it can never
-   * bypass a committed Defeat/Game Over or its Resume-only recovery.
-   */
-  readonly requestReturnToBase: () => void;
-  /**
    * S13 settings-driven control-mode seam: applies the mutually exclusive
    * movement mode selected by the single shared `Mouse Movement Enabled` value
    * for use on Resume (AC-038).
@@ -143,9 +132,9 @@ export interface CombatSessionInput {
   /**
    * The one application-owned Session Store (S08, S13): the Combat session
    * synchronises the single `Mouse Movement Enabled` value through its
-   * dispatch, relays terminal/lifecycle/browser-safety commands, derives the
-   * authoritative paused/running lifecycle by subscription, and invokes the
-   * S12 abortMission seam. The store remains the single source of truth.
+   * dispatch and relays terminal/lifecycle/browser-safety commands and the
+   * authoritative paused/running lifecycle by subscription. The store remains
+   * the single source of truth.
    */
   readonly store: SessionStore;
   /**
@@ -178,20 +167,15 @@ export interface CombatSessionInput {
     successEconomy?: SuccessEconomyRelay,
     onComplete?: (outcome: TerminalCommitOutcome) => void,
   ) => void;
-  /** Bound Aborted (Return to Base) application command through the seam. */
-  readonly abortMission: (
-    combatHullIntegrity: number,
-    missionAttemptId: number,
-    missionInstanceOrdinal: number,
-  ) => void;
 }
 
 /**
  * Returns `true` only while the caller still owns the originating Active
  * Mission and may create its Combat presentation. The guard is evaluated
  * after the lazy module import and immediately before synchronous owner
- * creation, so an aborted mission never creates a late runtime, canvas, or
- * listener in a detached container (S13-WI01).
+ * creation, so a mission that resolved, was disposed, or was replaced while
+ * the lazy chunk loaded never creates a late runtime, canvas, or listener in
+ * a detached container (S13-WI01).
  */
 export type CombatSessionCreationGuard = () => boolean;
 

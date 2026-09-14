@@ -75,11 +75,27 @@ import type {
  * rendered-bounds AABBs, the Ranged independent `ranged-fire` cadence, the
  * Hunter Approach/commit machine, pending combat economy, the Combat
  * Countdown, the one-shot Critical Hull latch, and the deterministic two-phase
- * Success exit sequence.
+ * committed Success exit sequence.
+ *
+ * V02-WI-05 E02 adds the deterministic Evacuation commitment: the runtime
+ * `beginEvacuation` command records the irreversible `300`-step countdown
+ * exactly once; every executed step continues normal Combat and then
+ * decrements the counter once, with Defeat first and the exact zero step
+ * resolving the immutable `Evacuated` terminal while ordinary Success is
+ * suppressed from commitment onward. Success and Evacuation share one typed
+ * committed terminal-exit owner (`exitPhase`: 30 centre steps then `60% VH/s`
+ * upward flight); the authoritative `evacuationEnemyOpacity` scalar drives the
+ * enemy/enemy-projectile fade of a committed Evacuation over the same 30
+ * steps.
  */
 
 export const FIXED_STEP_SECONDS = 1 / 60;
 export const MAX_STEPS_PER_FRAME = 4;
+/** Fixed `1/60 s` steps per second (v0.2 §13.4 Countdown display divisor). */
+export const FIXED_STEPS_PER_SECOND = Math.round(1 / FIXED_STEP_SECONDS);
+/** The irreversible Evacuation commitment is exactly `5.0 s` = 300 fixed steps
+ *  (v0.2 §13.4, V02-AC-014). */
+export const EVACUATION_COUNTDOWN_STEPS = 5 * FIXED_STEPS_PER_SECOND;
 
 export interface CombatPoint {
   readonly x: number;
@@ -115,7 +131,9 @@ export interface RuntimeArrivalGroup extends ResolvedArrivalGroup {
 }
 
 const CRITICAL_HULL_MESSAGE_STEPS = Math.round(2.0 / FIXED_STEP_SECONDS);
-const SUCCESS_CENTRE_STEPS = Math.round(0.5 / FIXED_STEP_SECONDS);
+/** Shared committed terminal-exit centre phase: exactly `0.5 s` = 30 fixed steps
+ *  for both Success (v0.2 §13.3) and Evacuation (v0.2 §13.4, V02-DEC-028). */
+export const EXIT_CENTRE_STEPS = Math.round(0.5 / FIXED_STEP_SECONDS);
 const HUNTER_CONTACT_DAMAGE = 35;
 const RANGED_FIRST_SHOT_STEPS = 180;
 const RANGED_MIN_INTERVAL_STEPS = 60;
@@ -194,13 +212,25 @@ export interface CombatSimulationState {
   // --- Critical Hull (v0.2 §15.3) ---
   readonly criticalHullMessageTriggered: boolean;
   readonly criticalHullMessageStepsRemaining: number;
-  // --- terminal / Success exit (Epic §13.3) ---
+  // --- terminal / committed terminal exit (Epic §13.3–13.4, V02-WI-05 E02) ---
   readonly terminalResult: CombatTerminalResult | null;
-  readonly successExitPhase: 'none' | 'centre' | 'fly-up' | 'complete';
+  /** V02-WI-05 E02: the shared deterministic committed terminal-exit phase
+   *  (`none` before/at terminal freeze; `centre` over exactly 30 fixed steps;
+   *  `fly-up` until the complete rendered Aircraft bounds leave the top
+   *  viewport; `complete` once the Result Overlay may open). Success and
+   *  Evacuation share this one phase machine (V02-DEC-025/028). */
+  readonly exitPhase: 'none' | 'centre' | 'fly-up' | 'complete';
   readonly exitCentreStepsRemaining: number;
-  /** V02-WI-04 C01: the deterministic exit advances only after the campaign
-   *  transaction has committed Success (set through the runtime seam). */
-  readonly successExitAuthorized: boolean;
+  /** V02-WI-04 C01 / V02-WI-05 E02: the deterministic committed exit advances
+   *  only after the campaign transaction has committed the terminal result
+   *  (set through the runtime seam). A failed/inert write keeps the frozen
+   *  terminal and never advances fade, centring, or flight. */
+  readonly exitAuthorized: boolean;
+  /** V02-WI-05 E02: remaining fixed `1/60 s` steps of the irreversible
+   *  `300`-step Evacuation commitment, `0` when `beginEvacuation` has not been
+   *  accepted (and `0` again once the exact zero step resolved `Evacuated`).
+   *  Display seconds are `ceil(max(0, remainingSteps) / 60)` (v0.2 §13.4). */
+  readonly evacuationStepsRemaining: number;
   /** V02-WI-04 C03 evidence-only observed per-step maxima (Pass A). `null`
    *  (and the entire field) is compile-time absent from the ordinary build. */
   readonly evidence: CombatEvidenceAccumulator | null;
@@ -385,9 +415,10 @@ export function createCombatSimulation(
       ? CRITICAL_HULL_MESSAGE_STEPS
       : 0,
     terminalResult: null,
-    successExitPhase: 'none',
+    exitPhase: 'none',
     exitCentreStepsRemaining: 0,
-    successExitAuthorized: false,
+    exitAuthorized: false,
+    evacuationStepsRemaining: 0,
     // V02-WI-04 C03/C04: the observed per-step maxima accumulator exists only
     // in builds with the counters capability enabled; other builds carry
     // `null` (no instrumentation).
@@ -655,13 +686,14 @@ export function stepCombatSimulation(
     return state;
   }
   if (state.terminalResult !== null) {
-    // Epic §13.3/§13.5: after a terminal result, gameplay stops. A Success
-    // continues only its immutable deterministic centre-and-up exit sequence;
-    // Defeat freezes and its commitment/presentation is owned by the
-    // application terminal-save boundary (Epic §13.5, §13.7).
-    return state.terminalResult.kind === 'success'
-      ? stepSuccessExit(state, stepSeconds)
-      : state;
+    // Epic §13.3–13.5 / V02-WI-05 E02: after a terminal result, gameplay stops.
+    // A committed Success or Evacuation continues only its immutable
+    // deterministic centre-and-up exit sequence; Defeat freezes and its
+    // commitment/presentation is owned by the application terminal-save
+    // boundary (Epic §13.5, §13.7).
+    return state.terminalResult.kind === 'defeat'
+      ? state
+      : stepCommittedExit(state, stepSeconds);
   }
   // V02-WI-04 C03/C04: one fresh evidence sink per executed step, present only
   // in builds with the counters capability enabled (Pass A). The whole branch
@@ -676,7 +708,7 @@ export function stepCombatSimulation(
       : stepMouse(begun, stepSeconds);
   const withMission = stepMission(moved, stepSeconds);
   const withCollisions = resolveCollisions(withMission, evidenceSink);
-  const stepped = evaluateTerminalResult(withCollisions);
+  const stepped = stepEvacuationAndResolveTerminal(withCollisions);
   if (EVIDENCE_COUNTERS_ENABLED && evidenceSink !== null) {
     // Observed workload maxima after the collision phase (surviving entities).
     stepped.evidence?.recordStep(
@@ -729,28 +761,37 @@ function beginStepCounters(
   };
 }
 
-/** Immutable deterministic two-phase Success exit (Epic §13.3, V02-AC-023):
+/** Immutable deterministic two-phase committed terminal exit (Epic §13.3,
+ *  V02-AC-023; V02-WI-05 E02 generalizes the Success-only exit into one typed
+ *  owner shared by committed Success and committed Evacuation — V02-DEC-025/028):
  *  over exactly `0.5 s` the Aircraft centre X moves linearly to `50% VW` with
  *  Y fixed, then the Aircraft flies straight up at `60% VH/s` with no control.
  *  Once its complete rendered bounds leave the upper viewport boundary the
  *  phase becomes `complete` (the entry opens the committed Result Overlay).
  *  Resize reprojects the current geometry without restarting either phase.
- */
-function stepSuccessExit(
+ *  For a committed Evacuation the active enemies/enemy projectiles are already
+ *  gameplay-inactive at terminal freeze; their presentation opacity is the
+ *  simulation-owned scalar `evacuationEnemyOpacity` derived from the same
+ *  `exitCentreStepsRemaining` (full at freeze, zero exactly when the 30 centre
+ *  steps complete), so the fade shares this exact phase machine and never owns
+ *  a timer. */
+function stepCommittedExit(
   state: CombatSimulationState,
   stepSeconds: number,
 ): CombatSimulationState {
   // V02-WI-04 C01: the exit sequence advances only after the campaign
-  // transaction has successfully committed Success; a failed or inert commit
-  // leaves the Aircraft frozen at the terminal position and never animates it
-  // out or strands the session (Epic §13.3 order: freeze → commit → exit).
-  if (!state.successExitAuthorized) {
+  // transaction has successfully committed the terminal result; a failed or
+  // inert commit leaves the Aircraft frozen at the terminal position and never
+  // animates it out or strands the session (Epic §13.3/§13.4/§13.7 order:
+  // freeze → commit → exit). Save failure/conflict and hidden pause cannot
+  // advance fade, centring, or flight.
+  if (!state.exitAuthorized) {
     return state;
   }
-  if (state.successExitPhase === 'complete') {
+  if (state.exitPhase === 'complete') {
     return state;
   }
-  if (state.successExitPhase === 'centre') {
+  if (state.exitPhase === 'centre') {
     if (state.exitCentreStepsRemaining > 0) {
       const targetX = state.viewportWidth * 0.5;
       const centerX =
@@ -771,7 +812,7 @@ function stepSuccessExit(
   return {
     ...state,
     aircraft: { ...state.aircraft, centerY },
-    successExitPhase: complete ? 'complete' : 'fly-up',
+    exitPhase: complete ? 'complete' : 'fly-up',
   };
 }
 
@@ -1227,12 +1268,16 @@ function contactDamageByType(
 }
 
 /**
- * Terminal evaluation (Epic §7.3, V02-AC-005/023): Defeat has unconditional
- * priority when player Hull is 0. Otherwise Success occurs when the final
- * scheduled Arrival Group has spawned, no scheduled encounter remains, and no
- * active enemy remains (every spawned regular enemy is Destroyed or Escaped)
- * with Hull above 0. The Combat Countdown reaching `00:00` does not itself
- * grant Success.
+ * Terminal evaluation (Epic §7.3, V02-AC-005/023; V02-WI-05 E02): Defeat has
+ * unconditional priority when player Hull is 0. Otherwise Success occurs when
+ * the final scheduled Arrival Group has spawned, no scheduled encounter
+ * remains, and no active enemy remains (every spawned regular enemy is
+ * Destroyed or Escaped) with Hull above 0 — and only while no Evacuation
+ * commitment is running (V02-DEC-027: from the accepted `beginEvacuation`
+ * onward ordinary Success is suppressed even when every enemy resolves). The
+ * Combat Countdown reaching `00:00` does not itself grant Success. The
+ * Evacuated zero-step terminal is resolved by `stepEvacuationAndResolveTerminal`
+ * (the countdown decrements only inside an executed step).
  */
 function evaluateTerminalResult(
   state: CombatSimulationState,
@@ -1243,16 +1288,139 @@ function evaluateTerminalResult(
   if (state.playerDefeated) {
     return { ...state, terminalResult: { kind: 'defeat' } };
   }
+  if (state.evacuationStepsRemaining > 0) {
+    // Committed Evacuation countdown still running: Success is suppressed. The
+    // zero step resolves only Evacuated/Defeat, never Success.
+    return state;
+  }
   const allSpawned = state.arrivalGroupIndex >= state.arrivalGroups.length;
   if (allSpawned && state.enemies.length === 0) {
     return {
       ...state,
       terminalResult: { kind: 'success' },
-      successExitPhase: 'centre',
-      exitCentreStepsRemaining: SUCCESS_CENTRE_STEPS,
+      exitPhase: 'centre',
+      exitCentreStepsRemaining: EXIT_CENTRE_STEPS,
     };
   }
   return state;
+}
+
+/**
+ * V02-WI-05 E02 authoritative pure Evacuation commitment (Epic §13.4,
+ * V02-DEC-027, V02-AC-014): accepted exactly once for an active, non-terminal,
+ * not-yet-committed simulation. It records the irreversible `300`-step
+ * countdown immediately; repeated, post-terminal, and already-committed calls
+ * are strict no-ops returning the same state. The countdown advances only
+ * inside executed fixed steps (pause/Settings/focus/visibility freezes the
+ * runtime and therefore the countdown without catch-up).
+ */
+export function beginEvacuation(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  if (state.terminalResult !== null || state.evacuationStepsRemaining > 0) {
+    return state;
+  }
+  return { ...state, evacuationStepsRemaining: EVACUATION_COUNTDOWN_STEPS };
+}
+
+/**
+ * V02-WI-05 E02 per-step terminal evaluation for a running commitment. Every
+ * executed unpaused fixed step has already run its complete normal Combat work
+ * (mission time, due authored spawns, controls, automatic fire, enemy
+ * behaviour, projectiles, collisions, damage, RNG consumption, and economy
+ * observation) in `stepMission` + `resolveCollisions`; this function then
+ * decrements the Evacuation counter exactly once and applies terminal priority
+ * (V02-AC-014): Defeat stays first after the collision/damage work of the
+ * step, and on the exact step that reduces `remainingSteps` to `0` an
+ * operational Aircraft resolves the immutable `Evacuated` terminal with the
+ * shared 30-step centre phase. No other result replaces it, no remaining enemy
+ * becomes Escaped or adds a penalty, and no post-terminal gameplay/spawn/
+ * collision/economy mutation may occur.
+ */
+function stepEvacuationAndResolveTerminal(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  // Not committed: the ordinary Defeat/Success evaluation applies unchanged.
+  if (state.evacuationStepsRemaining <= 0) {
+    return evaluateTerminalResult(state);
+  }
+  const remainingSteps = state.evacuationStepsRemaining - 1;
+  const decremented = { ...state, evacuationStepsRemaining: remainingSteps };
+  // Defeat remains first priority after the complete normal collision/damage
+  // work of every step — including the exact zero step.
+  if (decremented.playerDefeated) {
+    return { ...decremented, terminalResult: { kind: 'defeat' } };
+  }
+  // The exact step that reduces remainingSteps to 0 resolves Evacuated when
+  // the Aircraft remains operational.
+  if (remainingSteps === 0) {
+    return {
+      ...decremented,
+      terminalResult: { kind: 'evacuated' },
+      exitPhase: 'centre',
+      exitCentreStepsRemaining: EXIT_CENTRE_STEPS,
+    };
+  }
+  // Countdown still running: normal Combat continues on later steps and
+  // ordinary Success stays suppressed (V02-DEC-027).
+  return decremented;
+}
+
+/** Canonical Evacuation display seconds (v0.2 §13.4): `ceil(max(0,
+ *  remainingSteps) / 60)` — immediately `5`, after the first executed step
+ *  still `5`, at `240` steps `4`, at `1` step `1`, and at `0` steps `0`. */
+export function evacuationCountdownDisplaySeconds(
+  remainingSteps: number,
+): number {
+  return Math.ceil(Math.max(0, remainingSteps) / FIXED_STEPS_PER_SECOND);
+}
+
+/** Typed Evacuation countdown read model for presentation (V02-WI-05 E02): the
+ *  E03 HUD replacement reads this from the authoritative simulation state and
+ *  never owns countdown timing or mutation. */
+export interface EvacuationCountdownReadModel {
+  /** True once the authoritative `beginEvacuation` commitment is recorded for
+   *  this Mission Instance (including a resolved `Evacuated` terminal). */
+  readonly committed: boolean;
+  /** Remaining fixed `1/60 s` steps of the irreversible `300`-step countdown
+   *  (`0` when none is running and after the zero step resolved). */
+  readonly remainingSteps: number;
+  /** Canonical display seconds `ceil(max(0, remainingSteps) / 60)`. */
+  readonly displaySeconds: number;
+}
+
+export function buildEvacuationCountdownReadModel(
+  state: CombatSimulationState,
+): EvacuationCountdownReadModel {
+  const remainingSteps = Math.max(0, state.evacuationStepsRemaining);
+  return {
+    committed:
+      state.evacuationStepsRemaining > 0 ||
+      state.terminalResult?.kind === 'evacuated',
+    remainingSteps,
+    displaySeconds: evacuationCountdownDisplaySeconds(remainingSteps),
+  };
+}
+
+/**
+ * V02-WI-05 E02 simulation-owned enemy/enemy-projectile fade scalar (Epic
+ * §13.4, V02-DEC-028): full opacity while no committed Evacuation exit is
+ * running, then `exitCentreStepsRemaining / EXIT_CENTRE_STEPS` across the exact
+ * shared 30 centre steps — reaching zero exactly when the centre phase
+ * completes (after which the presentation removes/inerts the faded enemy
+ * surfaces while the Aircraft flies upward). A single simulation-owned
+ * scalar/phase drives every active enemy and enemy-projectile opacity; the
+ * renderer never owns timers or fade mutation. Success has no active enemies
+ * at its exit, so this scalar stays `1` there.
+ */
+export function evacuationEnemyOpacity(state: CombatSimulationState): number {
+  if (state.terminalResult?.kind !== 'evacuated' || !state.exitAuthorized) {
+    return 1;
+  }
+  if (state.exitPhase === 'none') {
+    return 1;
+  }
+  return state.exitCentreStepsRemaining / EXIT_CENTRE_STEPS;
 }
 
 function stepKeyboard(
@@ -1405,6 +1573,24 @@ function resizeSimulation(
         : enemy.centerX * ratioX,
     centerY: enemy.centerY * ratioY,
   }));
+  // V02-WI-05 E02 C01: a committed Success/Evacuation exit is already flying
+  // outside the gameplay movement bounds. Reprojecting the Aircraft must stay
+  // purely proportional during every exit phase (`centre`, `fly-up`,
+  // `complete`) — clamping it back into the movement bounds would drag a
+  // late-flight Aircraft down into the playfield and break the exit geometry.
+  // Gameplay bounds clamping still applies to normal Combat and to the frozen
+  // Defeat terminal, where no exit movement exists.
+  const inCommittedExit =
+    state.terminalResult !== null && state.terminalResult.kind !== 'defeat';
+  const aircraft = {
+    ...state.aircraft,
+    centerX: inCommittedExit
+      ? state.aircraft.centerX * ratioX
+      : clamp(state.aircraft.centerX * ratioX, bounds.minX, bounds.maxX),
+    centerY: inCommittedExit
+      ? state.aircraft.centerY * ratioY
+      : clamp(state.aircraft.centerY * ratioY, bounds.minY, bounds.maxY),
+  };
   const enemyProjectiles = state.enemyProjectiles.map((projectile) => ({
     ...projectile,
     centerX: projectile.centerX * ratioX,
@@ -1440,11 +1626,7 @@ function resizeSimulation(
       },
       bounds,
     ),
-    aircraft: {
-      ...state.aircraft,
-      centerX: clamp(state.aircraft.centerX * ratioX, bounds.minX, bounds.maxX),
-      centerY: clamp(state.aircraft.centerY * ratioY, bounds.minY, bounds.maxY),
-    },
+    aircraft,
     projectileWidth: geometry.width,
     projectileHeight: geometry.height,
     projectileSpeedPxPerSecond: state.projectileSpeedPxPerSecond * ratioY,
@@ -1643,9 +1825,17 @@ export interface CombatSimulationRuntime {
   readonly advance: (frameDeltaSeconds: number) => CombatSimulationState;
   readonly setPaused: (paused: boolean) => void;
   readonly submitDebug: (command: CombatDebugCommand) => void;
-  /** V02-WI-04 C01: authorises the deterministic centre-and-up Success exit
-   *  after the campaign transaction has committed Success (Epic §13.3). */
-  readonly authorizeSuccessExit: () => void;
+  /** V02-WI-04 C01 / V02-WI-05 E02: authorises the deterministic committed
+   *  centre-and-up exit after the campaign transaction has committed the
+   *  Success or Evacuated terminal (Epic §13.3/§13.4/§13.7). */
+  readonly authorizeCommittedExit: () => void;
+  /** V02-WI-05 E02: authoritative runtime `beginEvacuation` command. Records
+   *  the irreversible `300`-step commitment exactly once for the active,
+   *  non-terminal, not-yet-committed simulation; repeated, stale (disposed),
+   *  post-terminal, and already-committed calls are strict no-ops. The
+   *  commitment advances only through executed fixed steps while the
+   *  authoritative lifecycle is running. */
+  readonly beginEvacuation: () => void;
   /** V02-WI-04 C03/C04 evidence-only benchmark scenarios (Epic §20.1). Present
    *  only in scenario-bearing builds (compile-time absent from the ordinary
    *  production artifact). `legacy-five-basic` reproduces the accepted v0.1
@@ -1727,11 +1917,28 @@ export function createCombatSimulationRuntime(
       }
       state = applyDebugCommand(state, command);
     },
-    authorizeSuccessExit() {
-      if (disposed || state.successExitAuthorized) {
+    authorizeCommittedExit() {
+      // V02-WI-05 E02 C01: only a frozen committed Success/Evacuated terminal
+      // may authorize the deterministic exit. Premature (no terminal yet) and
+      // Defeat authorizations are strict no-ops: a Defeat has no exit sequence
+      // (Epic §13.5) and authorizing before the terminal freeze would bypass
+      // the commit gate.
+      if (disposed || state.exitAuthorized) {
         return;
       }
-      state = { ...state, successExitAuthorized: true };
+      if (
+        state.terminalResult === null ||
+        state.terminalResult.kind === 'defeat'
+      ) {
+        return;
+      }
+      state = { ...state, exitAuthorized: true };
+    },
+    beginEvacuation() {
+      if (disposed) {
+        return;
+      }
+      state = beginEvacuation(state);
     },
     // V02-WI-04 C03/C04 evidence-only benchmark scenarios (Epic §20.1 legacy
     // proxy + exact e5 materialization). The method is compile-time absent
