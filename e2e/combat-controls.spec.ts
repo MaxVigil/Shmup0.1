@@ -6,6 +6,12 @@ import type { Page } from '@playwright/test';
  * §12.3 geometry portion). The real application is exercised at the minimum
  * supported viewport; the authoritative aircraft position is measured through
  * the CombatHudBridge Hull bar (centre below the aircraft, 1% short-side gap).
+ *
+ * V02-WI-05 M02-R01 C02: the cruise-speed measurement additionally reads the
+ * existing development-only read-only Mission Clock in the SAME in-page sample
+ * as the HUD rect, so displacement is divided by the observed authoritative
+ * simulation-time delta instead of an assumed wall-clock window (the runtime
+ * intentionally caps fixed-step catch-up at `MAX_STEPS_PER_FRAME`).
  */
 const MINIMUM_VIEWPORT = { width: 1280, height: 600 };
 
@@ -39,12 +45,20 @@ interface AircraftSample {
   centerY: number;
   vw: number;
   vh: number;
+  /**
+   * Authoritative Mission Clock time taken from the SAME in-page read as the
+   * geometry, or `null` when the development read-only observability surface is
+   * unavailable. Never used as a wall-clock substitute.
+   */
+  missionTimeSeconds: number | null;
 }
 
 /** Derives the authoritative aircraft centre from the Hull bar rect: bar
  *  centre = aircraft centre X; bar top = aircraft bottom + 1% short-side gap.
  *  The bar is the one HUD child with per-frame geometry (`.ds-combat-hud__bar`);
- *  the Countdown/CRITICAL HULL column never follows the Aircraft. */
+ *  the Countdown/CRITICAL HULL column never follows the Aircraft. The optional
+ *  development Mission Clock is read in the same call so a position and its
+ *  simulation time can never be correlated across different frames. */
 function readAircraft(page: Page): Promise<AircraftSample | null> {
   return page.evaluate(() => {
     const hud = document.querySelector('.ds-combat-hud__bar');
@@ -57,11 +71,18 @@ function readAircraft(page: Page): Promise<AircraftSample | null> {
     const shortSide = Math.min(vw, vh);
     const aircraftHeight = shortSide * 0.08;
     const gap = shortSide * 0.01;
+    const readClock = (
+      window as Window & {
+        __shmupDevObservability__?: () => { missionTimeSeconds: number };
+      }
+    ).__shmupDevObservability__;
     return {
       centerX: rect.left + rect.width / 2,
       centerY: rect.top - gap - aircraftHeight / 2,
       vw,
       vh,
+      missionTimeSeconds:
+        readClock === undefined ? null : readClock().missionTimeSeconds,
     };
   });
 }
@@ -73,6 +94,226 @@ const centerOf = (sample: AircraftSample): { x: number; y: number } => ({
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
   Math.hypot(a.x - b.x, a.y - b.y);
+
+// --- V02-WI-05 M02-R01 C02 authoritative cruise-measurement helpers ----------
+// Repair scope: the browser measurement only. Production movement logic, the
+// approved movement ratios/timings, and every other spec in this file are
+// untouched.
+
+/** Authoritative simulation-time window used for one cruise measurement. */
+const MEASURE_WINDOW_SECONDS = 0.3;
+
+/** Authoritative simulation time allowed to reach the capped cruise speed
+ *  before the measured window starts (approved time-to-maximum-speed: 0.25 s). */
+const MEASURE_ACCELERATION_SECONDS = 0.35;
+
+/** Free travel room (px) required between the measured start centre and each
+ *  movement bound the trajectory advances toward. Worst-case travel is the
+ *  acceleration window plus the measured window plus the stop distance
+ *  (~0.85 s × 270 px/s ≈ 230 px); 320 px keeps a real margin at 1280×600. */
+const MEASURE_CLEARANCE_PX = 320;
+
+/** Minimum clearance (px) required from every movement bound before measuring. */
+const MIN_BOUND_CLEARANCE_PX = 80;
+
+/** Aircraft movement bounds for the measured viewport: a 3% short-side margin
+ *  on every edge with the complete rendered aircraft inside it (Combat §6). */
+function aircraftMovementBounds(sample: AircraftSample): {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+} {
+  const shortSide = Math.min(sample.vw, sample.vh);
+  const margin = shortSide * 0.03;
+  const halfWidth = (shortSide * 0.08 * (1278 / 1231)) / 2;
+  const halfHeight = (shortSide * 0.08) / 2;
+  return {
+    minX: margin + halfWidth,
+    maxX: sample.vw - margin - halfWidth,
+    minY: margin + halfHeight,
+    maxY: sample.vh - margin - halfHeight,
+  };
+}
+
+const OPPOSITE_KEY: Readonly<Record<string, string>> = {
+  w: 's',
+  s: 'w',
+  a: 'd',
+  d: 'a',
+};
+
+/**
+ * True when the centre is a verified safe start for a trajectory that presses
+ * `keys`: clear of every movement bound and with free travel room on each axis
+ * the trajectory advances toward, so no measured axis can be clipped by a
+ * bound (the pre-C02 defect).
+ */
+function isSafeMeasurementStart(
+  sample: AircraftSample,
+  keys: readonly string[],
+): boolean {
+  const bounds = aircraftMovementBounds(sample);
+  const clearsEveryBound =
+    sample.centerX - bounds.minX >= MIN_BOUND_CLEARANCE_PX &&
+    bounds.maxX - sample.centerX >= MIN_BOUND_CLEARANCE_PX &&
+    sample.centerY - bounds.minY >= MIN_BOUND_CLEARANCE_PX &&
+    bounds.maxY - sample.centerY >= MIN_BOUND_CLEARANCE_PX;
+  const hasTravelRoom =
+    (!keys.includes('w') ||
+      sample.centerY - bounds.minY >= MEASURE_CLEARANCE_PX) &&
+    (!keys.includes('s') ||
+      bounds.maxY - sample.centerY >= MEASURE_CLEARANCE_PX) &&
+    (!keys.includes('d') ||
+      bounds.maxX - sample.centerX >= MEASURE_CLEARANCE_PX) &&
+    (!keys.includes('a') ||
+      sample.centerX - bounds.minX >= MEASURE_CLEARANCE_PX);
+  return clearsEveryBound && hasTravelRoom;
+}
+
+/**
+ * Reads one correlated sample and fails explicitly when the development Mission
+ * Clock is unavailable: the measurement must never silently fall back to
+ * wall-clock time.
+ */
+async function readTimedAircraft(
+  page: Page,
+): Promise<AircraftSample & { missionTimeSeconds: number }> {
+  const sample = await readAircraft(page);
+  if (sample === null || sample.missionTimeSeconds === null) {
+    throw new Error(
+      'Authoritative Mission Clock sample unavailable: the development read-only observability surface is required for this measurement.',
+    );
+  }
+  return { ...sample, missionTimeSeconds: sample.missionTimeSeconds };
+}
+
+/** Waits until the authoritative Mission Clock reaches `targetSeconds`. */
+async function waitForSimulationTime(
+  page: Page,
+  targetSeconds: number,
+): Promise<void> {
+  await expect
+    .poll(async () => (await readTimedAircraft(page)).missionTimeSeconds, {
+      timeout: 20000,
+      intervals: [50, 100],
+    })
+    .toBeGreaterThanOrEqual(targetSeconds);
+}
+
+/**
+ * Places the Aircraft in a verified safe measurement region using ONLY
+ * supported keyboard input, releases the placement keys, then requires a
+ * verified rest inside that same region. Every step fails explicitly, so a
+ * measured trajectory can never start from an unverified, near-bound, or moving
+ * state.
+ */
+async function prepareSafeMeasurementStart(
+  page: Page,
+  keys: readonly string[],
+): Promise<void> {
+  const placementKeys = keys.map((key) => OPPOSITE_KEY[key] ?? key);
+  for (const key of placementKeys) {
+    await page.keyboard.down(key);
+  }
+  try {
+    await expect
+      .poll(
+        async () => {
+          const sample = await readAircraft(page);
+          return sample !== null && isSafeMeasurementStart(sample, keys);
+        },
+        { timeout: 15000, intervals: [50, 100] },
+      )
+      .toBe(true);
+  } finally {
+    for (const key of placementKeys) {
+      await page.keyboard.up(key);
+    }
+  }
+
+  let previous = await readAircraft(page);
+  if (previous === null) {
+    throw new Error('Combat HUD sample unavailable during preparation.');
+  }
+  let atRest: AircraftSample | null = null;
+  for (let attempt = 0; attempt < 25 && atRest === null; attempt += 1) {
+    await page.waitForTimeout(100);
+    const current = await readAircraft(page);
+    if (current === null) {
+      throw new Error('Combat HUD sample unavailable during preparation.');
+    }
+    if (
+      Math.hypot(
+        current.centerX - previous.centerX,
+        current.centerY - previous.centerY,
+      ) < 0.5
+    ) {
+      atRest = current;
+      break;
+    }
+    previous = current;
+  }
+  if (atRest === null) {
+    throw new Error(
+      'Aircraft did not reach a verified rest state within the bounded preparation budget.',
+    );
+  }
+  expect(isSafeMeasurementStart(atRest, keys)).toBe(true);
+}
+
+interface CruiseMeasurement {
+  /** Observed authoritative simulation-time delta of the same sample pair. */
+  readonly elapsedSeconds: number;
+  readonly displacement: number;
+  readonly signedDx: number;
+  readonly signedDy: number;
+}
+
+/**
+ * One correlated cruise measurement: press the commanded keys, wait for the
+ * capped cruise speed, then take a start and an end sample whose displacement
+ * and elapsed authoritative simulation time belong to the SAME pair. X, Y and
+ * total displacement therefore always describe one attempt, and the speed uses
+ * the observed simulation delta instead of an assumed wall-clock window.
+ */
+async function measureCruiseTrajectory(
+  page: Page,
+  keys: readonly string[],
+): Promise<CruiseMeasurement> {
+  await prepareSafeMeasurementStart(page, keys);
+  const prepared = await readTimedAircraft(page);
+  for (const key of keys) {
+    await page.keyboard.down(key);
+  }
+  try {
+    await waitForSimulationTime(
+      page,
+      prepared.missionTimeSeconds + MEASURE_ACCELERATION_SECONDS,
+    );
+    const start = await readTimedAircraft(page);
+    await waitForSimulationTime(
+      page,
+      start.missionTimeSeconds + MEASURE_WINDOW_SECONDS,
+    );
+    const end = await readTimedAircraft(page);
+    const elapsedSeconds = end.missionTimeSeconds - start.missionTimeSeconds;
+    expect(elapsedSeconds).toBeGreaterThanOrEqual(MEASURE_WINDOW_SECONDS * 0.8);
+    return {
+      elapsedSeconds,
+      displacement: Math.hypot(
+        end.centerX - start.centerX,
+        end.centerY - start.centerY,
+      ),
+      signedDx: end.centerX - start.centerX,
+      signedDy: end.centerY - start.centerY,
+    };
+  } finally {
+    for (const key of keys) {
+      await page.keyboard.up(key);
+    }
+  }
+}
 
 test('Combat opens with the aircraft at rest at 50% x 80% (AC-070, AC-071)', async ({
   page,
@@ -209,10 +450,11 @@ test('F switches modes and each mode rejects the inactive-mode input (AC-006, AC
 
 test(
   'keyboard aliases move the same way and diagonal input is normalized (AC-007)',
-  // The measurement now takes the median of three 500 ms windows per axis and
-  // verifies rest between them; under parallel load this can approach the
-  // default budget, so it gets an explicit 60 s budget (measurement, not
-  // product behaviour, drives the duration).
+  // V02-WI-05 M02-R01 C02: each trajectory verifies a safe rest start, then
+  // measures displacement over an OBSERVED authoritative simulation-time delta
+  // with one correlated sample pair (no wall-clock window, no per-axis median
+  // over attempts). The explicit budget covers two prepared trajectories and
+  // their rest verification.
   { timeout: 60000 },
   async ({ page }) => {
     await startCombat(page);
@@ -244,101 +486,57 @@ test(
     await movedUpBy('w');
     await movedUpBy('ArrowUp');
 
-    // Return toward the lower area so both cruise measurements have room.
-    await page.keyboard.down('s');
-    await page.waitForTimeout(1200);
-    await page.keyboard.up('s');
-    await page.waitForTimeout(300);
+    // Two correlated trajectories, each from its own verified safe rest start.
+    const single = await measureCruiseTrajectory(page, ['d']);
+    const diagonal = await measureCruiseTrajectory(page, ['d', 'w']);
 
-    // Measurement note (V02-WI-02 correction root cause): the authoritative
-    // aircraft position is read through the HUD-bar DOM rect, and wall-clock
-    // windows of the fixed-step simulation (which advances at most four 1/60 s
-    // steps per rendered frame) are noisy under parallel machine load. Residual
-    // velocity from the previous command and a max-of-two sampling amplify an
-    // outlier window. The measurement therefore (1) verifies the aircraft is
-    // fully at rest before every sample window, (2) samples over a longer fixed
-    // window, and (3) uses the MEDIAN of three attempts. The exact 45% short-side
-    // cap and diagonal normalization remain deterministically unit-covered; the
-    // browser only proves the ratio invariant (diagonal never √2 × single).
-    const waitUntilRest = async (): Promise<void> => {
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const before = await readAircraft(page);
-        await page.waitForTimeout(120);
-        const after = await readAircraft(page);
-        if (
-          before !== null &&
-          after !== null &&
-          Math.hypot(
-            after.centerX - before.centerX,
-            after.centerY - before.centerY,
-          ) < 0.5
-        ) {
-          return;
-        }
-      }
-    };
+    const singleSpeed = single.displacement / single.elapsedSeconds;
+    const diagonalSpeed = diagonal.displacement / diagonal.elapsedSeconds;
+    console.log(
+      `V02-WI-05-M02-R01-C02-KEYBOARD-MEASUREMENT ${JSON.stringify({
+        viewport: MINIMUM_VIEWPORT,
+        single: {
+          elapsedSeconds: single.elapsedSeconds,
+          displacement: single.displacement,
+          dx: single.signedDx,
+          dy: single.signedDy,
+          speed: singleSpeed,
+        },
+        diagonal: {
+          elapsedSeconds: diagonal.elapsedSeconds,
+          displacement: diagonal.displacement,
+          dx: diagonal.signedDx,
+          dy: diagonal.signedDy,
+          speed: diagonalSpeed,
+        },
+        ratio: diagonalSpeed / singleSpeed,
+      })}`,
+    );
 
-    const measureCruise = async (
-      keys: string[],
-    ): Promise<{ displacement: number; dx: number; dy: number }> => {
-      const displacements: number[] = [];
-      const dxs: number[] = [];
-      const dys: number[] = [];
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        await waitUntilRest();
-        for (const key of keys) {
-          await page.keyboard.down(key);
-        }
-        await page.waitForTimeout(500); // accelerate to cruise
-        const start = await readAircraft(page);
-        await page.waitForTimeout(500);
-        const end = await readAircraft(page);
-        for (const key of keys) {
-          await page.keyboard.up(key);
-        }
-        await page.waitForTimeout(600);
-        if (start !== null && end !== null) {
-          const dx = Math.abs(end.centerX - start.centerX);
-          const dy = Math.abs(end.centerY - start.centerY);
-          displacements.push(Math.hypot(dx, dy));
-          dxs.push(dx);
-          dys.push(dy);
-        }
-      }
-      displacements.sort((a, b) => a - b);
-      dxs.sort((a, b) => a - b);
-      dys.sort((a, b) => a - b);
-      const median = displacements[Math.floor(displacements.length / 2)] ?? 0;
-      const medianDx = dxs[Math.floor(dxs.length / 2)] ?? 0;
-      const medianDy = dys[Math.floor(dys.length / 2)] ?? 0;
-      return { displacement: median, dx: medianDx, dy: medianDy };
-    };
+    // The commanded direction reached the simulation on both trajectories, and
+    // the single-axis trajectory stays axis-pure.
+    expect(single.signedDx).toBeGreaterThan(0);
+    expect(Math.abs(single.signedDy)).toBeLessThan(2);
+    expect(diagonal.signedDx).toBeGreaterThan(0);
+    expect(diagonal.signedDy).toBeLessThan(0);
 
-    // Single axis ('d', right), then back left, then diagonally ('d' + 'w')
-    // from a safe mid-low position with clearance on every edge. The leftward
-    // return is deliberately long so the three 500 ms diagonal windows still
-    // have room before the right movement bound.
-    const single = await measureCruise(['d']);
-    await page.keyboard.down('a');
-    await page.waitForTimeout(2000);
-    await page.keyboard.up('a');
-    await page.waitForTimeout(300);
-    const diagonal = await measureCruise(['d', 'w']);
-
-    // Single-axis cruise is the approved 45% short-side per second (270 px/s
-    // over the 500 ms window → ~135 px). The absolute floor is deliberately low
-    // so the ratio assertion below is the primary evidence even under heavy
-    // machine load; the exact 270 px/s cap is covered by deterministic units.
-    const singleSpeed = single.displacement / 0.5;
-    const diagonalSpeed = diagonal.displacement / 0.5;
+    // Single-axis cruise is the approved 45% short-side per second (270 px/s at
+    // 1280×600). The absolute floor is deliberately low so the ratio assertion
+    // below is the primary evidence even under heavy machine load; the exact
+    // 270 px/s cap is covered by deterministic units.
     expect(singleSpeed).toBeGreaterThan(30);
     expect(singleSpeed).toBeLessThan(500);
-    // Diagonal movement is capped at the same maximum, never √2 × it.
+    // Diagonal movement is capped at the same maximum, never √2 × it. Removing
+    // the normalized direction in `stepKeyboard`
+    // (`src/application/combat/combat-simulation.ts`, pinned by
+    // `combat-simulation.test.ts` → 'normalizes diagonal input so speed never
+    // exceeds the configured maximum (AC-007)') drives this ratio to √2 ≈ 1.414
+    // and fails the ceiling below, so the assertion stays mutation-sensitive.
     expect(diagonalSpeed).toBeGreaterThan(singleSpeed * 0.4);
     expect(diagonalSpeed).toBeLessThan(singleSpeed * 1.3);
     // Both axes move during the diagonal hold.
-    expect(diagonal.dx).toBeGreaterThan(20);
-    expect(diagonal.dy).toBeGreaterThan(20);
+    expect(Math.abs(diagonal.signedDx)).toBeGreaterThan(20);
+    expect(Math.abs(diagonal.signedDy)).toBeGreaterThan(20);
   },
 );
 

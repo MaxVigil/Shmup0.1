@@ -290,6 +290,206 @@ test('a successful Evacuation resolves once through the production artifact and 
   expect(pageErrors).toEqual([]);
 });
 
+/** Writes the exact persisted campaign row envelope (V02-WI-05 M02-R01 test
+ *  setup: the production application reads it as normal durable campaign
+ *  progress; no Debug, dev observability, or product hook is involved). */
+async function seedPersistedCampaign(
+  page: Page,
+  value: Readonly<Record<string, unknown>>,
+): Promise<void> {
+  await page.evaluate(async (record) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('shmup-v0.2');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('campaign', 'readwrite');
+      transaction.objectStore('campaign').put({
+        id: 'current',
+        rowFormatVersion: 2,
+        value: record,
+      });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  }, value);
+}
+
+/** Reads the raw persisted campaign row envelope through IndexedDB. */
+async function readPersistedCampaign(page: Page): Promise<{
+  readonly value: {
+    readonly credits: number;
+    readonly missionInProgress: {
+      readonly missionId: string;
+      readonly attemptId: number;
+    } | null;
+    readonly completedMissionIds: readonly string[];
+    readonly unlockedMissionIds: readonly string[];
+  };
+}> {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('shmup-v0.2');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const row = await new Promise<unknown>((resolve, reject) => {
+      const transaction = database.transaction('campaign', 'readonly');
+      const get = transaction.objectStore('campaign').get('current');
+      get.onsuccess = () => resolve(get.result);
+      get.onerror = () => reject(get.error);
+    });
+    database.close();
+    return row as never;
+  });
+}
+
+/**
+ * V02-WI-05 M02-R01 C01 production-browser evidence for the SELECTED Mission 02
+ * production path (Epic §6.1, §13.2, §13.4, §15.4, V02-AC-003/015/020/023).
+ *
+ * What this test owns: the production artifact resolves the selected Mission 02
+ * identity and starts it through the real mission-start transaction, exposes
+ * the authored `04:20` Countdown, contains no Debug surface, resolves ONE
+ * supported non-Debug terminal result (the real `Evacuate` affordance and its
+ * `5.0 s` countdown), commits that result exactly once with its cleanup, and
+ * returns to Operations with the negative progression rule intact (Mission 02
+ * incomplete, Mission 03 still locked, no completion reward, no unlock row).
+ *
+ * What this test does NOT own: Mission 02 Success, its economy, or the Mission
+ * 03 unlock. Those are owned by the deterministic simulation/application
+ * evidence (`src/application/combat/combat-mission-02.test.ts`,
+ * `src/application/mission/mission-02-progression.test.ts`) and by the real
+ * development browser vertical (`e2e/mission-02-acceptance.spec.ts`), which is
+ * the only place a player-facing Mission 02 Success is driven end to end.
+ */
+test('a selected Mission 02 starts and resolves through the supported production Evacuation terminal exactly once with no Debug surface, no completion and no Mission 03 unlock (V02-AC-003/015/020/023)', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  // Durable setup: Mission 01 completed, Interception 02 available, 03 locked.
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await seedPersistedCampaign(page, {
+    schemaVersion: 1,
+    runStatus: 'active',
+    credits: 20,
+    aircraftId: 'german-fighter',
+    hullIntegrity: 80,
+    equippedWeapon: 'machine-gun',
+    unlockedMissionIds: ['interception-01', 'interception-02'],
+    completedMissionIds: ['interception-01'],
+    missionInProgress: null,
+    pilotId: 'pilot-shevchenko',
+  });
+  await page.reload();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+
+  // The selected Mission 02 identity is visible in Operations and Mission
+  // Details before any start transaction.
+  const mission02 = page.getByRole('button', { name: 'Interception 02' });
+  await expect(mission02).toBeEnabled();
+  await mission02.click();
+  const details = page.getByRole('dialog');
+  await expect(
+    details.getByRole('heading', { name: 'Interception 02' }),
+  ).toBeVisible();
+  await expect(details.getByText('12 Credits', { exact: true })).toBeVisible();
+  await details.getByRole('button', { name: 'Start Mission' }).click();
+
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
+  const countdown = page.locator('.ds-combat-countdown');
+  await expect(countdown).toHaveText('04:20');
+  await expect(page.locator('.ds-combat-hud')).toHaveCount(1);
+  // The durable marker belongs to the exact selected Mission 02 attempt.
+  const atStart = await readPersistedCampaign(page);
+  expect(atStart.value.missionInProgress?.missionId).toBe('interception-02');
+  expect(atStart.value.credits).toBe(20);
+  expect(atStart.value.completedMissionIds).toEqual(['interception-01']);
+  expect(atStart.value.unlockedMissionIds).toEqual([
+    'interception-01',
+    'interception-02',
+  ]);
+
+  // No Debug surface exists in the production artifact.
+  await page.keyboard.press('F1');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(
+    page.getByText(/God Mode|Win Mission|Lose Mission/i),
+  ).toHaveCount(0);
+
+  // The only terminal this path uses is the supported non-Debug Evacuation:
+  // the real destructive affordance, its blocking confirmation, and the exact
+  // 5.0 s commitment.
+  const utility = page.getByTestId('combat-utility');
+  await utility.getByRole('button', { name: 'Evacuate' }).click();
+  const confirmation = page.getByRole('dialog');
+  await expect(
+    confirmation.getByRole('heading', { name: 'Evacuate?' }),
+  ).toBeVisible();
+  await confirmation
+    .getByRole('button', { name: 'Confirm Evacuation' })
+    .click();
+  await expect(countdown).toHaveText('EVACUATION 00:05');
+  await expect
+    .poll(async () => (await countdown.textContent()) ?? '', {
+      timeout: 30000,
+      intervals: [50, 100],
+    })
+    .toBe('EVACUATION 00:00');
+
+  const result = page.getByRole('dialog');
+  await expect(result.getByRole('heading', { name: 'EVACUATED' })).toBeVisible({
+    timeout: 20000,
+  });
+  // The committed result explicitly reports no completion and no unlock.
+  await expect(result).toContainText('Mission not completed');
+  await expect(result.getByText('Completion reward')).toHaveCount(0);
+  await expect(result.getByText('Mission unlocked')).toHaveCount(0);
+  const creditsRow = await result
+    .locator('.ds-field-row', { hasText: 'Credits earned' })
+    .textContent();
+  const creditsEarned = Number.parseInt(
+    /\d+/.exec(creditsRow ?? '')?.[0] ?? '',
+    10,
+  );
+  expect(Number.isNaN(creditsEarned)).toBe(false);
+
+  // Continue returns to Operations with exactly one committed economy change
+  // (the retained 50% payout), no completion, no unlock and no Combat residue.
+  await result.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await expect(page.locator('canvas')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText(`Credits: ${20 + creditsEarned}`)).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Interception 02' }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Interception 02 (Completed)' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Interception 03 (Locked)' }),
+  ).toBeDisabled();
+  const afterContinue = await readPersistedCampaign(page);
+  expect(afterContinue.value.credits).toBe(20 + creditsEarned);
+  expect(afterContinue.value.missionInProgress).toBeNull();
+  expect(afterContinue.value.completedMissionIds).toEqual(['interception-01']);
+  expect(afterContinue.value.unlockedMissionIds).toEqual([
+    'interception-01',
+    'interception-02',
+  ]);
+  expect(pageErrors).toEqual([]);
+});
+
 test('a natural Defeat resolves once and Continue returns to Operations for the next mission (Delivery §7.5, Combat AC-010/028–036, MASTER-AC-005)', async ({
   page,
 }) => {

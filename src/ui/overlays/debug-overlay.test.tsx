@@ -55,6 +55,13 @@ afterEach(() => {
 
 function renderDebugOverlay(
   observability: CombatObservability | null = BASE_OBSERVABILITY,
+  encounterIds: readonly string[] = [
+    'interception-01-e1',
+    'interception-01-e2',
+    'interception-01-e3',
+    'interception-01-e4',
+    'interception-01-e5',
+  ],
 ): {
   getObservability: ReturnType<typeof vi.fn>;
   submitDebugAction: ReturnType<typeof vi.fn>;
@@ -70,6 +77,7 @@ function renderDebugOverlay(
         onClose={onClose}
         getObservability={getObservability}
         submitDebugAction={submitDebugAction}
+        encounterIds={encounterIds}
       />
     </WithApplication>,
   );
@@ -172,9 +180,52 @@ describe('DebugOverlay (Combat §11, DS §8.24)', () => {
           onClose={vi.fn()}
           getObservability={getObservability}
           submitDebugAction={submitDebugAction}
+          encounterIds={['interception-01-e1']}
         />
       </WithApplication>,
     );
     expect(screen.queryByRole('heading', { name: 'Debug' })).toBeNull();
+  });
+
+  it('addresses the CURRENT mission authored encounters instead of a hard-coded Mission 01 (V02-WI-05 M02-R01)', () => {
+    const { submitDebugAction } = renderDebugOverlay(BASE_OBSERVABILITY, [
+      'interception-02-e1',
+      'interception-02-e2',
+      'interception-02-e3',
+      'interception-02-e4',
+      'interception-02-e5',
+      'interception-02-e6',
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Spawn E1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Spawn E5' }));
+    expect(submitDebugAction.mock.calls.map((call) => call[0])).toEqual([
+      {
+        type: 'combat-debug/spawn-encounter',
+        encounterId: 'interception-02-e1',
+      },
+      {
+        type: 'combat-debug/spawn-encounter',
+        encounterId: 'interception-02-e5',
+      },
+    ]);
+  });
+
+  it('keeps an absent authored encounter inert instead of relaying a foreign identity (V02-WI-05 M02-R01)', () => {
+    const { submitDebugAction } = renderDebugOverlay(BASE_OBSERVABILITY, [
+      'interception-01-e1',
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Spawn E1' }));
+    expect(submitDebugAction).toHaveBeenCalledWith({
+      type: 'combat-debug/spawn-encounter',
+      encounterId: 'interception-01-e1',
+    });
+    // The mission has no fifth authored Encounter: the action is disabled and
+    // a forced activation still relays nothing.
+    const spawnE5 = screen.getByRole('button', {
+      name: 'Spawn E5',
+    }) as HTMLButtonElement;
+    expect(spawnE5.disabled).toBe(true);
+    fireEvent.click(spawnE5);
+    expect(submitDebugAction).toHaveBeenCalledTimes(1);
   });
 });

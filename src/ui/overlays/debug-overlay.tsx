@@ -14,6 +14,15 @@ export interface DebugOverlayProps {
   readonly getObservability: () => CombatObservability | null;
   /** Relays one deterministic Debug command to the application simulation. */
   readonly submitDebugAction: (command: CombatDebugCommand) => void;
+  /**
+   * Authored Encounter ids of the CURRENT Active Mission, in authored order
+   * (V02-WI-05 M02-R01). The two Spawn Encounter actions address the current
+   * mission's first and fifth authored Encounter through the same
+   * authoritative `combat-debug/spawn-encounter` command, so the development
+   * surface can never target another mission's staging. An absent authored id
+   * renders the action disabled instead of relaying a foreign identity.
+   */
+  readonly encounterIds: readonly string[];
 }
 
 /**
@@ -25,14 +34,18 @@ export interface DebugOverlayProps {
  * Spawned) via Field Rows and is refreshed only on open and accepted Debug
  * actions while paused — never per frame. Related actions use two-column
  * rows; `Win Mission` is primary and `Lose Mission` destructive; content
- * scrolls while Header and Close remain visible. This component exists only in
- * development builds (the CombatScreen lazy-loads it behind `import.meta.env.DEV`).
+ * scrolls while Header and Close remain visible. The two Spawn Encounter
+ * actions address the current Active Mission's authored first and fifth
+ * Encounter (V02-WI-05 M02-R01) through the same authoritative command. This
+ * component exists only in development builds (the CombatScreen lazy-loads it
+ * behind `import.meta.env.DEV`).
  */
 export function DebugOverlay({
   open,
   onClose,
   getObservability,
   submitDebugAction,
+  encounterIds,
 }: DebugOverlayProps): ReactElement | null {
   const [observability, setObservability] =
     useState<CombatObservability | null>(null);
@@ -60,6 +73,10 @@ export function DebugOverlay({
     submitDebugAction(command);
     refresh();
   };
+  // The Spawn Encounter actions address the CURRENT Active Mission's authored
+  // encounters (V02-WI-05 M02-R01): its first and fifth authored Encounter.
+  const firstEncounterId = encounterIds[0];
+  const fifthEncounterId = encounterIds[4];
 
   const activeText =
     observability === null
@@ -184,23 +201,29 @@ export function DebugOverlay({
         </Button>
         <Button
           variant="secondary"
-          onClick={() =>
-            act({
-              type: 'combat-debug/spawn-encounter',
-              encounterId: 'interception-01-e1',
-            })
-          }
+          disabled={firstEncounterId === undefined}
+          onClick={() => {
+            if (firstEncounterId !== undefined) {
+              act({
+                type: 'combat-debug/spawn-encounter',
+                encounterId: firstEncounterId,
+              });
+            }
+          }}
         >
           Spawn E1
         </Button>
         <Button
           variant="secondary"
-          onClick={() =>
-            act({
-              type: 'combat-debug/spawn-encounter',
-              encounterId: 'interception-01-e5',
-            })
-          }
+          disabled={fifthEncounterId === undefined}
+          onClick={() => {
+            if (fifthEncounterId !== undefined) {
+              act({
+                type: 'combat-debug/spawn-encounter',
+                encounterId: fifthEncounterId,
+              });
+            }
+          }}
         >
           Spawn E5
         </Button>

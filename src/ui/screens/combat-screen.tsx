@@ -121,6 +121,20 @@ export function CombatScreen(): ReactElement | null {
       ? null
       : session.activeMission.missionInstanceOrdinal;
 
+  // V02-WI-05 M02-R01: the development Debug Spawn Encounter actions address
+  // the CURRENT Active Mission's authored encounters (resolved from the one
+  // validated registry) instead of a hard-coded Mission 01 identity, so the
+  // development surface stays correct for every startable mission. No new
+  // command, hook, or gameplay path is added: the same authoritative
+  // `combat-debug/spawn-encounter` transition runs.
+  const debugEncounterIds =
+    session.activeMission === 'none'
+      ? []
+      : (
+          resolveMission(content, session.activeMission.missionId)
+            ?.encounters ?? []
+        ).map((encounter) => encounter.id);
+
   useEffect(() => {
     const snapshot = session.activeMission;
     if (snapshot === 'none') {
@@ -543,6 +557,7 @@ export function CombatScreen(): ReactElement | null {
             onClose={dispatchCloseDebug}
             getObservability={getObservability}
             submitDebugAction={submitDebugAction}
+            encounterIds={debugEncounterIds}
           />
         </Suspense>
       ) : null}
