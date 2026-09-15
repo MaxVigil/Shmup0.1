@@ -214,7 +214,7 @@ Acceptance evidence:
 **Outcome:** Interception 03 is fully playable and completable with the exact Elite entry, anchor, phase cycle, attacks, visuals, economy, and final mission progression.
 
 - **Depends on:** accepted `V02-WI-05` revision.
-- **Readiness precondition:** Product Owner approval and canonical recording of exact Mission 03 regular-enemy Arrival Groups and Spawn Placements; qualitative Epic §8.3 formation language must not be converted into runtime geometry by the implementation agent. The Elite's already-approved entry and anchor remain authoritative.
+- **Readiness precondition:** satisfied by Product Owner approval and canonical `V02-DEC-032` recording of every exact Mission 03 Arrival Group, ordered member, Spawn Placement, positive offset, seeded-side draw, the `05:20` Elite creation step, and the post-entry anchor transition. The implementation agent must consume that contract exactly and must not create another placement type, hidden formation algorithm, or generic formation DSL.
 - **Owned AC:** `V02-AC-009–010` plus regression of all Mission 03-relevant preceding AC.
 - **Primary sources:** Epic §§8.3, 9.4, 10–13, 15–20.
 
@@ -269,15 +269,14 @@ Acceptance evidence:
 
 ## 9. Handoff readiness
 
-`V02-WI-01` through `V02-WI-04` have accepted implementation revisions.
-`V02-WI-05` has bounded scope, exact Mission 02 staging, alternative-outcome
-behaviour, AC ownership, negative requirements, dependency order, and
-verification expectations and is the next Work Item ready for one separately
-authorized handoff.
+`V02-WI-01` through `V02-WI-05` have accepted implementation revisions;
+`V02-WI-05` is accepted at
+`175b5dd6061f7192947a3c6ac4c44bfcb483eea8`. Product Owner approval and
+canonical `V02-DEC-032` now close the final Mission 03 staging gap.
 
-`V02-WI-06` remains NOT READY for its regular-enemy runtime staging until the
-Product Owner approves and canonical documentation records the exact Mission 03
-Arrival Groups and Spawn Placements required by its readiness precondition.
-`V02-WI-07` remains dependency-blocked until `V02-WI-06` is accepted. Starting
-any later Work Item, combining Work Items, or sending the whole Epic as one
-DeepSeek task violates this plan.
+`V02-WI-06` has exact Mission 03 regular/Elite staging, Elite behaviour, AC
+ownership, negative requirements, dependency order, and verification
+expectations and is the next Work Item ready for one separately authorized
+handoff. `V02-WI-07` remains dependency-blocked until `V02-WI-06` is accepted.
+Starting any later Work Item, combining Work Items, or sending the whole Epic as
+one DeepSeek task violates this plan.

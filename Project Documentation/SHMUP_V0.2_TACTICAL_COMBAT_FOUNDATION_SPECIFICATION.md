@@ -7,8 +7,9 @@
 **Prepared:** 2026-08-25
 **Mission 01 staging decision:** 2026-08-31
 **Mission 02 staging and alternative-outcome decisions:** 2026-09-02
+**Mission 03 staging decision:** 2026-09-15
 **Repository baseline audited:** `91f2aa29f2783c90af584d95720453a1eabc8c3e`
-**Status:** **APPROVED — V02-WI-05 READY FOR BOUNDED HANDOFF; MISSION 03 STAGING BOUNDED AS NOT READY**
+**Status:** **APPROVED — V02-WI-06 READY FOR BOUNDED HANDOFF**
 
 ## 1. Purpose and authority
 
@@ -187,11 +188,10 @@ members share one fixed step. Content contains data only: it does not contain
 spawn callbacks, Phaser objects, or hidden formation algorithms.
 
 This contract is introduced by the Mission 01 staging approved in §8.1.1 and
-reused without a new placement type or formation DSL by the Mission 02 staging
-approved in §8.2.1. The qualitative Mission 03 rows remain non-runtime product
-input until their owning Work Item receives separately approved numeric staging.
-The implementation must not invent Mission 03 values or generalize a formation
-DSL while implementing Mission 02.
+reused without a new placement type or formation DSL by the Mission 02 and
+Mission 03 staging approved in §§8.2.1 and 8.3.1. Implementation must consume
+those exact values and must not invent another placement type, hidden formation
+algorithm, or generic formation DSL.
 
 ### 7.2 No Reactive Spawn Cheating
 
@@ -342,6 +342,48 @@ reaches `00:00` exactly when the complete final group is created.
 **Totals:** 13 Basic, 4 Ranged, 3 Hunter, 1 Elite.
 **Maximum combat reward:** 35 Credits.
 **Maximum Success payout:** 51 Credits.
+
+#### 8.3.1 Exact Arrival Groups and Spawn Placements
+
+**DECISION V02-DEC-032 (2026-09-15):** Mission 03 reuses only the bounded
+`Arrival Group`, `Top Placement`, and `Seeded Side Placement` contract from
+§7.1. It adds no formation DSL, fixed-side placement, reactive geometry, or
+mission-specific spawn algorithm. Every Top fraction is measured inside the
+current Aircraft horizontal engagement band. Every Seeded Side member uses the
+exact ordered pair `upper-left, upper-right` at the authored viewport-height
+fraction.
+
+| Encounter | Offset | Ordered members and Spawn Placements |
+|---|---:|---|
+| `interception-03-e1` | `+0 s` | Basic Top `0.25`; Basic Top `0.50`; Basic Top `0.75` |
+| `interception-03-e1` | `+2 s` | Ranged Top `0.50` |
+| `interception-03-e2` | `+0 s` | Basic Top `0.15`; Basic Top `0.50`; Basic Top `0.85` |
+| `interception-03-e3` | `+0 s` | Basic Top `0.30`; Ranged Top `0.50`; Basic Top `0.70` |
+| `interception-03-e3` | `+2 s` | Hunter Seeded Side `upper-left, upper-right`, `Y = 0.20 VH` |
+| `interception-03-e4` | `+0 s` | Basic Top `0.20`; Ranged Top `0.30`; Ranged Top `0.70`; Basic Top `0.80` |
+| `interception-03-e5` | `+0 s` | Basic Top `0.50`; Hunter Seeded Side `upper-left, upper-right`, `Y = 0.20 VH` |
+| `interception-03-e6` | `+0 s` | Basic Top `0.35`; Basic Top `0.65` |
+| `interception-03-e7` | `+0 s` | Hunter Seeded Side `upper-left, upper-right`, `Y = 0.20 VH` |
+| `interception-03-e8` | `+0 s` | Elite Top `0.50` |
+
+Mission 03 consumes exactly three `mission-data` `nextInt(2)` draws in
+Encounter/Arrival Group/member order: the delayed e3 Hunter, the e5 Hunter, and
+the e7 Hunter. Draw `0` maps to `upper-left`; draw `1` maps to `upper-right`.
+Every Top Placement, including the Elite, consumes zero draws. Selection is
+resolved from authored mission data and the Mission seed before active Combat
+and never reads Aircraft, Hull, weapon, score, or performance state.
+
+The e1 Ranged and e3 Hunter are the only positive-offset Mission 03 Arrival
+Groups, both at exactly `+2 s`. The e5 Basic and Hunter arrive simultaneously.
+The wide e2 Top fractions express its flank-oriented geometry without adding
+independent left/right side selections that the bounded contract does not own.
+
+The Elite is created alone on the single `05:20` fixed step, fully above the
+Top boundary with its complete authoritative bounds touching that boundary at
+Top fraction `0.50`. Mission 03 has no positive Arrival Group offset after that
+step. The Combat Countdown therefore reaches `00:00` exactly when the Elite is
+created. The Elite then follows §9.4 to the fixed `50% VW, 20% VH` anchor; entry
+does not activate phases, attacks, or their timers.
 
 ## 9. Enemy Vocabulary and tuning
 
@@ -1232,6 +1274,7 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-029 | Approved | shared terminal commitment and recovery contract     | all outcomes save exactly once before presentation or exit  |
 | V02-DEC-030 | Approved | exact Evacuation affordance and confirmation UX      | irreversible exit has safe focus, truthful copy, and one entry path |
 | V02-DEC-031 | Approved | exact mission-start cleanup recovery                 | failed Combat initialization cannot become a free abort, paid Defeat, or trapped shell |
+| V02-DEC-032 | Approved | exact eight-Encounter Mission 03 staging             | regular and Elite runtime geometry is explicit; final arrival remains `05:20` |
 
 ## 23. Consistency and Definition of Ready audit
 
@@ -1265,12 +1308,11 @@ and conflict path that does not depend on the removed free abort. The WI-04
 temporary Defeat/Return-to-Base compatibility seam has one removal owner in
 WI-05 and is not an alternate accepted v0.2 path.
 
-**BOUNDED FUTURE GAP:** Mission 03 retains qualitative entry and formation
-language without complete numeric regular-enemy Arrival Groups. This does not
-block Mission 02 or `V02-WI-05`; it makes the affected runtime portion of
-`V02-WI-06` NOT READY until its Product Owner staging decision is recorded.
-WI-06 must not infer geometry from Mission 01, Mission 02, or implementation
-convenience.
+Mission 03 now has complete numeric Arrival Groups and Spawn Placements under
+`V02-DEC-032`. Its three seeded-side draws, two positive offsets, `05:20` Elite
+creation step, Top entry and post-creation anchor transition are explicit. The
+readiness precondition for `V02-WI-06` is satisfied without adding a new
+placement type or formation DSL.
 
 ### 23.2 Visual acceptance closure
 
@@ -1282,12 +1324,11 @@ convenience.
 
 ## 24. Readiness verdict
 
-**APPROVED — V02-WI-05 READY FOR BOUNDED HANDOFF**
+**APPROVED — V02-WI-06 READY FOR BOUNDED HANDOFF**
 
-The Mission 02 and alternative-outcome product-definition, consistency,
-traceability, and Definition of Ready audits have no unresolved S0–S2 blocker. Implementation may
-begin only through one separately authorized Work Item handoff at a time,
-following `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` and repository governance. This
-document does not itself start implementation or authorize the whole Epic as one
-unbounded assignment. Mission 03 runtime staging remains subject to the bounded
-future gap in §23.1.
+The Mission 03 and Elite product definition, exact staging, consistency,
+traceability, and Definition of Ready audits have no unresolved S0–S2 blocker.
+Implementation may begin only through one separately authorized Work Item
+handoff at a time, following `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` and repository
+governance. This document does not itself start implementation or authorize the
+whole Epic as one unbounded assignment.
