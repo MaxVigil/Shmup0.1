@@ -1,7 +1,7 @@
 import { createAabb } from '@domain/geometry';
 import type { Aabb } from '@domain/geometry';
 import type { CombatEnemy } from './enemies';
-import type { CombatProjectile, EnemyProjectile } from './projectiles';
+import type { CombatProjectile, EnemyProjectileInstance } from './projectiles';
 
 /**
  * Collision geometry (Combat §8.6, AC-049; v0.2 §9/§11, V02-DEC-019): the
@@ -52,9 +52,10 @@ export function projectileCollisionAabb(
   );
 }
 
-/** The Ranged-projectile hitbox is its full rendered bounds (v0.2 §9.2). */
+/** The Ranged-projectile hitbox is its full rendered bounds (v0.2 §9.2); every
+ *  Elite projectile's hitbox is likewise its complete rendered bounds. */
 export function enemyProjectileCollisionAabb(
-  projectile: EnemyProjectile,
+  projectile: EnemyProjectileInstance,
 ): Aabb {
   return createAabb(
     projectile.centerX - projectile.width / 2,

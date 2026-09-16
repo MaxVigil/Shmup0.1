@@ -5,19 +5,24 @@ import { createTestCombatState } from '@test-support/domain';
 import {
   activateElite,
   createEliteAtAnchor,
+  createEliteForEntry,
   eliteAcceptsProjectileDamage,
   spawnEnemyFromPlacement,
   stepEnemy,
   ELITE_ANCHOR_VIEWPORT_FRACTION_X,
   ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
   ELITE_ARMOURED_PHASE_STEPS,
+  ELITE_CANNON_INTERVAL_STEPS,
+  ELITE_ENTRY_SPEED_VIEWPORT_HEIGHT_PER_SECOND,
   ELITE_PHASE_CYCLE_STEPS,
   ELITE_VULNERABLE_PHASE_STEPS,
 } from './enemies';
 import type { CombatEnemy, EliteEnemyState, EnemyStepInput } from './enemies';
 import {
   AIRCRAFT_DAMAGE_FLASH_STEPS,
+  ELITE_CONTACT_DAMAGE,
   ENEMY_HIT_FLASH_STEPS,
+  PAIR_CONTACT_COOLDOWN_STEPS,
   resolveAircraftContacts,
   resolveProjectileCollisions,
 } from './collision';
@@ -219,29 +224,82 @@ describe('Elite creation and content ownership (Epic §9.4, §16.4)', () => {
   });
 });
 
-describe('Elite pre-activation state (Epic §9.4)', () => {
-  it('consumes no phase time, does not move, and is never the regular full-bounds activation', () => {
-    const elite = createElite();
-    // The complete bounds are already inside the viewport, which would activate
-    // every regular role on this step.
-    const input = stepInput();
-    const result = stepEnemy(elite, input);
+describe('Elite canonical Top entry before activation (Epic §9.4, V02-DEC-033)', () => {
+  it('starts fully above the Top boundary with no phase or attack time and is not the regular full-bounds activation', () => {
+    const elite = createEliteForEntry({
+      id: ELITE_ID,
+      ordinal: 0,
+      viewportWidth: VIEWPORT.width,
+      viewportHeight: VIEWPORT.height,
+    });
+    // The nearest complete-bounds edge touches the Top boundary and nothing is
+    // visible yet; the regular full-bounds activation rule does not apply.
+    expect(elite.centerY + elite.height / 2).toBeCloseTo(0, 9);
+    expect(elite.centerX).toBeCloseTo(
+      VIEWPORT.width * ELITE_ANCHOR_VIEWPORT_FRACTION_X,
+      9,
+    );
+    expect(elite.activated).toBe(false);
+    expect(elite.phase).toBe('entering');
+    expect(elite.phaseStepsElapsed).toBe(0);
+    expect(elite.phaseStepsRemaining).toBe(0);
+    expect(elite.attackStepsRemaining).toBe(0);
+    expect(elite.horizontalDirection).toBeNull();
+    expect(elite.movementDecisionStepsRemaining).toBe(0);
+    expect(elite.hasEnteredVisibleArea).toBe(false);
+
+    // One executed step: straight down at exactly `12% VH/s`, no phase or
+    // attack time, no decision draw, and no horizontal movement.
+    const result = stepEnemy(elite, stepInput());
     expect(result.newlyActivated).toBe(false);
     expect(result.enemy?.activated).toBe(false);
-    const after = stepEliteExact(elite, ELITE_PHASE_CYCLE_STEPS * 3);
-    expect(after.phase).toBe('entering');
+    const after = result.enemy;
+    if (after === null || after.kind !== 'elite') {
+      throw new Error('the entering Elite must never escape or change kind');
+    }
+    expect(after.centerX).toBe(elite.centerX);
+    expect(after.centerY).toBeCloseTo(
+      elite.centerY +
+        ELITE_ENTRY_SPEED_VIEWPORT_HEIGHT_PER_SECOND *
+          VIEWPORT.height *
+          FIXED_STEP_SECONDS,
+      9,
+    );
     expect(after.phaseStepsElapsed).toBe(0);
     expect(after.phaseStepsRemaining).toBe(0);
-    expect(after.centerX).toBe(elite.centerX);
-    expect(after.centerY).toBe(elite.centerY);
-    expect(after.width).toBe(elite.width);
-    expect(after.height).toBe(elite.height);
+    expect(after.attackStepsRemaining).toBe(0);
   });
 
-  it('never escapes and never changes phase while entering', () => {
-    const elite = stepEliteExact(createElite(), ELITE_PHASE_CYCLE_STEPS * 5);
-    expect(elite.phase).toBe('entering');
-    expect(elite.activated).toBe(false);
+  it('never escapes and activates exactly on the anchor-reaching step', () => {
+    const elite = createEliteForEntry({
+      id: ELITE_ID,
+      ordinal: 0,
+      viewportWidth: VIEWPORT.width,
+      viewportHeight: VIEWPORT.height,
+    });
+    const anchorY = VIEWPORT.height * ELITE_ANCHOR_VIEWPORT_FRACTION_Y;
+    const perStep =
+      ELITE_ENTRY_SPEED_VIEWPORT_HEIGHT_PER_SECOND *
+      VIEWPORT.height *
+      FIXED_STEP_SECONDS;
+    const entrySteps = Math.ceil((anchorY - elite.centerY) / perStep);
+
+    const beforeAnchor = stepEliteExact(elite, entrySteps - 1);
+    expect(beforeAnchor.activated).toBe(false);
+    expect(beforeAnchor.phase).toBe('entering');
+    expect(beforeAnchor.centerY).toBeLessThan(anchorY);
+
+    const activated = stepEliteExact(elite, entrySteps);
+    expect(activated.activated).toBe(true);
+    expect(activated.phase).toBe('armoured');
+    expect(activated.centerX).toBeCloseTo(
+      VIEWPORT.width * ELITE_ANCHOR_VIEWPORT_FRACTION_X,
+      9,
+    );
+    expect(activated.centerY).toBeCloseTo(anchorY, 9);
+    expect(activated.phaseStepsRemaining).toBe(ELITE_ARMOURED_PHASE_STEPS);
+    expect(activated.attackStepsRemaining).toBe(ELITE_CANNON_INTERVAL_STEPS);
+    expect(activated.hasEnteredVisibleArea).toBe(true);
   });
 });
 
@@ -624,7 +682,7 @@ describe('Elite player-projectile resolution (Epic §9.4/§10/§11)', () => {
   });
 });
 
-describe('Elite Aircraft contact exclusion (Epic §11.1–11.2, V02-WI-06 E01 C01)', () => {
+describe('Elite Aircraft contact (Epic §11.3, V02-DEC-033)', () => {
   const contactInput = (enemies: readonly CombatEnemy[]) => ({
     enemies,
     aircraftCenterX: eliteFrom(enemies).centerX,
@@ -638,18 +696,36 @@ describe('Elite Aircraft contact exclusion (Epic §11.1–11.2, V02-WI-06 E01 C0
       'basic-drone': 15,
       'ranged-drone': 15,
       'hunter-drone': 35,
-      'elite-drone': 0,
+      'elite-drone': ELITE_CONTACT_DAMAGE,
     },
     aircraftDangerFlashStepsRemaining: 0,
     godModeEnabled: false,
     playerDefeated: false,
   });
 
-  it('produces no damage, flash, cooldown, destruction, or accounting side effect', () => {
+  it('deals 20 damage with the 45-step pair cooldown once the Elite is active, without harming or destroying it', () => {
     const elite = activate();
     const result = resolveAircraftContacts(contactInput([elite]));
-    // No approved Elite contact outcome exists, so every contact owner must stay
-    // exactly as it was: the Elite is not a regular enemy and not a Hunter.
+    expect(ELITE_CONTACT_DAMAGE).toBe(20);
+    expect(result.playerHullIntegrity).toBe(80);
+    expect(result.playerDefeated).toBe(false);
+    expect(result.aircraftDangerFlashStepsRemaining).toBe(
+      AIRCRAFT_DAMAGE_FLASH_STEPS,
+    );
+    expect(result.pairContactCooldownSteps[ELITE_ID]).toBe(
+      PAIR_CONTACT_COOLDOWN_STEPS,
+    );
+    expect(PAIR_CONTACT_COOLDOWN_STEPS).toBe(45);
+    // No destruction, no reward/count, and no Elite Hull change.
+    expect(result.destroyedByContact).toHaveLength(0);
+    expect(result.destroyedEnemyFlashes).toHaveLength(0);
+    expect(result.enemies).toHaveLength(1);
+    expect(eliteFrom(result.enemies).hullIntegrity).toBe(60);
+  });
+
+  it('is completely inactive while the Elite is still entering', () => {
+    const elite = createElite();
+    const result = resolveAircraftContacts(contactInput([elite]));
     expect(result.playerHullIntegrity).toBe(100);
     expect(result.playerDefeated).toBe(false);
     expect(result.aircraftDangerFlashStepsRemaining).toBe(0);
@@ -678,20 +754,24 @@ describe('Elite Aircraft contact exclusion (Epic §11.1–11.2, V02-WI-06 E01 C0
       ordinal: 0,
     };
     const result = resolveAircraftContacts(contactInput([basic, elite]));
-    // The overlapping Elite is skipped entirely while the Basic keeps the
-    // unchanged regular contact behaviour.
-    expect(result.playerHullIntegrity).toBe(85);
+    // Both overlapping enemies apply their own contact damage and their own
+    // pair cooldown; neither is destroyed.
+    expect(result.playerHullIntegrity).toBe(65);
     expect(result.aircraftDangerFlashStepsRemaining).toBe(
       AIRCRAFT_DAMAGE_FLASH_STEPS,
     );
-    expect(result.pairContactCooldownSteps[4]).toBeGreaterThan(0);
-    expect(result.pairContactCooldownSteps[ELITE_ID]).toBeUndefined();
+    expect(result.pairContactCooldownSteps[4]).toBe(
+      PAIR_CONTACT_COOLDOWN_STEPS,
+    );
+    expect(result.pairContactCooldownSteps[ELITE_ID]).toBe(
+      PAIR_CONTACT_COOLDOWN_STEPS,
+    );
     expect(result.destroyedByContact).toHaveLength(0);
     expect(result.enemies).toHaveLength(2);
     expect(eliteFrom(result.enemies).hullIntegrity).toBe(60);
   });
 
-  it('stays side-effect free through the real fixed-step pipeline', () => {
+  it('applies exactly once per 45 executed steps through the real fixed-step pipeline', () => {
     const activated = activate();
     const base = createTestCombatState();
     // Place the Elite exactly on the Aircraft hold pose so the pair overlaps.
@@ -708,17 +788,33 @@ describe('Elite Aircraft contact exclusion (Epic §11.1–11.2, V02-WI-06 E01 C0
       finalArrivalTimeSeconds: 0,
       countdownSeconds: 0,
     };
-    const stepped = stepCombatSimulation(state, FIXED_STEP_SECONDS);
-    expect(stepped.playerHullIntegrity).toBe(100);
-    expect(stepped.playerDefeated).toBe(false);
-    expect(stepped.aircraftDangerFlashStepsRemaining).toBe(0);
-    expect(Object.keys(stepped.pairContactCooldownSteps)).toHaveLength(0);
-    expect(stepped.destroyedCountByType['elite-drone']).toBe(0);
-    expect(stepped.destroyedByContactCountByType['elite-drone']).toBe(0);
-    expect(stepped.pendingCombatRewards).toBe(0);
-    expect(stepped.pendingEscapePenalties).toBe(0);
-    expect(stepped.enemies).toHaveLength(1);
-    expect(eliteFrom(stepped.enemies).hullIntegrity).toBe(60);
+    const first = stepCombatSimulation(state, FIXED_STEP_SECONDS);
+    expect(first.playerHullIntegrity).toBe(80);
+    expect(first.aircraftDangerFlashStepsRemaining).toBe(
+      AIRCRAFT_DAMAGE_FLASH_STEPS,
+    );
+    expect(first.pairContactCooldownSteps[ELITE_ID]).toBe(
+      PAIR_CONTACT_COOLDOWN_STEPS,
+    );
+    expect(first.destroyedCountByType['elite-drone']).toBe(0);
+    expect(first.destroyedByContactCountByType['elite-drone']).toBe(0);
+    expect(first.pendingCombatRewards).toBe(0);
+    expect(first.pendingEscapePenalties).toBe(0);
+    expect(first.enemies).toHaveLength(1);
+    expect(eliteFrom(first.enemies).hullIntegrity).toBe(60);
+
+    // The pair cooldown suppresses every following step of the 45-step window.
+    let current = first;
+    for (let index = 0; index < 44; index += 1) {
+      current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+    }
+    expect(current.playerHullIntegrity).toBe(80);
+    // The 46th executed step is the first step the cooldown no longer covers.
+    const next = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+    expect(next.playerHullIntegrity).toBe(60);
+    expect(next.enemies).toHaveLength(1);
+    expect(eliteFrom(next.enemies).hullIntegrity).toBe(60);
+    expect(next.pendingCombatRewards).toBe(0);
   });
 });
 

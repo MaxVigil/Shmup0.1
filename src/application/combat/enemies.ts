@@ -1,4 +1,5 @@
 import type { EnemyType } from '@domain/index';
+import type { Mulberry32 } from '@domain/random';
 import { ELITE_DRONE, enemyRenderedBounds } from '../content';
 
 /**
@@ -20,9 +21,17 @@ import { ELITE_DRONE, enemyRenderedBounds } from '../content';
  * `Armoured 12 s → Vulnerable 6 s` phase foundation (Epic §9.4, V02-AC-009).
  * The Elite never uses the regular-enemy factory, the full-bounds activation
  * rule, or escape; unsupported enemy types are rejected explicitly instead of
- * falling through to a regular role. Elite entry and horizontal movement are
- * NOT owned here — a later movement consumer invokes `activateElite` on the
- * exact anchor-reaching fixed step.
+ * falling through to a regular role.
+ *
+ * V02-WI-06 E02 adds the canonical Elite entry and horizontal movement owned by
+ * `stepElite` (Epic §9.4, V02-DEC-033): the Elite is created fully above the
+ * Top boundary, descends at `12% VH/s`, and clamps exactly to its
+ * `50% VW, 20% VH` anchor while activating idempotently on the same step.
+ * Its active horizontal direction comes only from the dedicated deterministic
+ * `elite-movement` stream, and the complete current-phase bounds always stay
+ * inside the viewport. Elite attacks (cannon/Core) are the active-phase attack
+ * step owned by `combat-simulation.ts`; this module owns movement, the phase
+ * boundary, and the attack-timer initialization that boundary requires.
  */
 
 export type EnemyEntryRegion = 'top' | 'upper-left' | 'upper-right';
@@ -38,6 +47,20 @@ export const ELITE_PHASE_CYCLE_STEPS =
 export const ELITE_ANCHOR_VIEWPORT_FRACTION_X = 0.5;
 /** Fixed Elite anchor centre vertical fraction (`20% VH`, Epic §9.4). */
 export const ELITE_ANCHOR_VIEWPORT_FRACTION_Y = 0.2;
+/** Elite straight-down Top-entry speed `12% VH/s` (Epic §9.4, V02-DEC-033). */
+export const ELITE_ENTRY_SPEED_VIEWPORT_HEIGHT_PER_SECOND = 0.12;
+/** Elite active horizontal speed `12% VW/s` (Epic §9.4). */
+export const ELITE_HORIZONTAL_SPEED_VIEWPORT_WIDTH_PER_SECOND = 0.12;
+/**
+ * Scheduled horizontal decision interval: `interval = 90 + nextInt(121)`
+ * (Epic §9.4, V02-DEC-033), i.e. `90–210` fixed steps = `1.5–3.5 s`.
+ */
+export const ELITE_MOVEMENT_MIN_INTERVAL_STEPS = 90;
+export const ELITE_MOVEMENT_INTERVAL_DRAW_RANGE = 121;
+/** Fresh cannon timer every newly entered `Armoured` phase: `1.5 s` (§9.4). */
+export const ELITE_CANNON_INTERVAL_STEPS = 90;
+/** Fresh Core timer every newly entered `Vulnerable` phase: `2.5 s` (§9.4). */
+export const ELITE_CORE_INTERVAL_STEPS = 150;
 
 /** Fields shared by every regular-enemy state. */
 interface EnemyCommonState {
@@ -123,6 +146,45 @@ export interface EliteEnemyState extends EnemyCommonState {
   readonly phaseStepsElapsed: number;
   /** Remaining fixed steps in the current active phase, this step included. */
   readonly phaseStepsRemaining: number;
+  /**
+   * Active horizontal direction (`-1` left, `1` right) from the dedicated
+   * `elite-movement` stream. `null` while entering and until the activation
+   * decision has been applied; a boundary, phase-geometry, or resize clamp may
+   * force it inward without consuming a draw or resetting the decision timer.
+   */
+  readonly horizontalDirection: -1 | 1 | null;
+  /** Remaining executed fixed steps of the current scheduled movement decision. */
+  readonly movementDecisionStepsRemaining: number;
+  /**
+   * Remaining executed fixed steps until the owning phase's next attack (owned
+   * by the active-phase attack step). `0` while entering and, for a Vulnerable
+   * Core at the launch cap, while the due launch is held.
+   */
+  readonly attackStepsRemaining: number;
+}
+
+/** One drawn Elite horizontal movement decision (Epic §9.4, V02-DEC-033). */
+export interface EliteMovementDecision {
+  /** `-1` left (`nextInt(2) === 0`), `1` right (`nextInt(2) === 1`). */
+  readonly direction: -1 | 1;
+  /** `90 + nextInt(121)` executed fixed steps, inclusive `90–210`. */
+  readonly intervalSteps: number;
+}
+
+/**
+ * Draws exactly one movement decision in the canonical order (Epic §9.4,
+ * V02-DEC-033): direction first (`nextInt(2)`), then the decision interval
+ * (`90 + nextInt(121)`). Activation and every scheduled decision consume this
+ * same pair in this same order, so the replay sequence is exact.
+ */
+export function drawEliteMovementDecision(
+  stream: Mulberry32,
+): EliteMovementDecision {
+  const direction = stream.nextInt(2) === 0 ? -1 : 1;
+  const intervalSteps =
+    ELITE_MOVEMENT_MIN_INTERVAL_STEPS +
+    stream.nextInt(ELITE_MOVEMENT_INTERVAL_DRAW_RANGE);
+  return { direction, intervalSteps };
 }
 
 export interface EnemyStepInput {
@@ -135,6 +197,13 @@ export interface EnemyStepInput {
   readonly stepSeconds: number;
   readonly aircraftCenterX: number;
   readonly aircraftCenterY: number;
+  /**
+   * The Elite's dedicated deterministic `elite-movement` stream, present only
+   * for an Elite (supplied by the simulation from the Elite's stable authored
+   * member ordinal). No other role consumes it, and no draw happens when it is
+   * absent.
+   */
+  readonly eliteMovementStream?: Mulberry32 | undefined;
 }
 
 export interface EnemyStepResult {
@@ -276,16 +345,16 @@ function createEnemyState(input: {
  *   or `2.0 s` since Approach began locks the direction at `26% VH/s`.
  * A side/top entry can never escape during its initial entry. An enemy that
  * has entered and now fully exits any boundary is returned as `null` (Escaped).
- * The Elite is routed to `stepElite` (V02-WI-06 E01): it is never activated by
- * full-bounds entry, its centre is not moved by this foundation, and it never
- * escapes (Epic §9.4).
+ * The Elite is routed to `stepElite` (V02-WI-06 E01/E02): it is never activated
+ * by full-bounds entry, it owns its own Top-entry descent and activation, its
+ * horizontal movement, and its phase boundary, and it never escapes (Epic §9.4).
  */
 export function stepEnemy(
   enemy: CombatEnemy,
   input: EnemyStepInput,
 ): EnemyStepResult {
   if (enemy.kind === 'elite') {
-    return { enemy: stepElite(enemy, input), newlyActivated: false };
+    return stepElite(enemy, input);
   }
   const positioned =
     enemy.kind === 'hunter'
@@ -504,52 +573,105 @@ export interface EliteCreationInput {
 }
 
 /**
- * Creates the one authored Elite at its fixed `50% VW, 20% VH` anchor centre
- * (Epic §9.4). The returned state is `entering`: until the explicit
- * `activateElite` transition it consumes no phase or attack time. This factory
- * is the only Elite creation owner — the Elite never passes through the
- * regular-enemy factory, the full-bounds activation rule, or escape — and it
- * owns no entry speed, entry movement, horizontal movement, or RNG. The entry
- * consumer creates the Elite above the viewport and invokes `activateElite` on
- * the exact anchor-reaching fixed step.
+ * Shared Elite construction owner: every Elite starts `entering` with no phase
+ * time, no phase/attack timer, no horizontal decision, and the complete
+ * rendered bounds of its Armoured state. The Elite never passes through the
+ * regular-enemy factory, the full-bounds activation rule, or escape.
  */
-export function createEliteAtAnchor(
-  input: EliteCreationInput,
-): EliteEnemyState {
-  const shortSidePx = Math.min(input.viewportWidth, input.viewportHeight);
-  const bounds = eliteBoundsForPhase('armoured', shortSidePx);
+function createEliteState(input: {
+  readonly id: number;
+  readonly ordinal: number;
+  readonly centerX: number;
+  readonly centerY: number;
+  readonly hasEnteredVisibleArea: boolean;
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+}): EliteEnemyState {
+  const bounds = eliteBoundsForPhase(
+    'armoured',
+    Math.min(input.viewportWidth, input.viewportHeight),
+  );
   return {
     id: input.id,
     kind: 'elite',
     type: ELITE_DRONE.type,
     hullIntegrity: ELITE_DRONE.maximumHullIntegrity,
-    centerX: input.viewportWidth * ELITE_ANCHOR_VIEWPORT_FRACTION_X,
-    centerY: input.viewportHeight * ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
+    centerX: input.centerX,
+    centerY: input.centerY,
     width: bounds.width,
     height: bounds.height,
     entry: 'top',
-    // The Elite is created already at its visible anchor in this factory and
-    // never escapes; the later entry-movement owner creates it above the
-    // viewport and owns that latch.
-    hasEnteredVisibleArea: true,
+    hasEnteredVisibleArea: input.hasEnteredVisibleArea,
     activated: false,
     ordinal: input.ordinal,
     phase: 'entering',
     phaseStepsElapsed: 0,
     phaseStepsRemaining: 0,
+    horizontalDirection: null,
+    movementDecisionStepsRemaining: 0,
+    attackStepsRemaining: 0,
   };
 }
 
 /**
- * Explicit idempotent Elite activation transition (Epic §9.4, V02-AC-009). The
- * movement owner invokes it on the exact fixed step the Elite centre first
- * reaches the `50% VW, 20% VH` anchor; the Elite enters `Armoured` and its
- * phase timer starts once in that same authoritative simulation step. Repeated
- * calls are strict no-ops returning the same state, so the cycle can never be
- * restarted, and an Elite that has not reached the anchor keeps consuming no
- * phase or attack time.
+ * Creates the one authored Elite for canonical Top entry (Epic §9.4,
+ * V02-DEC-033): it starts fully above the viewport with the nearest edge of its
+ * complete Armoured bounds touching the Top boundary, centred on the authored
+ * `50% VW` anchor X. `stepElite` then descends it at `12% VH/s` and activates
+ * it on the exact anchor-reaching fixed step. The Elite consumes no phase or
+ * attack time until that activation.
  */
-export function activateElite(elite: EliteEnemyState): EliteEnemyState {
+export function createEliteForEntry(
+  input: EliteCreationInput,
+): EliteEnemyState {
+  const shortSidePx = Math.min(input.viewportWidth, input.viewportHeight);
+  return createEliteState({
+    id: input.id,
+    ordinal: input.ordinal,
+    centerX: input.viewportWidth * ELITE_ANCHOR_VIEWPORT_FRACTION_X,
+    centerY: -eliteBoundsForPhase('armoured', shortSidePx).height / 2,
+    hasEnteredVisibleArea: false,
+    viewportWidth: input.viewportWidth,
+    viewportHeight: input.viewportHeight,
+  });
+}
+
+/**
+ * Creates the one authored Elite already at its fixed `50% VW, 20% VH` anchor
+ * centre (Epic §9.4) while still `entering`. `stepElite` clamps and activates it
+ * on its first executed fixed step. This is the explicit "already at the
+ * anchor" construction consumed by focused collision/phase tests and by the
+ * Debug phase path; canonical player-facing Top entry uses `createEliteForEntry`.
+ */
+export function createEliteAtAnchor(
+  input: EliteCreationInput,
+): EliteEnemyState {
+  return createEliteState({
+    id: input.id,
+    ordinal: input.ordinal,
+    centerX: input.viewportWidth * ELITE_ANCHOR_VIEWPORT_FRACTION_X,
+    centerY: input.viewportHeight * ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
+    hasEnteredVisibleArea: true,
+    viewportWidth: input.viewportWidth,
+    viewportHeight: input.viewportHeight,
+  });
+}
+
+/**
+ * Explicit idempotent Elite activation transition (Epic §9.4, V02-AC-009,
+ * V02-DEC-033). `stepElite` invokes it on the exact fixed step the Elite centre
+ * first reaches the `50% VW, 20% VH` anchor; the Elite enters `Armoured` and
+ * its phase timer and fresh `90`-step cannon timer start once in that same
+ * authoritative simulation step. The caller may supply the movement decision
+ * drawn in that same step (direction first, then interval); without one the
+ * Elite owns no horizontal decision and therefore does not move horizontally.
+ * Repeated calls are strict no-ops returning the same state, and an Elite that
+ * has not reached the anchor keeps consuming no phase or attack time.
+ */
+export function activateElite(
+  elite: EliteEnemyState,
+  decision?: EliteMovementDecision,
+): EliteEnemyState {
   if (elite.activated) {
     return elite;
   }
@@ -559,6 +681,9 @@ export function activateElite(elite: EliteEnemyState): EliteEnemyState {
     phase: 'armoured',
     phaseStepsElapsed: 0,
     phaseStepsRemaining: ELITE_ARMOURED_PHASE_STEPS,
+    attackStepsRemaining: ELITE_CANNON_INTERVAL_STEPS,
+    horizontalDirection: decision?.direction ?? null,
+    movementDecisionStepsRemaining: decision?.intervalSteps ?? 0,
   };
 }
 
@@ -573,16 +698,13 @@ export function eliteAcceptsProjectileDamage(elite: EliteEnemyState): boolean {
 }
 
 /**
- * V02-WI-06 E01 C01 temporary player-projectile eligibility guard. Canonical
- * §9.4 defines a blocked player hit only during `Armoured` and normal damage
- * only during `Vulnerable`; it defines no projectile interaction during entry,
- * and the Product Owner owns that rule before E02 makes the Elite reachable.
- * Until then an `entering` Elite is NOT an eligible player-projectile target at
- * all: it takes no damage, consumes no projectile, and emits no hit or
- * deflection feedback. `resolveProjectileCollisions` continues its stable
- * ascending-id search, so the same projectile may still resolve against the
- * next eligible overlapping enemy. This guard is explicitly temporary and is
- * not the final E02 player-facing entry rule.
+ * Canonical player-projectile eligibility for the Elite (Epic §9.4,
+ * V02-DEC-033): an `entering` Elite is NOT a target at all. Player projectiles
+ * pass through it without damage, without being consumed, and without any
+ * feedback, so `resolveProjectileCollisions` continues its stable ascending-id
+ * search and the same projectile may still resolve against the next eligible
+ * overlapping enemy. After activation the Elite is a normal single-hit target:
+ * `Armoured` blocks and consumes the projectile, `Vulnerable` takes damage.
  */
 export function isEliteProjectileTargetEligible(
   elite: EliteEnemyState,
@@ -591,20 +713,127 @@ export function isEliteProjectileTargetEligible(
 }
 
 /**
- * Advances the Elite phase timer by exactly one executed fixed step (Epic
- * §9.4, V02-AC-009): `Armoured` lasts exactly `720` fixed steps, `Vulnerable`
- * exactly `360`, then the cycle repeats. Every boundary transition happens on
- * exactly one step and the new phase starts from its exact full duration, so
- * the cycle cannot drift. An Elite that has not been explicitly activated
- * consumes no phase time. E01 owns no Elite movement: the centre never changes.
+ * True once the Elite is contact-active (Epic §11.3, V02-DEC-033): Elite body
+ * contact is inactive during entry and becomes active only after activation.
+ */
+export function isEliteContactActive(elite: EliteEnemyState): boolean {
+  return elite.activated;
+}
+
+/**
+ * Canonical Elite step owner (Epic §9.4, V02-DEC-033). Order within the step:
+ * entry/horizontal movement, then the phase boundary. The active-phase attack
+ * timer is applied by `combat-simulation.ts` after this movement/boundary step,
+ * so a phase boundary always suppresses an old-phase shot due on the same step.
+ *
+ * - While `entering`, the Elite descends straight down at `12% VH/s` from its
+ *   above-viewport creation position, consumes no phase or attack time, and
+ *   never escapes. On the first fixed step whose movement would reach or pass
+ *   the anchor, its centre clamps exactly to `50% VW, 20% VH` and it activates,
+ *   drawing its initial movement decision in that same step.
+ * - While active, it moves horizontally at `12% VW/s` in its drawn direction,
+ *   draws a new direction and interval on each scheduled decision step, and
+ *   keeps its complete current-phase bounds inside the viewport.
+ * - The phase boundary advances `Armoured 720 → Vulnerable 360` without drift,
+ *   reinitializes the entered phase's full attack timer, and clamps the new
+ *   phase geometry inside the viewport while preserving the decision timer and
+ *   the RNG state.
  */
 function stepElite(
   elite: EliteEnemyState,
   input: EnemyStepInput,
-): EliteEnemyState {
+): EnemyStepResult {
   if (!elite.activated) {
-    return elite;
+    return stepEnteringElite(elite, input);
   }
+  const moved = stepActiveEliteMovement(elite, input);
+  return { enemy: stepElitePhaseBoundary(moved, input), newlyActivated: false };
+}
+
+/** Entry descent, exact anchor clamp, and same-step idempotent activation. */
+function stepEnteringElite(
+  elite: EliteEnemyState,
+  input: EnemyStepInput,
+): EnemyStepResult {
+  const anchorX = input.viewportWidth * ELITE_ANCHOR_VIEWPORT_FRACTION_X;
+  const anchorY = input.viewportHeight * ELITE_ANCHOR_VIEWPORT_FRACTION_Y;
+  const movedY =
+    elite.centerY +
+    ELITE_ENTRY_SPEED_VIEWPORT_HEIGHT_PER_SECOND *
+      input.viewportHeight *
+      input.stepSeconds;
+  const hasEnteredVisibleArea =
+    elite.hasEnteredVisibleArea ||
+    isEnemyAnyPortionVisible(elite, input.viewportWidth, input.viewportHeight);
+  if (movedY < anchorY) {
+    return {
+      enemy: { ...elite, centerY: movedY, hasEnteredVisibleArea },
+      newlyActivated: false,
+    };
+  }
+  const atAnchor: EliteEnemyState = {
+    ...elite,
+    centerX: anchorX,
+    centerY: anchorY,
+    hasEnteredVisibleArea: true,
+  };
+  // Activation initializes the phase, attack, and movement-decision states on
+  // this same authoritative step; each retains its full value until the next
+  // executed fixed step.
+  const decision =
+    input.eliteMovementStream === undefined
+      ? undefined
+      : drawEliteMovementDecision(input.eliteMovementStream);
+  return { enemy: activateElite(atAnchor, decision), newlyActivated: true };
+}
+
+/** Active horizontal movement with the scheduled `elite-movement` decisions. */
+function stepActiveEliteMovement(
+  elite: EliteEnemyState,
+  input: EnemyStepInput,
+): EliteEnemyState {
+  let direction = elite.horizontalDirection;
+  let movementDecisionStepsRemaining = elite.movementDecisionStepsRemaining;
+  if (movementDecisionStepsRemaining > 1) {
+    movementDecisionStepsRemaining -= 1;
+  } else if (input.eliteMovementStream !== undefined) {
+    // Scheduled decision step (and the defensive activation-without-draw case):
+    // direction first, then the next interval.
+    const decision = drawEliteMovementDecision(input.eliteMovementStream);
+    direction = decision.direction;
+    movementDecisionStepsRemaining = decision.intervalSteps;
+  }
+  const movedX =
+    direction === null
+      ? elite.centerX
+      : elite.centerX +
+        direction *
+          ELITE_HORIZONTAL_SPEED_VIEWPORT_WIDTH_PER_SECOND *
+          input.viewportWidth *
+          input.stepSeconds;
+  return clampEliteHorizontally(
+    {
+      ...elite,
+      horizontalDirection: direction,
+      movementDecisionStepsRemaining,
+      centerX: movedX,
+    },
+    input.viewportWidth,
+  );
+}
+
+/**
+ * Phase boundary (Epic §9.4): `Armoured` exactly `720` and `Vulnerable` exactly
+ * `360` executed fixed steps, then the cycle repeats; every boundary transition
+ * happens on exactly one step and the new phase starts from its exact full
+ * duration, so the cycle cannot drift. The newly entered phase initializes its
+ * own fresh attack timer (`90` cannon / `150` Core), which is not decremented on
+ * the transition step.
+ */
+function stepElitePhaseBoundary(
+  elite: EliteEnemyState,
+  input: EnemyStepInput,
+): EliteEnemyState {
   if (elite.phaseStepsRemaining > 1) {
     return {
       ...elite,
@@ -618,17 +847,88 @@ function stepElite(
     nextPhase,
     Math.min(input.viewportWidth, input.viewportHeight),
   );
-  return {
-    ...elite,
-    phase: nextPhase,
-    phaseStepsElapsed: 0,
-    phaseStepsRemaining:
-      nextPhase === 'armoured'
-        ? ELITE_ARMOURED_PHASE_STEPS
-        : ELITE_VULNERABLE_PHASE_STEPS,
-    width: bounds.width,
-    height: bounds.height,
-  };
+  return clampEliteHorizontally(
+    {
+      ...elite,
+      phase: nextPhase,
+      phaseStepsElapsed: 0,
+      phaseStepsRemaining:
+        nextPhase === 'armoured'
+          ? ELITE_ARMOURED_PHASE_STEPS
+          : ELITE_VULNERABLE_PHASE_STEPS,
+      attackStepsRemaining:
+        nextPhase === 'armoured'
+          ? ELITE_CANNON_INTERVAL_STEPS
+          : ELITE_CORE_INTERVAL_STEPS,
+      width: bounds.width,
+      height: bounds.height,
+    },
+    input.viewportWidth,
+  );
+}
+
+/**
+ * Keeps the complete current-phase Elite bounds inside the viewport (Epic
+ * §9.4): the centre clamps to `[halfWidth, VW − halfWidth]`, and an Elite that
+ * already owns a drawn horizontal decision is forced inward at that boundary
+ * without consuming a draw and without resetting its scheduled decision timer.
+ * The RNG state, phase, and all timers are untouched.
+ */
+function clampEliteHorizontally(
+  elite: EliteEnemyState,
+  viewportWidth: number,
+): EliteEnemyState {
+  const halfWidth = elite.width / 2;
+  const minX = halfWidth;
+  const maxX = viewportWidth - halfWidth;
+  if (maxX < minX) {
+    // Unreachable at supported viewports (the Elite bounds are far narrower
+    // than the viewport): keep the centre without inventing a direction.
+    return { ...elite, centerX: viewportWidth / 2 };
+  }
+  if (elite.horizontalDirection === null) {
+    return { ...elite, centerX: clamp(elite.centerX, minX, maxX) };
+  }
+  if (elite.centerX >= maxX) {
+    return { ...elite, centerX: maxX, horizontalDirection: -1 };
+  }
+  if (elite.centerX <= minX) {
+    return { ...elite, centerX: minX, horizontalDirection: 1 };
+  }
+  return elite;
+}
+
+/**
+ * Accepted viewport-resize reprojection for one Elite (Epic §9.4,
+ * V02-DEC-033): the complete rendered bounds of the CURRENT phase are resolved
+ * from the single Elite content geometry owner, the centre reprojects
+ * proportionally, and bounds left outside the new viewport clamp inside and
+ * force the drawn direction inward. The movement decision timer, the RNG
+ * stream, the phase timers, and every launched projectile are untouched.
+ */
+export function reprojectEliteForViewport(
+  elite: EliteEnemyState,
+  input: {
+    readonly centerX: number;
+    readonly centerY: number;
+    readonly viewportWidth: number;
+    readonly shortSidePx: number;
+  },
+): EliteEnemyState {
+  const bounds = eliteBoundsForPhase(
+    elite.phase === 'vulnerable' ? 'vulnerable' : 'armoured',
+    input.shortSidePx,
+  );
+  return clampEliteHorizontally(
+    {
+      ...elite,
+      width: bounds.width,
+      height: bounds.height,
+      centerX: input.centerX,
+      centerY: input.centerY,
+    },
+    input.viewportWidth,
+  );
 }
 
 /** True when any portion of the complete bounds is strictly inside the viewport. */

@@ -2,10 +2,11 @@ import { overlaps } from '@domain/geometry';
 import type { EnemyType } from '@domain/index';
 import {
   eliteAcceptsProjectileDamage,
+  isEliteContactActive,
   isEliteProjectileTargetEligible,
 } from './enemies';
 import type { CombatEnemy } from './enemies';
-import type { CombatProjectile, EnemyProjectile } from './projectiles';
+import type { CombatProjectile, EnemyProjectileInstance } from './projectiles';
 import {
   aircraftCollisionAabb,
   enemyCollisionAabb,
@@ -46,6 +47,8 @@ import type { CollisionEvidenceSink } from './evidence';
 
 /** Player-only regular per-pair contact cooldown: 0.75 s = 45 fixed steps. */
 export const PAIR_CONTACT_COOLDOWN_STEPS = 45;
+/** Elite body-contact damage after activation (Epic §11.3, V02-DEC-033). */
+export const ELITE_CONTACT_DAMAGE = 20;
 /** Non-destroying enemy hit flash: 50 ms = 3 fixed steps. */
 export const ENEMY_HIT_FLASH_STEPS = 3;
 /** Destroyed-enemy flash: 100 ms = 6 fixed steps, hitbox-free and stationary. */
@@ -280,7 +283,7 @@ export function resolveProjectileCollisions(
 }
 
 export interface EnemyProjectileCollisionInput {
-  readonly projectiles: readonly EnemyProjectile[];
+  readonly projectiles: readonly EnemyProjectileInstance[];
   readonly aircraftCenterX: number;
   readonly aircraftCenterY: number;
   readonly aircraftWidth: number;
@@ -294,7 +297,7 @@ export interface EnemyProjectileCollisionInput {
 }
 
 export interface EnemyProjectileCollisionResult {
-  readonly projectiles: readonly EnemyProjectile[];
+  readonly projectiles: readonly EnemyProjectileInstance[];
   readonly playerHullIntegrity: number;
   readonly playerDefeated: boolean;
   readonly aircraftDangerFlashStepsRemaining: number;
@@ -333,7 +336,7 @@ export function resolveEnemyProjectileCollisions(
   // V02-WI-04 C03 evidence-only observed work counters (Pass A).
   let evidenceCandidates = 0;
   let evidenceIntersections = 0;
-  const remaining: EnemyProjectile[] = [];
+  const remaining: EnemyProjectileInstance[] = [];
   for (const projectile of input.projectiles) {
     if (EVIDENCE_COUNTERS_ENABLED) {
       evidenceCandidates += 1;
@@ -408,13 +411,13 @@ export interface ContactCollisionResult {
  * regular pair cooldown never converts Hunter contact into persistent overlap.
  * God Mode keeps Hull at maximum while contact outcomes still resolve.
  *
- * V02-WI-06 E01 C01: the Elite is excluded from this pass entirely. Epic §11.1
- * defines regular contact for Basic/Ranged and §11.2 defines the Hunter
- * exception; no Elite contact outcome is approved, so an overlapping Elite
- * produces NO contact side effect at all — no Aircraft damage, no Aircraft
- * damage flash, no pair cooldown, no enemy destruction, and no reward/count or
- * other accounting entry. The eventual Elite/Aircraft contact rule is outside
- * E01 and requires canonical closure before player-facing integration.
+ * V02-WI-06 E02 replaces the E01 exclusion with the canonical Elite contact
+ * contract (Epic §11.3, V02-DEC-033): contact is inactive during entry, and
+ * after activation an Elite/Aircraft pair deals `20` Hull damage at most once
+ * per `45` executed steps. The Elite is never damaged or destroyed, grants no
+ * reward, and adds no stun, momentum impulse, gameplay knockback, or other
+ * contact effect. Valid damage uses the existing approved Aircraft damage
+ * feedback (the same danger flash every other damage source uses).
  */
 export function resolveAircraftContacts(
   input: ContactCollisionInput,
@@ -441,10 +444,9 @@ export function resolveAircraftContacts(
     if (defeated) {
       break;
     }
-    if (enemy.kind === 'elite') {
-      // V02-WI-06 E01 C01: no approved Elite contact outcome exists, so the
-      // Elite is not a contact participant and never reaches the regular or
-      // Hunter branches (no damage, flash, cooldown, destruction, or reward).
+    if (enemy.kind === 'elite' && !isEliteContactActive(enemy)) {
+      // Elite body contact is inactive during entry (Epic §11.3): an entering
+      // Elite produces no damage, flash, cooldown, destruction, or accounting.
       continue;
     }
     if (EVIDENCE_COUNTERS_ENABLED) {

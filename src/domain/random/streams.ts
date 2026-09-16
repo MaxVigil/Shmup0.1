@@ -31,6 +31,16 @@ export const MISSION_DATA_ORDINAL = 0;
  */
 export const RANGED_FIRE_STREAM = 'ranged-fire';
 export const RANGED_FIRE_ORDINAL_BASE = 0;
+/**
+ * Per-Elite `elite-movement` stream (Epic §9.4, V02-DEC-033): the one authored
+ * Elite owns an independent stream derived from the already-derived mission
+ * seed with its stable zero-based authored Mission-member ordinal, so no other
+ * enemy, removal, or phase change can shift its horizontal decision sequence.
+ * Stream name versioned under the existing `rng-v1` input version; the ordinal
+ * is never removal-sensitive or shared with the combat-mission, mission-data,
+ * or ranged-fire streams.
+ */
+export const ELITE_MOVEMENT_STREAM = 'elite-movement';
 
 export function deriveStreamSeed(
   sessionSeed: number,
@@ -102,4 +112,18 @@ export function createRangedFireStream(
   memberOrdinal: number,
 ): Mulberry32 {
   return createStream(missionSeed, RANGED_FIRE_STREAM, memberOrdinal);
+}
+
+/**
+ * Independent per-Elite horizontal movement stream (Epic §9.4, V02-DEC-033):
+ * derives from the already-derived mission seed with the Elite's stable
+ * zero-based authored Mission-member ordinal. It is created once per mission
+ * instance and consumed only by its owning Elite, in activation-then-decision
+ * order.
+ */
+export function createEliteMovementStream(
+  missionSeed: number,
+  memberOrdinal: number,
+): Mulberry32 {
+  return createStream(missionSeed, ELITE_MOVEMENT_STREAM, memberOrdinal);
 }

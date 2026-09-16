@@ -2,6 +2,7 @@ export { fnv1a32 } from './fnv1a';
 export { Mulberry32 } from './mulberry32';
 export {
   COMBAT_MISSION_STREAM,
+  ELITE_MOVEMENT_STREAM,
   MISSION_DATA_ORDINAL,
   MISSION_DATA_STREAM,
   PILOT_SELECTION_ORDINAL,
@@ -10,6 +11,7 @@ export {
   RANGED_FIRE_STREAM,
   RNG_INPUT_VERSION,
   createCombatMissionStream,
+  createEliteMovementStream,
   createMissionDataStream,
   createPilotSelectionStream,
   createRangedFireStream,

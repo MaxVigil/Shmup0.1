@@ -741,6 +741,13 @@ export class CombatScene extends Phaser.Scene {
       if (opacity <= 0) {
         continue;
       }
+      // V02-WI-06 E02: Elite cannon/Core attacks are authoritative simulation
+      // state only; their `danger`/`accent` geometry presentation is owned by
+      // E03, so this Ranged-only surface deliberately skips every other kind
+      // instead of drawing an Elite projectile with the Ranged rectangle.
+      if (projectile.kind !== 'ranged') {
+        continue;
+      }
       seen.add(projectile.id);
       let visual = this.enemyProjectileVisuals.get(projectile.id);
       if (visual === undefined) {

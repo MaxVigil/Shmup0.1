@@ -5,15 +5,25 @@ import type {
   WeaponDefinition,
 } from '@application/content';
 import type { EnemyType } from '@domain/index';
-import { createRangedFireStream } from '@domain/random';
+import {
+  createEliteMovementStream,
+  createRangedFireStream,
+} from '@domain/random';
 import type { Mulberry32 } from '@domain/random';
 import type { CombatInputCommand, CombatControlMode } from './input-command';
 import { isPointerInsideViewport } from './input-command';
 import type { MovementConfig } from './movement-config';
 import { resolveMovementConfig, brakingDistance } from './movement-config';
 import {
+  advanceEliteCannonProjectile,
+  advanceEliteHomingCore,
   advanceEnemyProjectile,
   advanceProjectile,
+  eliteCannonProjectileGeometry,
+  eliteCannonSpeedPxPerSecond,
+  eliteCoreProjectileGeometry,
+  eliteCoreSpeedPxPerSecond,
+  isEliteHomingCoreRemoved,
   isEnemyProjectileOutsideViewport,
   isProjectileRemoved,
   projectileGeometry,
@@ -21,22 +31,27 @@ import {
   rangedProjectileGeometry,
   rangedProjectileSpeedPxPerSecond,
   resolveWeaponFireProfile,
+  spawnEliteCannonProjectile,
+  spawnEliteHomingCore,
   spawnProjectile,
   spawnRangedProjectile,
   type CombatProjectile,
-  type EnemyProjectile,
+  type EnemyProjectileInstance,
   type ProjectileGeometry,
 } from './projectiles';
 import {
-  eliteBoundsForPhase,
+  reprojectEliteForViewport,
   spawnEnemyFromPlacement,
   stepEnemy,
+  ELITE_CANNON_INTERVAL_STEPS,
+  ELITE_CORE_INTERVAL_STEPS,
   type CombatEnemy,
 } from './enemies';
 import {
   resolveAircraftContacts,
   resolveEnemyProjectileCollisions,
   resolveProjectileCollisions,
+  ELITE_CONTACT_DAMAGE,
   type DestroyedEnemyFlash,
   type DestroyedEnemyInfo,
   type EliteDeflectionFeedback,
@@ -90,6 +105,17 @@ import type {
  * upward flight); the authoritative `evacuationEnemyOpacity` scalar drives the
  * enemy/enemy-projectile fade of a committed Evacuation over the same 30
  * steps.
+ *
+ * V02-WI-06 E02 adds the complete Elite runtime: the canonical Top entry to the
+ * fixed anchor, the dedicated deterministic `elite-movement` horizontal stream,
+ * the canonical per-step order (Elite movement → phase boundary → active-phase
+ * attack timer → shared projectile movement/collision), the two Armoured cannon
+ * projectiles, the Vulnerable homing Core with its active cap, active Elite
+ * contact, and proportional resize reprojection for the Elite and its
+ * projectiles. `eliteMovementStreams` is created per authored Elite identity
+ * from its stable mission-member ordinal; the Elite itself remains created only
+ * by `createEliteForEntry`/`createEliteAtAnchor`, so with no Elite member in the
+ * production mission catalogue this owner stays production-unreachable.
  */
 
 export const FIXED_STEP_SECONDS = 1 / 60;
@@ -141,6 +167,8 @@ const HUNTER_CONTACT_DAMAGE = 35;
 const RANGED_FIRST_SHOT_STEPS = 180;
 const RANGED_MIN_INTERVAL_STEPS = 60;
 const RANGED_MAX_INTERVAL_STEPS = 180;
+/** At most `2` Elite homing Cores may be active at the same time (Epic §9.4). */
+const ELITE_CORE_MAX_ACTIVE = 2;
 
 const REGULAR_TYPES: readonly EnemyType[] = [
   'basic-drone',
@@ -188,12 +216,14 @@ export interface CombatSimulationState {
   readonly currentEncounterId: string | null;
   readonly enemies: readonly CombatEnemy[];
   readonly nextEnemyId: number;
-  readonly enemyProjectiles: readonly EnemyProjectile[];
+  readonly enemyProjectiles: readonly EnemyProjectileInstance[];
   readonly nextEnemyProjectileId: number;
   readonly rangedProjectileGeometry: ProjectileGeometry;
   readonly rangedProjectileSpeedPxPerSecond: number;
   /** Per-Ranged independent `ranged-fire` streams keyed by member ordinal. */
   readonly rangedFireStreams: Readonly<Record<number, Mulberry32>>;
+  /** Per-Elite independent `elite-movement` streams keyed by member ordinal. */
+  readonly eliteMovementStreams: Readonly<Record<number, Mulberry32>>;
   readonly finalArrivalTimeSeconds: number;
   /** Ceiling-formula Combat Countdown display value (v0.2 §15.2). */
   readonly countdownSeconds: number;
@@ -347,6 +377,21 @@ export function createCombatSimulation(
       ordinal,
     );
   }
+  // V02-WI-06 E02: one dedicated `elite-movement` stream per authored Elite
+  // identity, keyed by the Elite's stable authored mission-member ordinal. It is
+  // created once per mission instance and consumed only by that Elite, so no
+  // other enemy, removal, phase change, or resize can shift its sequence.
+  const eliteMovementStreams: Record<number, Mulberry32> = {};
+  for (const group of arrivalGroups) {
+    for (const member of group.members) {
+      if (member.type === 'elite-drone') {
+        eliteMovementStreams[member.ordinal] = createEliteMovementStream(
+          input.missionSeed,
+          member.ordinal,
+        );
+      }
+    }
+  }
 
   const enemyBoundsByType = boundsByType(defs, shortSide);
   const movementSpeedPxByType = speedMap(
@@ -407,6 +452,7 @@ export function createCombatSimulation(
       input.viewportHeight,
     ),
     rangedFireStreams,
+    eliteMovementStreams,
     finalArrivalTimeSeconds: enemyPlan.finalArrivalTimeSeconds,
     countdownSeconds: computeCountdown(enemyPlan.finalArrivalTimeSeconds, 0),
     pendingCombatRewards: 0,
@@ -879,8 +925,13 @@ function stepMission(
     afterEnemies,
     movement.newlyActivatedIds,
   );
+  // V02-WI-06 E02 canonical order: enemy entry/horizontal movement and phase
+  // boundaries (movement step above) → active-phase attack timer → shared
+  // projectile movement. An attack due on a phase-boundary step is therefore
+  // suppressed by that boundary.
+  const withEliteAttacks = stepEliteAttacks(withRangedFiring);
   const withEnemyProjectiles = stepEnemyProjectiles(
-    withRangedFiring,
+    withEliteAttacks,
     stepSeconds,
   );
   return stepPlayerProjectiles(withEnemyProjectiles, stepSeconds);
@@ -957,6 +1008,12 @@ function stepActiveEnemies(
       stepSeconds,
       aircraftCenterX: state.aircraft.centerX,
       aircraftCenterY: state.aircraft.centerY,
+      // V02-WI-06 E02: only the Elite consumes its dedicated `elite-movement`
+      // stream; every other role receives `undefined` and draws nothing here.
+      eliteMovementStream:
+        enemy.kind === 'elite'
+          ? state.eliteMovementStreams[enemy.ordinal]
+          : undefined,
     });
     if (result.newlyActivated) {
       newlyActivatedIds.add(enemy.id);
@@ -985,7 +1042,7 @@ function stepRangedFiring(
   newlyActivatedIds: ReadonlySet<number>,
 ): CombatSimulationState {
   let nextEnemyProjectileId = state.nextEnemyProjectileId;
-  const spawnedProjectiles: EnemyProjectile[] = [];
+  const spawnedProjectiles: EnemyProjectileInstance[] = [];
   const enemies = state.enemies.map((enemy) => {
     if (enemy.kind !== 'ranged') {
       return enemy;
@@ -1037,15 +1094,156 @@ function stepRangedFiring(
   };
 }
 
-/** Advances every enemy projectile along its fixed trajectory and removes it
- *  when its complete bounds leave the viewport (v0.2 §9.2: no lifetime). */
+/**
+ * Elite active-phase attack step (Epic §9.4, V02-AC-010, V02-DEC-033). It runs
+ * after Elite movement/phase-boundary resolution and before the shared
+ * projectile movement phase.
+ *
+ * - A freshly initialized phase timer (`phaseStepsElapsed === 0`, i.e. the
+ *   activation step or a phase-boundary step) is never decremented here and no
+ *   shot fires: an old-phase attack due on a boundary step is suppressed and
+ *   the new phase keeps its full duration until the next executed step.
+ * - `Armoured` fires the two cannons once every `90` steps from the exact
+ *   `−6°/+6°` muzzles; the first pair fires `1.5 s` after activation.
+ * - `Vulnerable` launches one homing Core every `150` steps from the Core
+ *   muzzle; the first may launch only after the complete interval.
+ * - At the two-active-Core cap a due launch holds its timer at zero and fires
+ *   on the first later `Vulnerable` step with capacity, resetting the complete
+ *   `150`-step timer. No attack ever fires while `Armoured` holds a Core timer
+ *   or vice versa: the timer is re-initialized by the owning phase boundary.
+ * - Existing launched projectiles are untouched here and keep their lifecycle
+ *   across later phase changes.
+ */
+function stepEliteAttacks(state: CombatSimulationState): CombatSimulationState {
+  let nextEnemyProjectileId = state.nextEnemyProjectileId;
+  const spawnedProjectiles: EnemyProjectileInstance[] = [];
+  const activeCores = state.enemyProjectiles.filter(
+    (projectile) => projectile.kind === 'elite-core',
+  ).length;
+  let remainingCoreCapacity = Math.max(0, ELITE_CORE_MAX_ACTIVE - activeCores);
+  const enemies = state.enemies.map((enemy) => {
+    if (enemy.kind !== 'elite' || !enemy.activated) {
+      return enemy;
+    }
+    if (enemy.phaseStepsElapsed === 0) {
+      // Activation or phase-boundary step: the fresh attack timer is not
+      // decremented and any old-phase shot due on this step is suppressed.
+      return enemy;
+    }
+    if (enemy.attackStepsRemaining > 1) {
+      return { ...enemy, attackStepsRemaining: enemy.attackStepsRemaining - 1 };
+    }
+    if (enemy.phase === 'armoured') {
+      if (enemy.attackStepsRemaining === 0) {
+        // Defensive: an Armoured cannon timer is never held at zero.
+        return enemy;
+      }
+      const geometry = eliteCannonProjectileGeometry(
+        Math.min(state.viewportWidth, state.viewportHeight),
+      );
+      const speedPxPerSecond = eliteCannonSpeedPxPerSecond(
+        state.viewportHeight,
+      );
+      spawnedProjectiles.push(
+        spawnEliteCannonProjectile(
+          nextEnemyProjectileId,
+          enemy.centerX,
+          enemy.centerY,
+          enemy.width,
+          enemy.height,
+          'left',
+          speedPxPerSecond,
+          geometry,
+        ),
+        // Identities ascend in muzzle order (left, then right).
+        spawnEliteCannonProjectile(
+          nextEnemyProjectileId + 1,
+          enemy.centerX,
+          enemy.centerY,
+          enemy.width,
+          enemy.height,
+          'right',
+          speedPxPerSecond,
+          geometry,
+        ),
+      );
+      nextEnemyProjectileId += 2;
+      return { ...enemy, attackStepsRemaining: ELITE_CANNON_INTERVAL_STEPS };
+    }
+    if (remainingCoreCapacity <= 0) {
+      // Launch is due but the cap holds it: the timer holds at zero until the
+      // first later Vulnerable step with capacity.
+      return { ...enemy, attackStepsRemaining: 0 };
+    }
+    remainingCoreCapacity -= 1;
+    spawnedProjectiles.push(
+      spawnEliteHomingCore(
+        nextEnemyProjectileId,
+        enemy.centerX,
+        enemy.centerY,
+        enemy.height,
+        state.aircraft.centerX,
+        state.aircraft.centerY,
+        eliteCoreSpeedPxPerSecond(state.viewportHeight),
+        eliteCoreProjectileGeometry(
+          Math.min(state.viewportWidth, state.viewportHeight),
+        ),
+      ),
+    );
+    nextEnemyProjectileId += 1;
+    return { ...enemy, attackStepsRemaining: ELITE_CORE_INTERVAL_STEPS };
+  });
+  return {
+    ...state,
+    enemies,
+    enemyProjectiles: [...state.enemyProjectiles, ...spawnedProjectiles],
+    nextEnemyProjectileId,
+  };
+}
+
+/**
+ * Advances every enemy projectile in the shared post-attack movement phase and
+ * removes it at its canonical removal condition: a Ranged or Elite cannon
+ * projectile has no lifetime and leaves on its complete-viewport exit, while a
+ * homing Core additionally expires without damage after its explicit `360`
+ * executed steps (Epic §9.2/§9.4). A valid Aircraft hit is consumed by the
+ * collision pass, which runs after this movement phase.
+ */
 function stepEnemyProjectiles(
   state: CombatSimulationState,
   stepSeconds: number,
 ): CombatSimulationState {
-  const kept: EnemyProjectile[] = [];
+  const kept: EnemyProjectileInstance[] = [];
   for (const projectile of state.enemyProjectiles) {
-    const advanced = advanceEnemyProjectile(projectile, stepSeconds);
+    let advanced: EnemyProjectileInstance;
+    switch (projectile.kind) {
+      case 'ranged':
+        advanced = advanceEnemyProjectile(projectile, stepSeconds);
+        break;
+      case 'elite-cannon':
+        advanced = advanceEliteCannonProjectile(projectile, stepSeconds);
+        break;
+      case 'elite-core':
+        // The Core turns toward the Aircraft's current authoritative centre
+        // (its first turn is the step after its launch), then moves.
+        advanced = advanceEliteHomingCore(
+          projectile,
+          state.aircraft.centerX,
+          state.aircraft.centerY,
+          stepSeconds,
+        );
+        if (
+          isEliteHomingCoreRemoved(
+            advanced,
+            state.viewportWidth,
+            state.viewportHeight,
+          )
+        ) {
+          continue;
+        }
+        kept.push(advanced);
+        continue;
+    }
     if (
       !isEnemyProjectileOutsideViewport(
         advanced,
@@ -1294,7 +1492,7 @@ function contactDamageByType(
     'basic-drone': defs['basic-drone']?.contactDamage ?? 15,
     'ranged-drone': defs['ranged-drone']?.contactDamage ?? 15,
     'hunter-drone': HUNTER_CONTACT_DAMAGE,
-    'elite-drone': 0,
+    'elite-drone': ELITE_CONTACT_DAMAGE,
   };
 }
 
@@ -1583,6 +1781,8 @@ function resizeSimulation(
   );
   const geometry = projectileGeometry(shortSide);
   const rangedGeometry = rangedProjectileGeometry(shortSide);
+  const eliteCannonGeometry = eliteCannonProjectileGeometry(shortSide);
+  const eliteCoreGeometry = eliteCoreProjectileGeometry(shortSide);
   const enemyBoundsByType = boundsByType(state.enemyDefsByType, shortSide);
   const movementSpeedPxByType = speedMap(
     state.enemyDefsByType,
@@ -1595,18 +1795,22 @@ function resizeSimulation(
     (definition) => definition.committedAttackSpeedViewportHeightPerSecond,
   );
   const enemies = state.enemies.map((enemy) => {
-    // V02-WI-06 E01 C01: an Elite resolves its complete rendered bounds from the
-    // single Elite content geometry owner for its CURRENT phase — the
-    // regular-only `enemyBoundsByType` map has no Elite entry, and the Elite
-    // AABB must equal the rendered bounds of the active phase. Every regular
-    // role keeps the unchanged map lookup.
-    const enemyBounds =
-      enemy.kind === 'elite'
-        ? eliteBoundsForPhase(
-            enemy.phase === 'vulnerable' ? 'vulnerable' : 'armoured',
-            shortSide,
-          )
-        : enemyBoundsByType[enemy.type];
+    // V02-WI-06 E02: an Elite resolves its complete current-phase rendered
+    // bounds from the single Elite content geometry owner, reprojects its own
+    // centre proportionally (it moves across the full viewport, not an
+    // engagement band), and clamps inside the new viewport with an inward
+    // direction forced only when that clamp is required — preserving its
+    // movement decision timer, RNG stream, and phase timers. Every regular role
+    // keeps the unchanged map lookup and engagement-band projection.
+    if (enemy.kind === 'elite') {
+      return reprojectEliteForViewport(enemy, {
+        centerX: enemy.centerX * ratioX,
+        centerY: enemy.centerY * ratioY,
+        viewportWidth: command.width,
+        shortSidePx: shortSide,
+      });
+    }
+    const enemyBounds = enemyBoundsByType[enemy.type];
     return {
       ...enemy,
       width: enemyBounds.width,
@@ -1636,15 +1840,42 @@ function resizeSimulation(
       ? state.aircraft.centerY * ratioY
       : clamp(state.aircraft.centerY * ratioY, bounds.minY, bounds.maxY),
   };
-  const enemyProjectiles = state.enemyProjectiles.map((projectile) => ({
-    ...projectile,
-    centerX: projectile.centerX * ratioX,
-    centerY: projectile.centerY * ratioY,
-    width: rangedGeometry.width,
-    height: rangedGeometry.height,
-    velocityX: projectile.velocityX * ratioX,
-    velocityY: projectile.velocityY * ratioY,
-  }));
+  const enemyProjectiles = state.enemyProjectiles.map((projectile) => {
+    // Every enemy projectile keeps its complete rendered bounds equal to its
+    // AABB at the new viewport, reprojects position proportionally, and keeps
+    // its remaining state (fixed trajectory or Core heading and lifetime).
+    switch (projectile.kind) {
+      case 'ranged':
+        return {
+          ...projectile,
+          centerX: projectile.centerX * ratioX,
+          centerY: projectile.centerY * ratioY,
+          width: rangedGeometry.width,
+          height: rangedGeometry.height,
+          velocityX: projectile.velocityX * ratioX,
+          velocityY: projectile.velocityY * ratioY,
+        };
+      case 'elite-cannon':
+        return {
+          ...projectile,
+          centerX: projectile.centerX * ratioX,
+          centerY: projectile.centerY * ratioY,
+          width: eliteCannonGeometry.width,
+          height: eliteCannonGeometry.height,
+          velocityX: projectile.velocityX * ratioX,
+          velocityY: projectile.velocityY * ratioY,
+        };
+      case 'elite-core':
+        return {
+          ...projectile,
+          centerX: projectile.centerX * ratioX,
+          centerY: projectile.centerY * ratioY,
+          width: eliteCoreGeometry.width,
+          height: eliteCoreGeometry.height,
+          speedPxPerSecond: projectile.speedPxPerSecond * ratioY,
+        };
+    }
+  });
   const projectiles = state.projectiles.map((projectile) => ({
     ...projectile,
     centerX: projectile.centerX * ratioX,
