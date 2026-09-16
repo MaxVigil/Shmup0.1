@@ -1,4 +1,5 @@
 import type { EnemyType } from '@domain/index';
+import { ELITE_DRONE, enemyRenderedBounds } from '../content';
 
 /**
  * Authoritative v0.2 regular-enemy state (Epic §9, V02-DEC-019, V02-WI-04).
@@ -13,9 +14,30 @@ import type { EnemyType } from '@domain/index';
  * and no additional hidden offset. Top entries spawn above the viewport and
  * travel straight down; Side entries travel horizontally inward at the role
  * movement speed until their complete bounds are fully inside the viewport.
+ *
+ * V02-WI-06 E01 adds the explicit Elite state (`EliteEnemyState`): one authored
+ * Elite with its own fixed-anchor activation transition and its authoritative
+ * `Armoured 12 s → Vulnerable 6 s` phase foundation (Epic §9.4, V02-AC-009).
+ * The Elite never uses the regular-enemy factory, the full-bounds activation
+ * rule, or escape; unsupported enemy types are rejected explicitly instead of
+ * falling through to a regular role. Elite entry and horizontal movement are
+ * NOT owned here — a later movement consumer invokes `activateElite` on the
+ * exact anchor-reaching fixed step.
  */
 
 export type EnemyEntryRegion = 'top' | 'upper-left' | 'upper-right';
+
+/** Elite `Armoured` phase duration: `12 s` = exactly 720 fixed steps (§9.4). */
+export const ELITE_ARMOURED_PHASE_STEPS = 720;
+/** Elite `Vulnerable` phase duration: `6 s` = exactly 360 fixed steps (§9.4). */
+export const ELITE_VULNERABLE_PHASE_STEPS = 360;
+/** Full Elite phase cycle (`Armoured 12 s → Vulnerable 6 s`, §9.4). */
+export const ELITE_PHASE_CYCLE_STEPS =
+  ELITE_ARMOURED_PHASE_STEPS + ELITE_VULNERABLE_PHASE_STEPS;
+/** Fixed Elite anchor centre horizontal fraction (`50% VW`, Epic §9.4). */
+export const ELITE_ANCHOR_VIEWPORT_FRACTION_X = 0.5;
+/** Fixed Elite anchor centre vertical fraction (`20% VH`, Epic §9.4). */
+export const ELITE_ANCHOR_VIEWPORT_FRACTION_Y = 0.2;
 
 /** Fields shared by every regular-enemy state. */
 interface EnemyCommonState {
@@ -75,7 +97,33 @@ export interface HunterEnemyState extends EnemyCommonState {
   readonly approachStepsElapsed: number;
 }
 
-export type CombatEnemy = BasicEnemyState | RangedEnemyState | HunterEnemyState;
+export type CombatEnemy =
+  BasicEnemyState | RangedEnemyState | HunterEnemyState | EliteEnemyState;
+
+/**
+ * Authoritative Elite phase (Epic §9.4, V02-AC-009). `entering` covers creation
+ * and the later movement owner's entry to the anchor and consumes no phase or
+ * attack time; the explicit `activateElite` transition enters `armoured`, after
+ * which the fixed `armoured → vulnerable` cycle repeats until destruction.
+ */
+export type ElitePhase = 'entering' | 'armoured' | 'vulnerable';
+
+/**
+ * The one authored Elite's authoritative state (Epic §9.4, V02-WI-06 E01).
+ * `width`/`height` are the complete rendered bounds of the CURRENT phase state
+ * (Epic §16.1/§16.4), so the authoritative AABB always equals what the matching
+ * sprite renders; `phase`, `phaseStepsElapsed`, and `phaseStepsRemaining` are
+ * the authoritative phase facts exposed to later Debug/presentation consumers.
+ * The Elite never escapes and is never created through the regular factory.
+ */
+export interface EliteEnemyState extends EnemyCommonState {
+  readonly kind: 'elite';
+  readonly phase: ElitePhase;
+  /** Elapsed fixed steps inside the current active phase (0 on its first step). */
+  readonly phaseStepsElapsed: number;
+  /** Remaining fixed steps in the current active phase, this step included. */
+  readonly phaseStepsRemaining: number;
+}
 
 export interface EnemyStepInput {
   /** Downward / approach speed in px/s (role content × current viewport height). */
@@ -194,14 +242,28 @@ function createEnemyState(input: {
   if (input.type === 'ranged-drone') {
     return { ...common, kind: 'ranged', firingStepsRemaining: 0 };
   }
-  return {
-    ...common,
-    kind: 'hunter',
-    phase: 'entering',
-    committedVx: 0,
-    committedVy: 0,
-    approachStepsElapsed: 0,
-  };
+  if (input.type === 'hunter-drone') {
+    return {
+      ...common,
+      kind: 'hunter',
+      phase: 'entering',
+      committedVx: 0,
+      committedVy: 0,
+      approachStepsElapsed: 0,
+    };
+  }
+  // V02-WI-06 E01: explicit rejection instead of a regular-role fallthrough.
+  // The one authored Elite is never built by the regular-enemy factory (which
+  // would otherwise interpret it as a Hunter); its authored staging consumer
+  // creates it through `createEliteAtAnchor`.
+  if (input.type === 'elite-drone') {
+    throw new Error(
+      'Combat enemy factory rejected elite-drone: the Elite is created only through `createEliteAtAnchor` and never through the regular-enemy spawn path.',
+    );
+  }
+  throw new Error(
+    `Combat enemy factory rejected the unsupported enemy type "${String(input.type)}".`,
+  );
 }
 
 /**
@@ -214,11 +276,17 @@ function createEnemyState(input: {
  *   or `2.0 s` since Approach began locks the direction at `26% VH/s`.
  * A side/top entry can never escape during its initial entry. An enemy that
  * has entered and now fully exits any boundary is returned as `null` (Escaped).
+ * The Elite is routed to `stepElite` (V02-WI-06 E01): it is never activated by
+ * full-bounds entry, its centre is not moved by this foundation, and it never
+ * escapes (Epic §9.4).
  */
 export function stepEnemy(
   enemy: CombatEnemy,
   input: EnemyStepInput,
 ): EnemyStepResult {
+  if (enemy.kind === 'elite') {
+    return { enemy: stepElite(enemy, input), newlyActivated: false };
+  }
   const positioned =
     enemy.kind === 'hunter'
       ? stepHunter(enemy, input)
@@ -390,13 +458,177 @@ function stepHunter(
   };
 }
 
-/** Applies the permanent full-bounds activation latch (the Ranged first-shot
- *  timer starts on this exact step; Hunter Approach is entered by its owner). */
-function activateEnemy(enemy: CombatEnemy): CombatEnemy {
+/** Applies the permanent full-bounds activation latch for the three regular
+ *  roles (the Ranged first-shot timer starts on this exact step; Hunter
+ *  Approach is entered by its owner). The Elite has its own explicit
+ *  `activateElite` transition and is deliberately excluded from the parameter
+ *  type, so it can never reach this regular-only owner. */
+function activateEnemy(
+  enemy: BasicEnemyState | RangedEnemyState | HunterEnemyState,
+): CombatEnemy {
   if (enemy.kind === 'ranged') {
     return { ...enemy, activated: true, firingStepsRemaining: 180 };
   }
   return { ...enemy, activated: true };
+}
+
+// ---------------------------------------------------------------------------
+// Elite (Epic §9.4, V02-WI-06 E01)
+// ---------------------------------------------------------------------------
+
+/**
+ * Complete rendered bounds (px) of one Elite phase state at gameplay scale,
+ * resolved from the single content geometry owner (Epic §16.1/§16.4,
+ * `ELITE_DRONE`). The authoritative Elite AABB therefore always equals the
+ * complete rendered bounds of the sprite for that state — no second Elite
+ * hitbox rule exists. The creation owner and the accepted viewport-resize
+ * reprojection both consume this one mapping.
+ */
+export function eliteBoundsForPhase(
+  phase: 'armoured' | 'vulnerable',
+  shortSidePx: number,
+): { readonly width: number; readonly height: number } {
+  const geometry =
+    phase === 'armoured'
+      ? ELITE_DRONE.armouredVisualGeometry
+      : ELITE_DRONE.vulnerableVisualGeometry;
+  const bounds = enemyRenderedBounds(geometry, shortSidePx);
+  return { width: bounds.widthPx, height: bounds.heightPx };
+}
+
+export interface EliteCreationInput {
+  readonly id: number;
+  readonly ordinal: number;
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+}
+
+/**
+ * Creates the one authored Elite at its fixed `50% VW, 20% VH` anchor centre
+ * (Epic §9.4). The returned state is `entering`: until the explicit
+ * `activateElite` transition it consumes no phase or attack time. This factory
+ * is the only Elite creation owner — the Elite never passes through the
+ * regular-enemy factory, the full-bounds activation rule, or escape — and it
+ * owns no entry speed, entry movement, horizontal movement, or RNG. The entry
+ * consumer creates the Elite above the viewport and invokes `activateElite` on
+ * the exact anchor-reaching fixed step.
+ */
+export function createEliteAtAnchor(
+  input: EliteCreationInput,
+): EliteEnemyState {
+  const shortSidePx = Math.min(input.viewportWidth, input.viewportHeight);
+  const bounds = eliteBoundsForPhase('armoured', shortSidePx);
+  return {
+    id: input.id,
+    kind: 'elite',
+    type: ELITE_DRONE.type,
+    hullIntegrity: ELITE_DRONE.maximumHullIntegrity,
+    centerX: input.viewportWidth * ELITE_ANCHOR_VIEWPORT_FRACTION_X,
+    centerY: input.viewportHeight * ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
+    width: bounds.width,
+    height: bounds.height,
+    entry: 'top',
+    // The Elite is created already at its visible anchor in this factory and
+    // never escapes; the later entry-movement owner creates it above the
+    // viewport and owns that latch.
+    hasEnteredVisibleArea: true,
+    activated: false,
+    ordinal: input.ordinal,
+    phase: 'entering',
+    phaseStepsElapsed: 0,
+    phaseStepsRemaining: 0,
+  };
+}
+
+/**
+ * Explicit idempotent Elite activation transition (Epic §9.4, V02-AC-009). The
+ * movement owner invokes it on the exact fixed step the Elite centre first
+ * reaches the `50% VW, 20% VH` anchor; the Elite enters `Armoured` and its
+ * phase timer starts once in that same authoritative simulation step. Repeated
+ * calls are strict no-ops returning the same state, so the cycle can never be
+ * restarted, and an Elite that has not reached the anchor keeps consuming no
+ * phase or attack time.
+ */
+export function activateElite(elite: EliteEnemyState): EliteEnemyState {
+  if (elite.activated) {
+    return elite;
+  }
+  return {
+    ...elite,
+    activated: true,
+    phase: 'armoured',
+    phaseStepsElapsed: 0,
+    phaseStepsRemaining: ELITE_ARMOURED_PHASE_STEPS,
+  };
+}
+
+/**
+ * True when the Elite's exposed Core accepts normal player-projectile damage
+ * (Epic §9.4, V02-AC-009): only the `Vulnerable` phase. An `Armoured` hit is a
+ * blocked hit — zero damage, exactly that projectile consumed, and the local
+ * deflection feedback owned by `collision.ts`.
+ */
+export function eliteAcceptsProjectileDamage(elite: EliteEnemyState): boolean {
+  return elite.phase === 'vulnerable';
+}
+
+/**
+ * V02-WI-06 E01 C01 temporary player-projectile eligibility guard. Canonical
+ * §9.4 defines a blocked player hit only during `Armoured` and normal damage
+ * only during `Vulnerable`; it defines no projectile interaction during entry,
+ * and the Product Owner owns that rule before E02 makes the Elite reachable.
+ * Until then an `entering` Elite is NOT an eligible player-projectile target at
+ * all: it takes no damage, consumes no projectile, and emits no hit or
+ * deflection feedback. `resolveProjectileCollisions` continues its stable
+ * ascending-id search, so the same projectile may still resolve against the
+ * next eligible overlapping enemy. This guard is explicitly temporary and is
+ * not the final E02 player-facing entry rule.
+ */
+export function isEliteProjectileTargetEligible(
+  elite: EliteEnemyState,
+): boolean {
+  return elite.phase !== 'entering';
+}
+
+/**
+ * Advances the Elite phase timer by exactly one executed fixed step (Epic
+ * §9.4, V02-AC-009): `Armoured` lasts exactly `720` fixed steps, `Vulnerable`
+ * exactly `360`, then the cycle repeats. Every boundary transition happens on
+ * exactly one step and the new phase starts from its exact full duration, so
+ * the cycle cannot drift. An Elite that has not been explicitly activated
+ * consumes no phase time. E01 owns no Elite movement: the centre never changes.
+ */
+function stepElite(
+  elite: EliteEnemyState,
+  input: EnemyStepInput,
+): EliteEnemyState {
+  if (!elite.activated) {
+    return elite;
+  }
+  if (elite.phaseStepsRemaining > 1) {
+    return {
+      ...elite,
+      phaseStepsElapsed: elite.phaseStepsElapsed + 1,
+      phaseStepsRemaining: elite.phaseStepsRemaining - 1,
+    };
+  }
+  const nextPhase: 'armoured' | 'vulnerable' =
+    elite.phase === 'armoured' ? 'vulnerable' : 'armoured';
+  const bounds = eliteBoundsForPhase(
+    nextPhase,
+    Math.min(input.viewportWidth, input.viewportHeight),
+  );
+  return {
+    ...elite,
+    phase: nextPhase,
+    phaseStepsElapsed: 0,
+    phaseStepsRemaining:
+      nextPhase === 'armoured'
+        ? ELITE_ARMOURED_PHASE_STEPS
+        : ELITE_VULNERABLE_PHASE_STEPS,
+    width: bounds.width,
+    height: bounds.height,
+  };
 }
 
 /** True when any portion of the complete bounds is strictly inside the viewport. */

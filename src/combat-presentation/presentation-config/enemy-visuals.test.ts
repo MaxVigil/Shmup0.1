@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PreparedRuntimeAsset } from '@application/ports';
+import { ELITE_DRONE, enemyRenderedBounds } from '@application/content';
 import { RUNTIME_ASSET_MANIFEST } from '@platform/assets/runtime-asset-catalogue';
 import {
   ENEMY_VISUAL_KINDS,
@@ -65,6 +66,47 @@ describe('enemy visual mapping (V02-WI-01)', () => {
         9,
       );
     }
+  });
+
+  it('reads both Elite state scales from the single Elite content geometry owner (V02-WI-06 E01)', () => {
+    const armoured = enemyVisualMappingFor('elite-drone-armoured');
+    const vulnerable = enemyVisualMappingFor('elite-drone-vulnerable');
+    expect(armoured.scale).toEqual({
+      footprintAreaRatio:
+        ELITE_DRONE.armouredVisualGeometry.visualFootprintAreaRatio,
+      aspectRatio: ELITE_DRONE.armouredVisualGeometry.visualAspectRatio,
+    });
+    expect(vulnerable.scale).toEqual({
+      footprintAreaRatio:
+        ELITE_DRONE.vulnerableVisualGeometry.visualFootprintAreaRatio,
+      aspectRatio: ELITE_DRONE.vulnerableVisualGeometry.visualAspectRatio,
+    });
+    // The presentation's complete rendered bounds equal the content-derived
+    // bounds the authoritative Elite simulation AABB uses: one content owner.
+    expect(
+      resolveEnemyRenderedBounds(armoured, MINIMUM_VIEWPORT_SHORT_SIDE),
+    ).toEqual(
+      enemyRenderedBounds(
+        ELITE_DRONE.armouredVisualGeometry,
+        MINIMUM_VIEWPORT_SHORT_SIDE,
+      ),
+    );
+    expect(
+      resolveEnemyRenderedBounds(vulnerable, MINIMUM_VIEWPORT_SHORT_SIDE),
+    ).toEqual(
+      enemyRenderedBounds(
+        ELITE_DRONE.vulnerableVisualGeometry,
+        MINIMUM_VIEWPORT_SHORT_SIDE,
+      ),
+    );
+    // Both states share one footprint area; only the width/height split of the
+    // retracted-armour Vulnerable silhouette differs.
+    expect(armoured.scale.footprintAreaRatio).toBe(
+      vulnerable.scale.footprintAreaRatio,
+    );
+    expect(vulnerable.scale.aspectRatio).toBeGreaterThan(
+      armoured.scale.aspectRatio,
+    );
   });
 
   it('produces exact complete rendered bounds at the minimum supported viewport', () => {

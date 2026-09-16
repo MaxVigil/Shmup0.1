@@ -1,5 +1,9 @@
 import { overlaps } from '@domain/geometry';
 import type { EnemyType } from '@domain/index';
+import {
+  eliteAcceptsProjectileDamage,
+  isEliteProjectileTargetEligible,
+} from './enemies';
 import type { CombatEnemy } from './enemies';
 import type { CombatProjectile, EnemyProjectile } from './projectiles';
 import {
@@ -26,6 +30,18 @@ import type { CollisionEvidenceSink } from './evidence';
  * is the kamikaze exception: 35 damage, the Hunter is destroyed, and zero
  * reward is granted. Defeat has priority over Success within the step.
  * Presentation-only feedback (hit flashes) never delays gameplay transitions.
+ *
+ * V02-WI-06 E01 adds the explicit Elite resolution (Epic §9.4, V02-AC-009):
+ * a hit on an `Armoured` Elite deals zero, preserves its Hull, and still
+ * consumes exactly that projectile while creating/restarting this Elite's
+ * dedicated local deflection-feedback record at the blocking projectile's
+ * authoritative centre; it never sets the generic full-craft enemy flash.
+ * Only a `Vulnerable` hit applies the player projectile damage through the
+ * unchanged regular hit path, and destruction stays terminal and idempotent
+ * for the rest of the step. V02-WI-06 E01 C01 additionally treats an
+ * `entering` Elite as not eligible at all (no damage, no consumption, no
+ * feedback) so the projectile may still resolve against the next eligible
+ * overlapping enemy in stable ascending-id order.
  */
 
 /** Player-only regular per-pair contact cooldown: 0.75 s = 45 fixed steps. */
@@ -36,6 +52,30 @@ export const ENEMY_HIT_FLASH_STEPS = 3;
 export const DESTROYED_ENEMY_FLASH_STEPS = 6;
 /** Player aircraft danger flash after valid damage: 100 ms = 6 fixed steps. */
 export const AIRCRAFT_DAMAGE_FLASH_STEPS = 6;
+
+/**
+ * V02-WI-06 E01 C01 authoritative local Elite deflection-feedback record
+ * (Epic §9.4): a blocked `Armoured` hit is communicated by one short local
+ * deflection at the valid impact location, never by a full-craft flash. The
+ * record carries the Elite id, the blocking projectile's authoritative centre
+ * at the collision step (the local impact centre), and exactly
+ * `ENEMY_HIT_FLASH_STEPS` remaining executed steps. A later blocked hit
+ * replaces (restarts) that Elite's single record; the record decays once per
+ * executed step and is removed at zero or when the Elite is destroyed.
+ * E01 owns this authoritative data only — rendering it is E03-owned.
+ */
+export interface EliteDeflectionFeedback {
+  readonly enemyId: number;
+  /** Blocking projectile's authoritative centre at the collision step. */
+  readonly impactCenterX: number;
+  readonly impactCenterY: number;
+  readonly stepsRemaining: number;
+}
+
+/** Live Elite deflection records keyed by Elite id (one authored Elite). */
+export type EliteDeflectionFeedbacks = Readonly<
+  Record<number, EliteDeflectionFeedback>
+>;
 
 export interface DestroyedEnemyFlash {
   readonly enemyId: number;
@@ -60,6 +100,13 @@ export interface ProjectileCollisionInput {
   readonly projectileWidth: number;
   readonly projectileHeight: number;
   readonly existingFlashes: EnemyFlashSteps;
+  /**
+   * V02-WI-06 E01 C01 live Elite deflection records to carry forward. Optional
+   * for the existing regular-only callers (`combat-collision.test.ts`), which
+   * have no Elite; the production simulation always supplies its authoritative
+   * `eliteDeflectionFeedbacks` state.
+   */
+  readonly existingEliteDeflections?: EliteDeflectionFeedbacks;
   /** Evidence-only read-only work sink (Pass A; absent from the ordinary build). */
   readonly evidence?: CollisionEvidenceSink;
 }
@@ -69,19 +116,30 @@ export interface ProjectileCollisionResult {
   readonly enemies: readonly CombatEnemy[];
   readonly destroyedEnemies: readonly DestroyedEnemyInfo[];
   readonly flashes: EnemyFlashSteps;
+  readonly eliteDeflections: EliteDeflectionFeedbacks;
   readonly destroyedEnemyFlashes: readonly DestroyedEnemyFlash[];
 }
 
 /**
  * Player-projectile → enemy pass (Combat §8.4; v0.2 §10 single-hit lifecycle):
  * projectile ids ascending; each projectile damages only the first overlapping
- * still-active enemy by ascending enemy id and is consumed exactly once. An
- * enemy reaching Hull <= 0 immediately leaves the active collection, is
- * reported exactly once (the simulation owns reward/count), and creates only
+ * still-active eligible enemy by ascending enemy id and is consumed exactly
+ * once. An enemy reaching Hull <= 0 immediately leaves the active collection,
+ * is reported exactly once (the simulation owns reward/count), and creates only
  * the 100 ms hitbox-free destruction flash; later projectiles in the same step
  * ignore it. A non-destroying hit applies or restarts that enemy's 50 ms flash
  * and preserves movement and hitbox. Enemy hulls are reduced only by
  * projectiles — regular contact never damages an enemy (Epic §11.1).
+ *
+ * Elite rules (Epic §9.4, V02-AC-009; V02-WI-06 E01 C01):
+ * - an `Armoured` hit is blocked: zero damage, Hull preserved, exactly that
+ *   projectile consumed, and the dedicated local deflection record created or
+ *   replaced at the blocking projectile's centre — the generic full-craft
+ *   `flashes` map is deliberately NOT written;
+ * - a `Vulnerable` hit keeps the unchanged normal-damage/full-hit-feedback path;
+ * - an `entering` Elite is not an eligible target in E01 (no damage, no
+ *   consumption, no feedback) and is skipped so a later eligible overlapping
+ *   enemy can be hit in the same step.
  */
 export function resolveProjectileCollisions(
   input: ProjectileCollisionInput,
@@ -93,6 +151,9 @@ export function resolveProjectileCollisions(
   const destroyedIds = new Set<number>();
   const survivingProjectileIds = new Set<number>();
   const flashes: Record<number, number> = { ...input.existingFlashes };
+  const eliteDeflections: Record<number, EliteDeflectionFeedback> = {
+    ...input.existingEliteDeflections,
+  };
   const destroyedEnemies: DestroyedEnemyInfo[] = [];
   const destroyedEnemyFlashes: DestroyedEnemyFlash[] = [];
   // V02-WI-04 C03 evidence-only observed work counters (Pass A): candidates are
@@ -111,6 +172,11 @@ export function resolveProjectileCollisions(
     let hitId: number | null = null;
     for (const enemy of sortedEnemies) {
       if (destroyedIds.has(enemy.id)) {
+        continue;
+      }
+      // V02-WI-06 E01 C01: an `entering` Elite is not eligible at all, so the
+      // stable ascending-id search continues to the next eligible target.
+      if (enemy.kind === 'elite' && !isEliteProjectileTargetEligible(enemy)) {
         continue;
       }
       if (EVIDENCE_COUNTERS_ENABLED) {
@@ -134,6 +200,27 @@ export function resolveProjectileCollisions(
     }
     if (hitId === null) {
       survivingProjectileIds.add(projectile.id);
+      continue;
+    }
+    const target = sortedEnemies.find((enemy) => enemy.id === hitId);
+    if (
+      target !== undefined &&
+      target.kind === 'elite' &&
+      !eliteAcceptsProjectileDamage(target)
+    ) {
+      // Blocked Armoured hit (Epic §9.4, V02-AC-009; V02-WI-06 E01 C01):
+      // exactly this projectile is consumed and the Elite Hull/phase are
+      // preserved, while the hit is communicated ONLY through this Elite's
+      // dedicated local deflection record created (or replaced) at the blocking
+      // projectile's authoritative centre for the collision step. The generic
+      // full-craft enemy flash map is deliberately not written, and no Hull,
+      // phase, movement, aircraft-damage, or destroyed-flash effect is added.
+      eliteDeflections[hitId] = {
+        enemyId: hitId,
+        impactCenterX: projectile.centerX,
+        impactCenterY: projectile.centerY,
+        stepsRemaining: ENEMY_HIT_FLASH_STEPS,
+      };
       continue;
     }
     // The projectile is consumed by its first valid hit (single-hit lifecycle).
@@ -171,11 +258,23 @@ export function resolveProjectileCollisions(
   const projectiles = input.projectiles.filter((projectile) =>
     survivingProjectileIds.has(projectile.id),
   );
+  // A destroyed Elite owns no feedback record, and a zero-step record is not
+  // live: both are removed here so the authoritative state never carries a
+  // deflection for an Elite that is gone (Epic §9.4, V02-WI-06 E01 C01).
+  const liveEliteDeflections: Record<number, EliteDeflectionFeedback> = {};
+  for (const [id, record] of Object.entries(eliteDeflections)) {
+    const enemyId = Number(id);
+    if (destroyedIds.has(enemyId) || record.stepsRemaining <= 0) {
+      continue;
+    }
+    liveEliteDeflections[enemyId] = record;
+  }
   return {
     projectiles,
     enemies,
     destroyedEnemies,
     flashes,
+    eliteDeflections: liveEliteDeflections,
     destroyedEnemyFlashes,
   };
 }
@@ -308,6 +407,14 @@ export interface ContactCollisionResult {
  * it damages the Aircraft, destroys the Hunter, and grants zero reward; the
  * regular pair cooldown never converts Hunter contact into persistent overlap.
  * God Mode keeps Hull at maximum while contact outcomes still resolve.
+ *
+ * V02-WI-06 E01 C01: the Elite is excluded from this pass entirely. Epic §11.1
+ * defines regular contact for Basic/Ranged and §11.2 defines the Hunter
+ * exception; no Elite contact outcome is approved, so an overlapping Elite
+ * produces NO contact side effect at all — no Aircraft damage, no Aircraft
+ * damage flash, no pair cooldown, no enemy destruction, and no reward/count or
+ * other accounting entry. The eventual Elite/Aircraft contact rule is outside
+ * E01 and requires canonical closure before player-facing integration.
  */
 export function resolveAircraftContacts(
   input: ContactCollisionInput,
@@ -333,6 +440,12 @@ export function resolveAircraftContacts(
   for (const enemy of sorted) {
     if (defeated) {
       break;
+    }
+    if (enemy.kind === 'elite') {
+      // V02-WI-06 E01 C01: no approved Elite contact outcome exists, so the
+      // Elite is not a contact participant and never reaches the regular or
+      // Hunter branches (no damage, flash, cooldown, destruction, or reward).
+      continue;
     }
     if (EVIDENCE_COUNTERS_ENABLED) {
       evidenceCandidates += 1;

@@ -892,7 +892,12 @@ const REGULAR_VISUAL_KINDS: readonly EnemyVisualKind[] = [
   'hunter-drone',
 ];
 
-/** Maps the authoritative enemy type to its visual kind. */
+/**
+ * Maps the authoritative enemy type to its visual kind. V02-WI-06 E01 removes
+ * the previous regular-role fallthrough: an Elite (or any unsupported type) must
+ * never be silently rendered with the Hunter texture. The Elite presentation
+ * consumer and its state-specific sprite mapping arrive with V02-WI-06 E03.
+ */
 function enemyVisualKindForType(type: EnemyType): EnemyVisualKind {
   if (type === 'basic-drone') {
     return 'basic-drone';
@@ -900,7 +905,10 @@ function enemyVisualKindForType(type: EnemyType): EnemyVisualKind {
   if (type === 'ranged-drone') {
     return 'ranged-drone';
   }
-  return 'hunter-drone';
+  if (type === 'hunter-drone') {
+    return 'hunter-drone';
+  }
+  throw new Error(`Unsupported enemy visual kind for type: ${type}`);
 }
 
 function enemyTextureKey(kind: EnemyVisualKind): string {

@@ -15,12 +15,17 @@ export type {
 } from '@content/weapons';
 export {
   BASIC_DRONE,
+  ELITE_DRONE,
   ENEMIES,
   HUNTER_DRONE,
   RANGED_DRONE,
   enemyDefinitionFor,
 } from '@content/enemies';
 export type { EnemyDefinition } from '@content/enemies';
+export type {
+  EliteDefinition,
+  EliteStateVisualGeometry,
+} from '@content/enemies';
 export {
   ENCOUNTER_ENTRY_REGIONS,
   ENCOUNTER_FORMATIONS,

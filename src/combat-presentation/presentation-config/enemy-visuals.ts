@@ -1,5 +1,9 @@
 import type { PreparedRuntimeAsset } from '@application/ports';
-import { ENEMIES, enemyRenderedBounds } from '@application/content';
+import {
+  ELITE_DRONE,
+  ENEMIES,
+  enemyRenderedBounds,
+} from '@application/content';
 
 /**
  * V02-WI-01 enemy visual presentation mapping (v0.2 Epic §16).
@@ -15,7 +19,9 @@ import { ENEMIES, enemyRenderedBounds } from '@application/content';
  * the regular-enemy simulation consumers. The complete rendered bounds are
  * sourced from the content `EnemyDefinition` values (V02-DEC-019) so the
  * presentation always equals the authoritative gameplay AABB — a single
- * content contract, never a second geometry authority.
+ * content contract, never a second geometry authority. V02-WI-06 E01 extends
+ * the same rule to the Elite: both Elite state scales are read from the
+ * explicit `ELITE_DRONE` content geometry owner.
  */
 
 export const ENEMY_VISUAL_KINDS = [
@@ -132,6 +138,21 @@ function regularScale(
   };
 }
 
+/** Derives one Elite state's gameplay scale from the single Elite content
+ *  geometry owner (`ELITE_DRONE`, V02-WI-06 E01): the presentation consumes the
+ *  same complete rendered-bounds facts as the authoritative Elite simulation
+ *  AABB, so neither is a second geometry source. */
+function eliteStateScale(phase: 'armoured' | 'vulnerable'): EnemyVisualScale {
+  const geometry =
+    phase === 'armoured'
+      ? ELITE_DRONE.armouredVisualGeometry
+      : ELITE_DRONE.vulnerableVisualGeometry;
+  return {
+    footprintAreaRatio: geometry.visualFootprintAreaRatio,
+    aspectRatio: geometry.visualAspectRatio,
+  };
+}
+
 export const ENEMY_VISUAL_MAPPINGS: readonly EnemyVisualMapping[] = [
   {
     kind: 'basic-drone',
@@ -235,7 +256,8 @@ export const ENEMY_VISUAL_MAPPINGS: readonly EnemyVisualMapping[] = [
     kind: 'elite-drone-armoured',
     assetId: 'enemy-elite-drone-armoured',
     // §16.3: alien/hybrid manta/flattened diamond, 2.3–2.6× Basic footprint.
-    scale: { footprintAreaRatio: 2.45, aspectRatio: 214 / 320 },
+    // The scale is read from the single Elite content geometry owner.
+    scale: eliteStateScale('armoured'),
     fallback: {
       shapes: [
         ...ELITE_OUTER_SILHOUETTE,
@@ -257,8 +279,9 @@ export const ENEMY_VISUAL_MAPPINGS: readonly EnemyVisualMapping[] = [
     assetId: 'enemy-elite-drone-vulnerable',
     // §16.3: same craft/framing/outer silhouette; vulnerable retracts the
     // armour plates and exposes the centred engineered Core with one
-    // restrained pale-cyan accent (`accent`).
-    scale: { footprintAreaRatio: 2.45, aspectRatio: 281 / 320 },
+    // restrained pale-cyan accent (`accent`). The scale is read from the
+    // single Elite content geometry owner.
+    scale: eliteStateScale('vulnerable'),
     fallback: {
       shapes: [
         ...ELITE_OUTER_SILHOUETTE,

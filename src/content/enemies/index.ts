@@ -77,6 +77,51 @@ export const HUNTER_DRONE: EnemyDefinition = {
   visualAspectRatio: 114 / 192,
 };
 
+/**
+ * Complete rendered-bounds geometry for one Elite phase state (Epic §16.3–16.4,
+ * V02-WI-06 E01). Both Elite states share the same footprint area ratio; each
+ * state owns the prepared-PNG aspect ratio of its own sprite. This is the
+ * single content geometry owner consumed by the authoritative Elite simulation
+ * AABB and by the enemy visual presentation mapping, so neither becomes a
+ * second geometry authority.
+ */
+export interface EliteStateVisualGeometry {
+  readonly visualFootprintAreaRatio: number;
+  readonly visualAspectRatio: number;
+}
+
+/**
+ * Explicit authored Elite definition (Epic §9.4, §16.3): exactly one authored
+ * Elite with its hull and its two prepared state geometries, not a generic
+ * boss/phase framework. The Elite is deliberately not part of the `ENEMIES`
+ * regular family; its simulation consumer and its presentation mapping consume
+ * this definition directly (V02-WI-06).
+ */
+export interface EliteDefinition {
+  readonly type: 'elite-drone';
+  readonly displayName: string;
+  /** Maximum Hull `60` (Epic §9.4). */
+  readonly maximumHullIntegrity: number;
+  /** Armoured-state complete rendered bounds geometry (§16.4 `214 × 320`). */
+  readonly armouredVisualGeometry: EliteStateVisualGeometry;
+  /** Vulnerable-state complete rendered bounds geometry (§16.4 `281 × 320`). */
+  readonly vulnerableVisualGeometry: EliteStateVisualGeometry;
+}
+
+export const ELITE_DRONE: EliteDefinition = {
+  type: 'elite-drone',
+  displayName: 'Elite Drone',
+  maximumHullIntegrity: 60,
+  armouredVisualGeometry: {
+    visualFootprintAreaRatio: 2.45,
+    visualAspectRatio: 214 / 320,
+  },
+  vulnerableVisualGeometry: {
+    visualFootprintAreaRatio: 2.45,
+    visualAspectRatio: 281 / 320,
+  },
+};
+
 /** The v0.2 regular-enemy family consumed by Combat (Epic §3.1). The Elite is
  *  introduced by V02-WI-06 with its own definition consumer. */
 export const ENEMIES: readonly EnemyDefinition[] = [

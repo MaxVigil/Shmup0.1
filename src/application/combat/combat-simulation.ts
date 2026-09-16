@@ -28,6 +28,7 @@ import {
   type ProjectileGeometry,
 } from './projectiles';
 import {
+  eliteBoundsForPhase,
   spawnEnemyFromPlacement,
   stepEnemy,
   type CombatEnemy,
@@ -38,6 +39,8 @@ import {
   resolveProjectileCollisions,
   type DestroyedEnemyFlash,
   type DestroyedEnemyInfo,
+  type EliteDeflectionFeedback,
+  type EliteDeflectionFeedbacks,
 } from './collision';
 import { enemyRenderedBounds } from '../content';
 import type { CombatDebugCommand } from './debug-command';
@@ -207,6 +210,15 @@ export interface CombatSimulationState {
   readonly godModeEnabled: boolean;
   // --- feedback ---
   readonly activeEnemyFlashStepsRemaining: Readonly<Record<number, number>>;
+  /**
+   * V02-WI-06 E01 C01 authoritative local Elite deflection records keyed by
+   * Elite id (at most one for the one authored Elite): created/replaced by a
+   * blocked `Armoured` hit at the blocking projectile's collision-step centre,
+   * decaying once per executed step, removed at zero or on Elite destruction,
+   * and reprojected proportionally on an accepted viewport resize. These are
+   * authoritative gameplay data only — E01 never renders them.
+   */
+  readonly eliteDeflectionFeedbacks: EliteDeflectionFeedbacks;
   readonly destroyedEnemyFlashes: readonly DestroyedEnemyFlash[];
   readonly aircraftDangerFlashStepsRemaining: number;
   // --- Critical Hull (v0.2 §15.3) ---
@@ -408,6 +420,7 @@ export function createCombatSimulation(
     playerDefeated: false,
     godModeEnabled: false,
     activeEnemyFlashStepsRemaining: {},
+    eliteDeflectionFeedbacks: {},
     destroyedEnemyFlashes: [],
     aircraftDangerFlashStepsRemaining: 0,
     criticalHullMessageTriggered: criticalTriggered,
@@ -735,6 +748,18 @@ function beginStepCounters(
       activeEnemyFlashStepsRemaining[Number(id)] = next;
     }
   }
+  // V02-WI-06 E01 C01: every live Elite deflection record decays by exactly one
+  // executed step and is removed when it reaches zero.
+  const eliteDeflectionFeedbacks: Record<number, EliteDeflectionFeedback> = {};
+  for (const [id, record] of Object.entries(state.eliteDeflectionFeedbacks)) {
+    const next = record.stepsRemaining - 1;
+    if (next > 0) {
+      eliteDeflectionFeedbacks[Number(id)] = {
+        ...record,
+        stepsRemaining: next,
+      };
+    }
+  }
   const destroyedEnemyFlashes = state.destroyedEnemyFlashes
     .map((flash) => ({ ...flash, stepsRemaining: flash.stepsRemaining - 1 }))
     .filter((flash) => flash.stepsRemaining > 0);
@@ -748,6 +773,7 @@ function beginStepCounters(
   return {
     ...state,
     activeEnemyFlashStepsRemaining,
+    eliteDeflectionFeedbacks,
     destroyedEnemyFlashes,
     aircraftDangerFlashStepsRemaining: Math.max(
       0,
@@ -1106,6 +1132,7 @@ function resolveCollisions(
     projectileWidth: state.projectileWidth,
     projectileHeight: state.projectileHeight,
     existingFlashes: state.activeEnemyFlashStepsRemaining,
+    existingEliteDeflections: state.eliteDeflectionFeedbacks,
     ...projectileEvidence,
   });
   const enemyProjectileResult = resolveEnemyProjectileCollisions({
@@ -1171,6 +1198,10 @@ function resolveCollisions(
     destroyedByContactCountByType: accounting.destroyedByContactCountByType,
     pendingCombatRewards: accounting.pendingCombatRewards,
     activeEnemyFlashStepsRemaining,
+    // V02-WI-06 E01 C01: the collision pass owns the live Elite deflection
+    // records (created/replaced by blocked Armoured hits and removed on Elite
+    // destruction); they never enter the generic enemy flash map.
+    eliteDeflectionFeedbacks: projectileResult.eliteDeflections,
     destroyedEnemyFlashes: [
       ...state.destroyedEnemyFlashes,
       ...projectileResult.destroyedEnemyFlashes,
@@ -1563,16 +1594,30 @@ function resizeSimulation(
     command.height,
     (definition) => definition.committedAttackSpeedViewportHeightPerSecond,
   );
-  const enemies = state.enemies.map((enemy) => ({
-    ...enemy,
-    width: enemyBoundsByType[enemy.type].width,
-    height: enemyBoundsByType[enemy.type].height,
-    centerX:
-      enemy.entry === 'top'
-        ? reprojectEngagementBandX(enemy.centerX, state.bounds, bounds)
-        : enemy.centerX * ratioX,
-    centerY: enemy.centerY * ratioY,
-  }));
+  const enemies = state.enemies.map((enemy) => {
+    // V02-WI-06 E01 C01: an Elite resolves its complete rendered bounds from the
+    // single Elite content geometry owner for its CURRENT phase — the
+    // regular-only `enemyBoundsByType` map has no Elite entry, and the Elite
+    // AABB must equal the rendered bounds of the active phase. Every regular
+    // role keeps the unchanged map lookup.
+    const enemyBounds =
+      enemy.kind === 'elite'
+        ? eliteBoundsForPhase(
+            enemy.phase === 'vulnerable' ? 'vulnerable' : 'armoured',
+            shortSide,
+          )
+        : enemyBoundsByType[enemy.type];
+    return {
+      ...enemy,
+      width: enemyBounds.width,
+      height: enemyBounds.height,
+      centerX:
+        enemy.entry === 'top'
+          ? reprojectEngagementBandX(enemy.centerX, state.bounds, bounds)
+          : enemy.centerX * ratioX,
+      centerY: enemy.centerY * ratioY,
+    };
+  });
   // V02-WI-05 E02 C01: a committed Success/Evacuation exit is already flying
   // outside the gameplay movement bounds. Reprojecting the Aircraft must stay
   // purely proportional during every exit phase (`centre`, `fly-up`,
@@ -1611,6 +1656,17 @@ function resizeSimulation(
     centerY: flash.centerY * ratioY,
     size: shortSide * 0.04,
   }));
+  // V02-WI-06 E01 C01: a live Elite deflection's local impact centre reprojects
+  // proportionally with the viewport so the authoritative impact location
+  // stays exact across an accepted resize (its remaining steps are unchanged).
+  const eliteDeflectionFeedbacks: Record<number, EliteDeflectionFeedback> = {};
+  for (const [id, record] of Object.entries(state.eliteDeflectionFeedbacks)) {
+    eliteDeflectionFeedbacks[Number(id)] = {
+      ...record,
+      impactCenterX: record.impactCenterX * ratioX,
+      impactCenterY: record.impactCenterY * ratioY,
+    };
+  }
   return {
     ...state,
     viewportWidth: command.width,
@@ -1634,6 +1690,7 @@ function resizeSimulation(
     enemyProjectiles,
     projectiles,
     destroyedEnemyFlashes,
+    eliteDeflectionFeedbacks,
     enemyBoundsByType,
     movementSpeedPxByType,
     committedSpeedPxByType,
