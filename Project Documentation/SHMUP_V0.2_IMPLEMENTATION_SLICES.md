@@ -214,17 +214,31 @@ Acceptance evidence:
 **Outcome:** Interception 03 is fully playable and completable with the exact Elite entry, anchor, phase cycle, attacks, visuals, economy, and final mission progression.
 
 - **Depends on:** accepted `V02-WI-05` revision.
-- **Readiness precondition:** satisfied by Product Owner approval and canonical `V02-DEC-032` recording of every exact Mission 03 Arrival Group, ordered member, Spawn Placement, positive offset, seeded-side draw, the `05:20` Elite creation step, and the post-entry anchor transition. The implementation agent must consume that contract exactly and must not create another placement type, hidden formation algorithm, or generic formation DSL.
+- **Readiness precondition:** satisfied by Product Owner approval and canonical
+  `V02-DEC-032` recording of every exact Mission 03 Arrival Group, ordered
+  member, Spawn Placement, positive offset, seeded-side draw, the `05:20` Elite
+  creation step, and the post-entry anchor transition, plus `V02-DEC-033` for
+  exact Elite movement, attack, entry/contact, and feedback values. The
+  implementation agent must consume those contracts exactly and must not create
+  another placement type, hidden formation algorithm, generic formation DSL,
+  boss framework, or agent-authored tuning value.
 - **Owned AC:** `V02-AC-009–010` plus regression of all Mission 03-relevant preceding AC.
 - **Primary sources:** Epic §§8.3, 9.4, 10–13, 15–20.
 
 IN scope:
 
-- exact Mission 03 schedule and Elite entry to `50% VW, 20% VH` anchor;
+- exact Mission 03 schedule and `12% VH/s` Elite Top entry to the
+  `50% VW, 20% VH` anchor;
 - activation-only timer start, Armoured-first `12 s / 6 s` cycle, exact sprite-state mapping;
-- cannon first/full cadence, exact `−6°/+6°` trajectories, speed/damage;
-- Vulnerable Core full initial interval, homing turn/speed/lifetime/damage, cap of two;
-- blocked-hit projectile consumption/feedback, Elite reward, Success, replay, and completion persistence.
+- exact `elite-movement` direction/interval draws, boundary forcing, phase and
+  resize preservation;
+- phase-owned attack timers and boundary ordering; cannon muzzle/geometry,
+  first/full cadence, exact `−6°/+6°` trajectories, speed/damage;
+- Vulnerable Core muzzle/geometry, full initial interval, homing
+  turn/speed/lifetime/damage, cap/hold behaviour;
+- entry projectile/contact ineligibility, active Elite contact, local blocked-hit
+  deflection, projectile consumption, Elite reward, Success, replay, and
+  completion persistence.
 
 OUT scope:
 
@@ -274,9 +288,11 @@ Acceptance evidence:
 `175b5dd6061f7192947a3c6ac4c44bfcb483eea8`. Product Owner approval and
 canonical `V02-DEC-032` now close the final Mission 03 staging gap.
 
-`V02-WI-06` has exact Mission 03 regular/Elite staging, Elite behaviour, AC
-ownership, negative requirements, dependency order, and verification
-expectations and is the next Work Item ready for one separately authorized
-handoff. `V02-WI-07` remains dependency-blocked until `V02-WI-06` is accepted.
+`V02-WI-06 E01` is accepted at
+`c4c54771ef952a6cdec061f7bd704936c4efb6c7`. Product Owner approval and
+canonical `V02-DEC-033` close the remaining E02 entry, movement RNG, attack,
+collision, and local-feedback values. `V02-WI-06 E02` is the next checkpoint
+ready for one separately authorized handoff. `V02-WI-07` remains
+dependency-blocked until the complete `V02-WI-06` is accepted.
 Starting any later Work Item, combining Work Items, or sending the whole Epic as
 one DeepSeek task violates this plan.

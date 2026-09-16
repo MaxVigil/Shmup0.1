@@ -197,6 +197,14 @@ The stream names and ordinals are:
   that Ranged alone consumes `nextInt(121)` to schedule each subsequent interval
   as `60–180` fixed steps inclusive. No other Ranged or spawn-data consumer can
   shift its sequence.
+- `elite-movement`, using the stable zero-based mission-member ordinal of the
+  one authored Elite (added by `V02-DEC-033`). It is derived from the
+  already-derived `combat-mission` seed. On Elite activation and every scheduled
+  horizontal decision it consumes exactly `nextInt(2)` for direction
+  (`0 = left`, `1 = right`) followed by `nextInt(121)` for the next interval
+  (`90 + draw`, inclusive `90–210` fixed steps). A forced inward boundary turn,
+  phase change, resize, Aircraft state, Hull, attack, or performance state
+  consumes no draw and does not reset the scheduled timer.
 
 The Mission Instance ordinal increments exactly once when an accepted `Start Mission` command creates a Mission Snapshot, regardless of the later Success, Defeat, or Aborted result.
 

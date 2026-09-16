@@ -125,7 +125,7 @@ The authoritative source is `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION
 | Combat Countdown and Critical Hull | §§8, 13, 15; Design System §8.26 | V02-AC-005, V02-AC-022 | V02-WI-04 | Covered |
 | Ranged activation, cadence stream, projectile geometry, and attack | §§9.2, 10; Technical Foundation §8 | V02-AC-006, V02-AC-011 | V02-WI-04 implementation; V02-WI-05 Mission 02 integration/regression | Covered |
 | Hunter approach, commitment, and outcomes | §§9.3, 11.2, 12 | V02-AC-007–008 | V02-WI-04 implementation; V02-WI-05 Mission 02 integration/regression | Covered |
-| Elite entry, phases, and bounded attacks | §§8.3–8.3.1, 9.4, 10 | V02-AC-009–010 | V02-WI-06 | Covered |
+| Elite entry, phases, deterministic movement, bounded attacks, contact, and local deflection | §§8.3–8.3.1, 9.4, 10–11; V02-DEC-033; Technical Foundation §8 | V02-AC-009–010 | V02-WI-06 E01 accepted foundation; E02 movement/attacks; E03 integration/presentation | Covered |
 | Projectile and regular-contact lifecycle | §§10–11 | V02-AC-011–012 | V02-WI-04 implementation; V02-WI-05 Mission 02 integration/regression | Covered |
 | Success economy, result commitment, exit, and result composition | §§12.1–12.2, 13.3, 15.4; Design System §8.26 | V02-AC-013, V02-AC-023 | V02-WI-04 | Covered |
 | Evacuation commitment and result | §§12.3, 13.4, 13.7, 15 | V02-AC-014–015 | V02-WI-05 | Covered; terminal set, exact countdown/exit, and save recovery explicit |

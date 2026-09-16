@@ -8,8 +8,9 @@
 **Mission 01 staging decision:** 2026-08-31
 **Mission 02 staging and alternative-outcome decisions:** 2026-09-02
 **Mission 03 staging decision:** 2026-09-15
+**Elite movement, attack, and collision decisions:** 2026-09-16
 **Repository baseline audited:** `91f2aa29f2783c90af584d95720453a1eabc8c3e`
-**Status:** **APPROVED — V02-WI-06 READY FOR BOUNDED HANDOFF**
+**Status:** **APPROVED — V02-WI-06 E02 READY FOR BOUNDED HANDOFF**
 
 ## 1. Purpose and authority
 
@@ -468,12 +469,32 @@ All speed units are viewport-relative and evaluated in simulation seconds. `VH/s
 
 #### Movement
 
-- The Elite enters from above at the authored Mission 03 time and moves to a fixed anchor whose centre is `50% VW, 20% VH`.
-- It is not attack-active or phase-active during entry. It becomes active when its centre first reaches the anchor, starts in `Armoured`, and starts all initial phase and attack timers in that same authoritative simulation step.
+- The Elite enters from above at the authored Mission 03 time, moves straight
+  downward at `12% VH/s`, and targets a fixed anchor whose centre is
+  `50% VW, 20% VH`.
+- It is created fully above the viewport with its nearest complete-bounds edge
+  touching the Top boundary. On the first fixed step whose movement would reach
+  or pass the anchor, its centre clamps exactly to the anchor and it activates.
+- It is not projectile-targetable, contact-active, attack-active, or
+  phase-active during entry. Player projectiles pass through without damage,
+  consumption, or feedback.
+- Activation starts `Armoured`, the horizontal decision state, and all initial
+  phase/attack timers on that same authoritative step. Newly initialized timers
+  retain their complete duration on the activation step and first decrement on
+  the next executed fixed step.
 - The Elite remains around the upper-combat anchor and does not travel downwards to escape.
 - Horizontal speed is `12% VW/s`.
-- Every `1.5–3.5 s`, a dedicated deterministic RNG stream selects left or right.
-- At a horizontal boundary, direction is forced inward.
+- The dedicated `elite-movement` stream uses the stable zero-based authored
+  Mission-member ordinal. On activation and every scheduled decision it
+  consumes exactly two draws in this order: `nextInt(2)` for direction
+  (`0 = left`, `1 = right`), then `nextInt(121)` for the next interval
+  (`90 + draw`, inclusive `90–210` fixed steps or `1.5–3.5 s`).
+- At a horizontal boundary, the complete current-phase bounds clamp inside the
+  viewport and direction is forced inward without consuming a draw or resetting
+  the scheduled decision timer.
+- A phase-geometry change or viewport resize that would leave any complete
+  Elite bounds outside the viewport clamps them inside and forces direction
+  inward while preserving the remaining decision timer and RNG state.
 - Aircraft position does not influence horizontal direction selection.
 
 #### Hull and phase cycle
@@ -483,6 +504,9 @@ All speed units are viewport-relative and evaluated in simulation seconds. `VH/s
 - During `Armoured`, incoming player damage is `0`; the projectile is consumed and a short local deflection flash communicates the valid blocked hit.
 - During `Vulnerable`, the exposed Core receives normal projectile damage.
 - Phase change must be readable from geometry, not colour alone.
+- Every newly entered `Armoured` phase initializes a fresh `90`-step cannon
+  timer. Every newly entered `Vulnerable` phase initializes a fresh `150`-step
+  Core timer. An attack timer advances only in its owning phase.
 
 #### Armoured attacks
 
@@ -491,6 +515,14 @@ All speed units are viewport-relative and evaluated in simulation seconds. `VH/s
 - Their trajectories are exactly `-6°` and `+6°` from vertical.
 - Projectile speed is `20% VH/s`.
 - Each projectile deals `10` Hull damage.
+- Left/right muzzle points are `centreX ± 31%` of current Elite width and
+  `centreY − 18%` of current Elite height. Each projectile's top edge touches
+  its muzzle and is immediately visible and collision-active.
+- Each cannon projectile is a vertical solid `danger` rectangle whose complete
+  bounds are `0.6% × 1.2%` of viewport short side. Its AABB equals those bounds.
+- `0°` is straight downward: the left cannon uses `−6°`, the right uses `+6°`.
+- Cannon projectiles have no artificial lifetime. They are removed on their
+  first valid Aircraft hit or after their complete bounds leave the viewport.
 - No shield bubble, full-craft damage flash, homing, or dense bullet pattern is used.
 
 #### Vulnerable attacks
@@ -502,6 +534,30 @@ All speed units are viewport-relative and evaluated in simulation seconds. `VH/s
 - Maximum turning rate is `60°/s`.
 - Lifetime is `6.0 s`; expiry destroys the projectile without damage.
 - Each hit deals `20` Hull damage.
+- The Core muzzle is `centreX`, `centreY − 2%` of current Elite height. The
+  projectile may overlap the craft while emerging and is immediately active.
+- Initial heading aims at the Aircraft centre at launch. Each later fixed step
+  turns along the shortest signed arc by at most `1°`; an exact opposite
+  heading chooses clockwise and a zero-distance target preserves prior heading.
+- A homing Core uses a `1.2% × 1.2%` viewport-short-side square AABB and a solid
+  `accent` diamond presentation with no glow or trail.
+- When a launch becomes due while two Cores remain active, the timer holds at
+  zero. The first later `Vulnerable` step with capacity launches one Core and
+  resets the complete `150`-step timer. It never launches while `Armoured`.
+- Existing cannon/Core projectiles continue their normal lifecycle across later
+  phase changes.
+
+#### Fixed-step ordering and local deflection
+
+- Elite owner order is entry/horizontal movement, phase boundary, active-phase
+  attack timer, then the shared projectile movement/collision phases.
+- A phase boundary suppresses an old-phase attack due on the same step. The new
+  phase's timer retains its full duration until the next executed step.
+- Armoured deflection renders the authoritative impact record as a local solid
+  `text-primary` diamond centred at the stored projectile-impact point, sized
+  `1.2%` of viewport short side, for exactly `3` fixed steps.
+- Deflection never tints the full Elite and adds no shield, glow, aura,
+  particles, or animation.
 
 ## 10. Player weapons and projectile lifecycle
 
@@ -539,7 +595,16 @@ Unaffected MVP rules remain: one equipped Primary Weapon, automatic straight-up 
 
 Hunter contact follows §9.3. It damages the Aircraft, destroys the Hunter, and grants no reward. The regular pair cooldown does not convert Hunter contact into persistent overlap.
 
-### 11.3 Collision ordering
+### 11.3 Elite contact
+
+- Elite body contact is inactive during entry.
+- After activation, Elite contact deals `20` Aircraft Hull damage at most once
+  per Elite/Aircraft pair per `0.75 s` (`45` executed fixed steps).
+- Contact never damages or destroys the Elite and grants no reward.
+- Existing minimum positional separation may resolve overlap. No stun,
+  momentum impulse, gameplay knockback, or other contact effect is added.
+
+### 11.4 Collision ordering
 
 Defeat has priority over Success and Evacuation completion within the same authoritative simulation step. Duplicate collisions or callbacks must not commit more than one result or reward.
 
@@ -1275,12 +1340,13 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-030 | Approved | exact Evacuation affordance and confirmation UX      | irreversible exit has safe focus, truthful copy, and one entry path |
 | V02-DEC-031 | Approved | exact mission-start cleanup recovery                 | failed Combat initialization cannot become a free abort, paid Defeat, or trapped shell |
 | V02-DEC-032 | Approved | exact eight-Encounter Mission 03 staging             | regular and Elite runtime geometry is explicit; final arrival remains `05:20` |
+| V02-DEC-033 | Approved | exact Elite entry, movement RNG, attacks, entry/contact, and deflection contract | E02 has deterministic fixed-step geometry and no agent-authored combat values |
 
 ## 23. Consistency and Definition of Ready audit
 
 ### 23.1 Passed areas
 
-The audit found no unresolved S0–S2 product gap for `V02-WI-05` in:
+The audit found no unresolved S0–S2 product gap for `V02-WI-06 E02` in:
 
 - problem/outcome and player context;
 - IN/OUT scope;
@@ -1314,6 +1380,12 @@ creation step, Top entry and post-creation anchor transition are explicit. The
 readiness precondition for `V02-WI-06` is satisfied without adding a new
 placement type or formation DSL.
 
+`V02-DEC-033` closes the remaining Elite runtime contract: entry speed and
+activation boundary, horizontal stream/draw order, boundary/resize behaviour,
+phase/attack ordering, cannon/Core geometry and lifecycle, entry interaction,
+active contact, and local deflection presentation are exact. `V02-WI-06 E02`
+therefore has no unresolved S0–S2 product value.
+
 ### 23.2 Visual acceptance closure
 
 **FACT:** Basic, Ranged, and Hunter contain real transparent pixels and satisfy the approved regular-enemy family direction in the prepared colour, grayscale, and approximate gameplay-scale comparison sheets. Elite Armoured and Elite Vulnerable remain the approved alien/hybrid state pair.
@@ -1324,10 +1396,11 @@ placement type or formation DSL.
 
 ## 24. Readiness verdict
 
-**APPROVED — V02-WI-06 READY FOR BOUNDED HANDOFF**
+**APPROVED — V02-WI-06 E02 READY FOR BOUNDED HANDOFF**
 
-The Mission 03 and Elite product definition, exact staging, consistency,
-traceability, and Definition of Ready audits have no unresolved S0–S2 blocker.
+The Mission 03 and Elite product definition, exact staging and E02 runtime
+contract, consistency, traceability, and Definition of Ready audits have no
+unresolved S0–S2 blocker.
 Implementation may begin only through one separately authorized Work Item
 handoff at a time, following `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` and repository
 governance. This document does not itself start implementation or authorize the
