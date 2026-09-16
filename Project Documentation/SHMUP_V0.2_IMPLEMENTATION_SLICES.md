@@ -291,8 +291,9 @@ canonical `V02-DEC-032` now close the final Mission 03 staging gap.
 `V02-WI-06 E01` is accepted at
 `c4c54771ef952a6cdec061f7bd704936c4efb6c7`. Product Owner approval and
 canonical `V02-DEC-033` close the remaining E02 entry, movement RNG, attack,
-collision, and local-feedback values. `V02-WI-06 E02` is the next checkpoint
-ready for one separately authorized handoff. `V02-WI-07` remains
+collision, and local-feedback values. `V02-WI-06 E02` is accepted at
+`b68f6de8e5dc644c83acb5ce8b383821e51fabf9`. `V02-WI-06 E03` is the next
+checkpoint ready for one separately authorized handoff. `V02-WI-07` remains
 dependency-blocked until the complete `V02-WI-06` is accepted.
 Starting any later Work Item, combining Work Items, or sending the whole Epic as
 one DeepSeek task violates this plan.
