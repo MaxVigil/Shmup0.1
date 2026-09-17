@@ -1,4 +1,5 @@
 import type { PreparedRuntimeAsset } from '@application/ports';
+import type { EnemyType } from '@domain/index';
 import {
   ELITE_DRONE,
   ENEMIES,
@@ -318,6 +319,58 @@ export function enemyVisualMappingFor(
     throw new Error(`No enemy visual mapping for kind: ${kind}`);
   }
   return mapping;
+}
+
+/** The authoritative Elite phase as the presentation sees it (Epic §9.4). */
+export type EliteVisualPhase = 'entering' | 'armoured' | 'vulnerable';
+/**
+ * Diamond vertices RELATIVE to a visual centre, inscribed in a `width × height`
+ * AABB (the four AABB edge midpoints). V02-WI-06 E03 uses exactly this shape for
+ * the solid `accent` Elite homing Core (`1.2%` square AABB) and the solid
+ * `text-primary` local Armoured deflection (`1.2%` of the viewport short side),
+ * so a diamond presentation never exceeds the authoritative bounds and never
+ * needs a glow, trail, or animation.
+ */
+export function diamondOffsets(
+  width: number,
+  height: number,
+): readonly (readonly [number, number])[] {
+  return [
+    [0, -height / 2],
+    [width / 2, 0],
+    [0, height / 2],
+    [-width / 2, 0],
+  ];
+}
+
+/**
+ * Maps an authoritative enemy role — and, for the one authored Elite, its
+ * authoritative phase — to its EXACT visual kind (V02-WI-06 E03, Epic §16).
+ * Only the Elite maps to the two Elite state kinds: `entering` uses the
+ * Armoured mapping because the Elite starts Armoured with its complete Armoured
+ * bounds, and an unsupported type is rejected explicitly instead of falling
+ * through to a regular-role kind. The mapping reads only authored role/phase
+ * facts; texture readiness never influences it.
+ */
+export function enemyVisualKindForEnemy(input: {
+  readonly type: EnemyType;
+  readonly elitePhase: EliteVisualPhase | null;
+}): EnemyVisualKind {
+  if (input.type === 'elite-drone') {
+    return input.elitePhase === 'vulnerable'
+      ? 'elite-drone-vulnerable'
+      : 'elite-drone-armoured';
+  }
+  if (input.type === 'basic-drone') {
+    return 'basic-drone';
+  }
+  if (input.type === 'ranged-drone') {
+    return 'ranged-drone';
+  }
+  if (input.type === 'hunter-drone') {
+    return 'hunter-drone';
+  }
+  throw new Error(`Unsupported enemy visual kind for type: ${input.type}`);
 }
 
 export interface EnemyRenderedBounds {

@@ -1257,8 +1257,9 @@ describe('Elite attack ordering, Core cap, lifetime, and cleanup (Epic §9.4)', 
     expect(destroyed.enemies).toHaveLength(0);
     expect(destroyed.eliteDeflectionFeedbacks).toEqual({});
     expect(destroyed.destroyedCountByType['elite-drone']).toBe(1);
-    // Destruction grants no reward or penalty in E02 (E03 owns Elite rewards).
-    expect(destroyed.pendingCombatRewards).toBe(0);
+    // V02-WI-06 E03: one player-projectile Elite destruction grants exactly the
+    // canonical `+8` pending Credits and still no escape penalty.
+    expect(destroyed.pendingCombatRewards).toBe(8);
     expect(destroyed.pendingEscapePenalties).toBe(0);
     // Already launched cannons keep their own lifecycle and leave no residue.
     expect(
@@ -1330,18 +1331,28 @@ describe('Elite determinism, production boundary, and regular-enemy isolation (V
     );
   });
 
-  it('stays production-unreachable: no authored Mission stages an Elite and no stream is created', () => {
+  it('is reachable only through the canonical Mission 03 plan: exactly one authored Elite member at 05:20 with its own stream', () => {
     const state = createTestCombatState();
     expect(state.eliteMovementStreams).toEqual({});
     expect(state.enemies).toHaveLength(0);
-    // No production mission authors a runtime Elite member (Mission 03 staging
-    // remains E03-owned), so the Elite owner has no production consumer yet.
+    // V02-WI-06 E03: the authored Mission 03 e8 group is the ONLY production
+    // Elite member, and its 05:20 fixed step is also the Countdown zero step.
     const eliteMembers = MISSIONS.flatMap((mission) =>
       mission.encounters.flatMap((encounter) =>
-        (encounter.staging ?? []).flatMap((group) => group.members),
+        (encounter.staging ?? []).flatMap((group) =>
+          group.members
+            .filter((member) => member.type === 'elite-drone')
+            .map(() => ({
+              missionId: mission.id,
+              encounterId: encounter.id,
+            })),
+        ),
       ),
-    ).filter((member) => member.type === 'elite-drone');
-    expect(eliteMembers).toHaveLength(0);
+    );
+    expect(eliteMembers).toEqual([
+      { missionId: 'interception-03', encounterId: 'interception-03-e8' },
+    ]);
+    expect(MISSIONS[2]?.encounters[7]?.timeSeconds).toBe(320);
   });
 
   it('does not shift the accepted regular-enemy streams (Ranged cadence isolation)', () => {

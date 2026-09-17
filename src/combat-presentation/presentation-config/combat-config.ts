@@ -29,6 +29,16 @@ export interface CombatGeometry {
   readonly fallbackAccentColor: string;
   /** Solid horizontal `danger` rectangle fill for the Ranged projectile. */
   readonly rangedProjectileColor: string;
+  /**
+   * V02-WI-06 E03 Elite presentation values. The cannon projectile is a solid
+   * vertical `danger` rectangle, the homing Core a solid `accent` diamond, and
+   * the local Armoured deflection a solid `text-primary` diamond sized
+   * `1.2%` of the viewport short side (Epic §9.4).
+   */
+  readonly eliteCannonProjectileColor: string;
+  readonly eliteCoreProjectileColor: string;
+  readonly eliteDeflectionColor: string;
+  readonly eliteDeflectionSizeRatio: number;
   /** Approved white flash for enemy damage/destruction feedback (S11). */
   readonly enemyFlashColor: string;
   /** Approved danger flash for the player aircraft after valid damage (S11). */
@@ -76,6 +86,10 @@ export function resolveCombatGeometry(viewport: {
     ),
     fallbackAccentColor: readColorToken('--color-accent', '#65a9d6'),
     rangedProjectileColor: readColorToken('--color-danger', '#d96767'),
+    eliteCannonProjectileColor: readColorToken('--color-danger', '#d96767'),
+    eliteCoreProjectileColor: readColorToken('--color-accent', '#65a9d6'),
+    eliteDeflectionColor: readColorToken('--color-text-primary', '#f1f5f7'),
+    eliteDeflectionSizeRatio: 0.012,
     enemyFlashColor: readColorToken('--color-text-primary', '#f1f5f7'),
     aircraftFlashColor: readColorToken('--color-danger', '#d96767'),
   };

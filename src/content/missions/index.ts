@@ -159,19 +159,18 @@ export interface EncounterDefinition {
   readonly formation: EncounterFormation | null;
   /**
    * Explicit authored role-level arrival offsets (Epic §8 `+N s` only:
-   * M01 e2 Ranged `+2 s`, M01 e4 Hunter `+3 s`). Absent when the canonical
-   * table gives no explicit offset. Qualitative delays (`Hunter delayed`,
-   * `delayed authored flank`) carry no invented number and are represented by
+   * M01 e2 Ranged `+2 s`, M01 e4 Hunter `+3 s`, M03 e1 Ranged `+2 s`,
+   * M03 e3 Hunter `+2 s`). Absent when the canonical table gives no explicit
+   * offset. Qualitative delays carry no invented number and are represented by
    * their subject-specific bounded formation id.
    */
   readonly roleDelays?: readonly RoleDelay[];
   /**
-   * Exact authored runtime staging (Epic §8.1.1, V02-DEC-021/026): the ordered
-   * Arrival Groups and normalized Spawn Placements this encounter consumes at
-   * runtime. Present only where the canonical source records exact numeric
-   * staging (Mission 01 for V02-WI-04; Mission 02 for V02-WI-05);
-   * Mission 03 remains qualitative and carries no staging until its Product
-   * Owner staging decision is recorded.
+   * Exact authored runtime staging (Epic §8.1.1–8.3.1, V02-DEC-021/026/032):
+   * the ordered Arrival Groups and normalized Spawn Placements this encounter
+   * consumes at runtime. Every encounter of every authored Interception Mission
+   * carries its exact numeric staging (Mission 01 `V02-DEC-021`, Mission 02
+   * `V02-DEC-026`, Mission 03 `V02-DEC-032`).
    */
   readonly staging?: readonly ArrivalGroup[];
 }
@@ -604,6 +603,23 @@ export const INTERCEPTION_03: MissionDefinition = {
       composition: [entry('basic-drone', 3), entry('ranged-drone', 1)],
       entry: { kind: 'unspecified' },
       formation: 'screened',
+      roleDelays: [{ type: 'ranged-drone', delaySeconds: 2 }],
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.25 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.5 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.75 } },
+          ],
+        },
+        {
+          offsetSeconds: 2,
+          members: [
+            { type: 'ranged-drone', placement: { kind: 'top', fraction: 0.5 } },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-03-e2',
@@ -611,6 +627,16 @@ export const INTERCEPTION_03: MissionDefinition = {
       composition: [entry('basic-drone', 3)],
       entry: { kind: 'unspecified' },
       formation: 'flank-oriented',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.15 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.5 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.85 } },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-03-e3',
@@ -620,8 +646,29 @@ export const INTERCEPTION_03: MissionDefinition = {
         entry('ranged-drone', 1),
         entry('hunter-drone', 1),
       ],
-      entry: { kind: 'unspecified' },
+      // V02-DEC-032: the delayed e3 Hunter is the first `mission-data` draw.
+      entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
       formation: 'hunter-delayed',
+      roleDelays: [{ type: 'hunter-drone', delaySeconds: 2 }],
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.3 } },
+            { type: 'ranged-drone', placement: { kind: 'top', fraction: 0.5 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.7 } },
+          ],
+        },
+        {
+          offsetSeconds: 2,
+          members: [
+            {
+              type: 'hunter-drone',
+              placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-03-e4',
@@ -629,13 +676,37 @@ export const INTERCEPTION_03: MissionDefinition = {
       composition: [entry('basic-drone', 2), entry('ranged-drone', 2)],
       entry: { kind: 'unspecified' },
       formation: 'split-firing-lanes',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.2 } },
+            { type: 'ranged-drone', placement: { kind: 'top', fraction: 0.3 } },
+            { type: 'ranged-drone', placement: { kind: 'top', fraction: 0.7 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.8 } },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-03-e5',
       timeSeconds: 190,
+      // V02-DEC-032: the simultaneous e5 Hunter consumes the second draw.
       composition: [entry('basic-drone', 1), entry('hunter-drone', 1)],
-      entry: { kind: 'unspecified' },
+      entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
       formation: 'aggressive-interruption',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.5 } },
+            {
+              type: 'hunter-drone',
+              placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-03-e6',
@@ -643,20 +714,51 @@ export const INTERCEPTION_03: MissionDefinition = {
       composition: [entry('basic-drone', 2)],
       entry: { kind: 'unspecified' },
       formation: 'simple',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.35 } },
+            { type: 'basic-drone', placement: { kind: 'top', fraction: 0.65 } },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-03-e7',
       timeSeconds: 275,
+      // V02-DEC-032: the pre-Elite e7 Hunter consumes the third draw.
       composition: [entry('hunter-drone', 1)],
       entry: { kind: 'seeded', variants: ['upper-left', 'upper-right'] },
       formation: null,
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            {
+              type: 'hunter-drone',
+              placement: { kind: 'seeded-side', yViewportFraction: 0.2 },
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'interception-03-e8',
       timeSeconds: 320,
+      // V02-DEC-032: the single final `05:20` group is the Elite-only group;
+      // its Top Placement consumes no `mission-data` draw.
       composition: [entry('elite-drone', 1)],
       entry: { kind: 'unspecified' },
       formation: 'upper-combat-zone',
+      staging: [
+        {
+          offsetSeconds: 0,
+          members: [
+            { type: 'elite-drone', placement: { kind: 'top', fraction: 0.5 } },
+          ],
+        },
+      ],
     },
   ],
   totals: { basic: 13, ranged: 4, hunter: 3, elite: 1 },

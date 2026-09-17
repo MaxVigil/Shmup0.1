@@ -434,25 +434,15 @@ describe('validateCatalogue', () => {
     ).toBe(true);
   });
 
-  it('rejects runtime staging on Mission 03 (V02-WI-05, Epic §23.1)', () => {
+  it('rejects a Mission 03 encounter whose staging is missing (V02-WI-06 E03)', () => {
     const invalidMission: MissionDefinition = {
       ...INTERCEPTION_03,
       encounters: INTERCEPTION_03.encounters.map((encounter, index) =>
         index === 0
-          ? {
+          ? ({
               ...encounter,
-              staging: [
-                {
-                  offsetSeconds: 0,
-                  members: [
-                    {
-                      type: 'basic-drone',
-                      placement: { kind: 'top', fraction: 0.5 },
-                    },
-                  ],
-                },
-              ],
-            }
+              staging: undefined,
+            } as unknown as EncounterDefinition)
           : encounter,
       ),
     };
@@ -465,7 +455,43 @@ describe('validateCatalogue', () => {
       issues.some(
         (issue) =>
           issue.path === 'missions[2].encounters' &&
-          /must not carry runtime Arrival Groups/.test(issue.message),
+          /every Interception 03 encounter/.test(issue.message),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a Mission 03 Arrival Group whose placement drifts from V02-DEC-032', () => {
+    const invalidMission: MissionDefinition = {
+      ...INTERCEPTION_03,
+      encounters: INTERCEPTION_03.encounters.map((encounter, index) =>
+        index === 7
+          ? ({
+              ...encounter,
+              staging: [
+                {
+                  offsetSeconds: 0,
+                  members: [
+                    {
+                      type: 'elite-drone',
+                      placement: { kind: 'top', fraction: 0.4 },
+                    },
+                  ],
+                },
+              ],
+            } as unknown as EncounterDefinition)
+          : encounter,
+      ),
+    };
+    const issues = validateCatalogue(
+      contentCatalogueWith({
+        missions: [INTERCEPTION_01, INTERCEPTION_02, invalidMission],
+      }),
+    );
+    expect(
+      issues.some((issue) =>
+        issue.path.startsWith(
+          'missions[2].encounters[7].staging[0].members[0].placement.fraction',
+        ),
       ),
     ).toBe(true);
   });

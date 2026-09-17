@@ -13,20 +13,22 @@ import type {
 import { resolveGermanFighter } from '@application/combat';
 
 /**
- * Shared V02-WI-04/V02-WI-05 Combat test harness. The default mission is the
- * authored Interception 01, the default seed is a fixed canonical test seed,
- * and the default viewport is the minimum supported `1280 × 600`. V02-WI-05
- * adds the authored Interception 02 (the second mission with runtime Arrival
- * Groups) so the same harness exercises the generic runtime for both missions
- * without a mission-specific fork.
+ * Shared V02-WI-04/V02-WI-05/V02-WI-06 Combat test harness. The default mission
+ * is the authored Interception 01, the default seed is a fixed canonical test
+ * seed, and the default viewport is the minimum supported `1280 × 600`. V02-WI-05
+ * adds the authored Interception 02 and V02-WI-06 E03 the authored Interception
+ * 03 (all three missions with runtime Arrival Groups) so the same harness
+ * exercises the generic runtime for every mission without a mission-specific
+ * fork.
  */
 export const TEST_VIEWPORT = { width: 1280, height: 600 } as const;
 export const AIRCRAFT_WIDTH = 48 * (1278 / 1231);
 export const AIRCRAFT_HEIGHT = 48;
 export const TEST_MISSION_SEED = 3735928559;
 
-/** Authored missions that carry runtime Arrival Groups (V02-WI-04/WI-05). */
-export type TestMissionId = 'interception-01' | 'interception-02';
+/** Authored missions that carry runtime Arrival Groups (V02-WI-04/05/06). */
+export type TestMissionId =
+  'interception-01' | 'interception-02' | 'interception-03';
 
 export interface TestCombatOptions {
   readonly mode?: CombatControlMode;

@@ -72,15 +72,16 @@ export async function startMission(
   if (!session.unlockedMissionIds.includes(missionId)) {
     return { kind: 'rejected', reason: 'mission-not-available' };
   }
-  // V02-WI-04/WI-05 bounded staging: Missions 01 and 02 carry their exact
-  // authored Arrival Groups (V02-DEC-021/026) and may start; an unlocked
-  // Mission 03 (reachable only after Mission 02 Success) is rejected before
-  // any mission-start transaction until the Product Owner records its exact
-  // staging — the runtime never infers geometry for a mission that has none.
-  const hasRuntimeStaging = mission.encounters.some(
+  // V02-WI-04/WI-05/WI-06 bounded staging: every authored mission carries its
+  // exact Arrival Groups (V02-DEC-021 Mission 01, V02-DEC-026 Mission 02,
+  // V02-DEC-032 Mission 03) and may start. The gate still rejects a mission
+  // whose runtime plan is incomplete before any mission-start transaction, so
+  // the runtime can never infer or invent geometry for a partially authored
+  // mission; the production content validator enforces the same completeness.
+  const hasCompleteRuntimeStaging = mission.encounters.every(
     (encounter) => (encounter.staging?.length ?? 0) > 0,
   );
-  if (!hasRuntimeStaging) {
+  if (!hasCompleteRuntimeStaging) {
     return { kind: 'rejected', reason: 'mission-not-ready' };
   }
   if (session.activeMission !== 'none') {

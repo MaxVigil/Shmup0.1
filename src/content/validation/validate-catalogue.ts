@@ -15,7 +15,7 @@ import {
 import type { MissionId } from '@domain/model';
 import { isEncounterEntryRegion, isEncounterFormation } from '../missions';
 import type { MissionDefinition } from '../missions';
-import { INTERCEPTION_01, INTERCEPTION_02 } from '../missions';
+import { INTERCEPTION_01, INTERCEPTION_02, INTERCEPTION_03 } from '../missions';
 
 export interface ContentValidationIssue {
   readonly path: string;
@@ -254,6 +254,21 @@ const CANONICAL_MISSION_IDS: readonly MissionId[] = [
   'interception-03',
 ];
 
+/** Authored display names used only in validator messages. */
+const CANONICAL_MISSION_NAMES: Readonly<Record<MissionId, string>> = {
+  'interception-01': 'Interception 01',
+  'interception-02': 'Interception 02',
+  'interception-03': 'Interception 03',
+};
+
+/** The Product Owner decision that owned each mission's exact runtime staging
+ *  (V02-DEC-021 Mission 01, V02-DEC-026 Mission 02, V02-DEC-032 Mission 03). */
+const CANONICAL_STAGING_DECISIONS: Readonly<Record<MissionId, string>> = {
+  'interception-01': 'V02-DEC-021',
+  'interception-02': 'V02-DEC-026',
+  'interception-03': 'V02-DEC-032',
+};
+
 function validateMissions(
   value: unknown,
   issues: ContentValidationIssue[],
@@ -489,10 +504,11 @@ function validateEncounters(
       `${encounterPath}.staging`,
       issues,
     );
-    // V02-WI-04 C03 / V02-WI-05: the production validator enforces the EXACT
-    // canonical staging projection for every fully staged mission (V02-DEC-021
-    // Mission 01, V02-DEC-026 Mission 02) — Arrival Group count/order, offset,
-    // member count/order/role, placement kind, Top fraction, and Side Y
+    // V02-WI-04 C03 / V02-WI-05 / V02-WI-06 E03: the production validator
+    // enforces the EXACT canonical staging projection for every fully staged
+    // mission (V02-DEC-021 Mission 01, V02-DEC-026 Mission 02, V02-DEC-032
+    // Mission 03) — Arrival Group count/order, offset, member
+    // count/order/role, placement kind, Top fraction, and Side Y
     // fraction must match the single canonical content owner. Generic
     // range/totals validation alone is insufficient: any path-qualified drift
     // is rejected even when totals, offsets, and unit intervals stay valid.
@@ -501,7 +517,9 @@ function validateEncounters(
         ? INTERCEPTION_01
         : missionId === 'interception-02'
           ? INTERCEPTION_02
-          : null;
+          : missionId === 'interception-03'
+            ? INTERCEPTION_03
+            : null;
     if (canonicalMission !== null) {
       validateCanonicalMissionStaging(
         canonicalMission,
@@ -515,14 +533,15 @@ function validateEncounters(
 }
 
 /**
- * Validates exact authored runtime staging (Epic §8.1.1, V02-DEC-021/026).
- * Staging is present only for Missions 01 and 02 (enforced by
- * `validateMissionStagingScope`): every Arrival Group carries a non-negative
- * offset and ordered typed members, Top fractions and Side Y fractions stay in
- * `[0, 1]`, `seeded-side` members require a `seeded` encounter entry (the
- * resolved side is the single encounter-level mission-data draw), and the
- * member totals must equal the encounter composition totals so the authored
- * staging never contradicts the authored composition.
+ * Validates exact authored runtime staging (Epic §8.1.1–8.3.1,
+ * V02-DEC-021/026/032). Staging is present for all three authored missions
+ * (enforced by `validateMissionStagingScope`): every Arrival Group carries a
+ * non-negative offset and ordered typed members, Top fractions and Side Y
+ * fractions stay in `[0, 1]`, `seeded-side` members require a `seeded`
+ * encounter entry (the resolved side is the single encounter-level
+ * mission-data draw), and the member totals must equal the encounter
+ * composition totals so the authored staging never contradicts the authored
+ * composition.
  */
 function validateStaging(
   value: unknown,
@@ -617,17 +636,18 @@ function validateStaging(
 }
 
 /**
- * V02-WI-04 C03 / V02-WI-05 exact-canonical staging projection (Epic §8.1.1,
- * V02-DEC-021 Mission 01, V02-DEC-026 Mission 02): the input staging is
+ * V02-WI-04 C03 / V02-WI-05 / V02-WI-06 E03 exact-canonical staging projection
+ * (Epic §8.1.1–8.3.1, V02-DEC-021 Mission 01, V02-DEC-026 Mission 02,
+ * V02-DEC-032 Mission 03): the input staging is
  * compared path-by-path against the single canonical content owner for the
- * mission (`INTERCEPTION_01` / `INTERCEPTION_02`). This validator rejects
- * drift in Arrival Group count and order, offsets, member count/order/role,
- * placement kind, Top fractions, and seeded-side Y fractions even when every
- * generic range/totals/unit-interval rule stays satisfied. It is safe for
- * hostile unknown input: no nested value is read before its structure is
- * verified, so validation never throws on malformed staging. Encounter
- * count/order is enforced by the exact-content contract separately; this
- * function only guards the staging fields of the encounters that exist.
+ * mission (`INTERCEPTION_01` / `INTERCEPTION_02` / `INTERCEPTION_03`). This
+ * validator rejects drift in Arrival Group count and order, offsets, member
+ * count/order/role, placement kind, Top fractions, and seeded-side Y fractions
+ * even when every generic range/totals/unit-interval rule stays satisfied. It
+ * is safe for hostile unknown input: no nested value is read before its
+ * structure is verified, so validation never throws on malformed staging.
+ * Encounter count/order is enforced by the exact-content contract separately;
+ * this function only guards the staging fields of the encounters that exist.
  */
 function validateCanonicalMissionStaging(
   canonicalMission: MissionDefinition,
@@ -648,7 +668,11 @@ function validateCanonicalMissionStaging(
     return;
   }
   const canonicalDecision =
-    canonicalMission.id === 'interception-02' ? 'V02-DEC-026' : 'V02-DEC-021';
+    canonicalMission.id === 'interception-02'
+      ? 'V02-DEC-026'
+      : canonicalMission.id === 'interception-03'
+        ? 'V02-DEC-032'
+        : 'V02-DEC-021';
   if (value.length !== expected.length) {
     issues.push({
       path,
@@ -725,7 +749,7 @@ function validateCanonicalMissionStaging(
       ) {
         issues.push({
           path: `${memberPath}.placement.yViewportFraction`,
-          message: `must be exactly ${expectedPlacement.yViewportFraction} (canonical Mission 01 Side Y fraction)`,
+          message: `must be exactly ${expectedPlacement.yViewportFraction} (canonical ${canonicalMission.id} Side Y fraction)`,
         });
       }
     }
@@ -805,9 +829,11 @@ function validateSpawnPlacement(
   });
 }
 
-/** Enforces the bounded staging scope (V02-WI-04 / V02-WI-05): Missions 01 and
- *  02 are fully staged; Mission 03 remains qualitative and must carry no
- *  invented staging (Epic §23.1 bounded future gap). */
+/** Enforces the bounded staging scope (V02-WI-04 / V02-WI-05 /
+ *  V02-WI-06 E03): every authored Interception Mission is fully staged, and
+ *  every encounter of a mission must carry its exact authored Arrival Groups
+ *  from the canonical decision that recorded them (V02-DEC-021 Mission 01,
+ *  V02-DEC-026 Mission 02, V02-DEC-032 Mission 03). */
 function validateMissionStagingScope(
   value: unknown,
   issues: ContentValidationIssue[],
@@ -823,8 +849,8 @@ function validateMissionStagingScope(
     if (expected === undefined) {
       return;
     }
-    // V02-WI-04 C01 / V02-WI-05: EVERY encounter of a fully staged mission
-    // must carry its exact authored Arrival Groups — a missing or empty
+    // V02-WI-04 C01 / V02-WI-05 / V02-WI-06 E03: EVERY encounter of an authored
+    // mission must carry its exact authored Arrival Groups — a missing or empty
     // staging on any one of them is rejected (a check that only required at
     // least one staged encounter would allow an encounter to silently fall
     // back to qualitative data).
@@ -837,30 +863,11 @@ function validateMissionStagingScope(
           isArray(encounter.staging) &&
           encounter.staging.length > 0,
       );
-    if (expected === 'interception-01' && !allStaged) {
+    const decision = CANONICAL_STAGING_DECISIONS[expected];
+    if (decision !== undefined && !allStaged) {
       issues.push({
         path: `missions[${index}].encounters`,
-        message:
-          'every Interception 01 encounter must carry its exact authored Arrival Groups (V02-DEC-021)',
-      });
-    }
-    if (expected === 'interception-02' && !allStaged) {
-      issues.push({
-        path: `missions[${index}].encounters`,
-        message:
-          'every Interception 02 encounter must carry its exact authored Arrival Groups (V02-DEC-026)',
-      });
-    }
-    const staged = isArray(item.encounters)
-      ? item.encounters.some(
-          (encounter) => isRecord(encounter) && isArray(encounter.staging),
-        )
-      : false;
-    if (expected === 'interception-03' && staged) {
-      issues.push({
-        path: `missions[${index}].encounters`,
-        message:
-          'Mission 03 must not carry runtime Arrival Groups until the Product Owner records its exact staging (Epic §23.1)',
+        message: `every ${CANONICAL_MISSION_NAMES[expected]} encounter must carry its exact authored Arrival Groups (${decision})`,
       });
     }
   });

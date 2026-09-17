@@ -102,6 +102,8 @@ export interface EliteDefinition {
   readonly displayName: string;
   /** Maximum Hull `60` (Epic §9.4). */
   readonly maximumHullIntegrity: number;
+  /** Credits granted when the player destroys the Elite (Epic §12 `+8`). */
+  readonly playerDestructionReward: number;
   /** Armoured-state complete rendered bounds geometry (§16.4 `214 × 320`). */
   readonly armouredVisualGeometry: EliteStateVisualGeometry;
   /** Vulnerable-state complete rendered bounds geometry (§16.4 `281 × 320`). */
@@ -112,6 +114,7 @@ export const ELITE_DRONE: EliteDefinition = {
   type: 'elite-drone',
   displayName: 'Elite Drone',
   maximumHullIntegrity: 60,
+  playerDestructionReward: 8,
   armouredVisualGeometry: {
     visualFootprintAreaRatio: 2.45,
     visualAspectRatio: 214 / 320,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONTENT_CATALOGUE } from '@content/index';
+import { CONTENT_CATALOGUE, INTERCEPTION_03 } from '@content/index';
 import {
   COMBAT_MISSION_STREAM,
   deriveStreamSeed,
@@ -318,13 +318,22 @@ describe('Mission 02 economy and progression through the real transaction (Epic 
     });
     expect(app.store.getState()?.missionResult).toBeNull();
 
-    // The unlocked Mission 03 remains NOT READY: its runtime staging is not
-    // authored, so no direct start can enter Combat with invented geometry.
-    expect(await startMission(deps(app), MISSION_03)).toEqual({
-      kind: 'rejected',
-      reason: 'mission-not-ready',
+    // V02-WI-06 E03: the unlocked Mission 03 is now fully authored and
+    // startable — every encounter carries its exact Arrival Groups
+    // (V02-DEC-032), so the same readiness gate that rejected a partially
+    // authored mission lets it through to the real mission-start transaction.
+    expect(
+      INTERCEPTION_03.encounters.every(
+        (encounter) => (encounter.staging?.length ?? 0) > 0,
+      ),
+    ).toBe(true);
+    expect(await startMission(deps(app), MISSION_03)).toMatchObject({
+      kind: 'accepted',
+      snapshot: { missionId: MISSION_03 },
     });
-    expect(app.campaignStore.current?.missionInProgress).toBeNull();
+    expect(app.campaignStore.current?.missionInProgress?.missionId).toBe(
+      MISSION_03,
+    );
     expect(app.campaignStore.current?.credits).toBe(42);
   });
 

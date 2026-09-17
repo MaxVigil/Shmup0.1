@@ -5,6 +5,8 @@ import { RUNTIME_ASSET_MANIFEST } from '@platform/assets/runtime-asset-catalogue
 import {
   ENEMY_VISUAL_KINDS,
   ENEMY_VISUAL_MAPPINGS,
+  diamondOffsets,
+  enemyVisualKindForEnemy,
   enemyVisualMappingFor,
   resolveEnemyRenderedBounds,
   resolveEnemyVisual,
@@ -326,5 +328,77 @@ describe('resolveEnemyVisual (V02-WI-01)', () => {
       MINIMUM_VIEWPORT_SHORT_SIDE,
     );
     expect(urlless.status).toBe('fallback');
+  });
+
+  describe('authoritative role/phase to visual kind mapping (V02-WI-06 E03)', () => {
+    it('inverts the diamond presentation inside the exact authoritative AABB', () => {
+      // The Core (`1.2%` square) and the local deflection (`1.2%` short side)
+      // both use this shape: the four AABB edge midpoints, so the diamond never
+      // exceeds the authoritative bounds.
+      expect(diamondOffsets(10, 10)).toEqual([
+        [0, -5],
+        [5, 0],
+        [0, 5],
+        [-5, 0],
+      ]);
+      expect(diamondOffsets(12, 6)).toEqual([
+        [0, -3],
+        [6, 0],
+        [0, 3],
+        [-6, 0],
+      ]);
+    });
+    it('maps every regular role to its own kind and never through a shared fallthrough', () => {
+      expect(
+        enemyVisualKindForEnemy({ type: 'basic-drone', elitePhase: null }),
+      ).toBe('basic-drone');
+      expect(
+        enemyVisualKindForEnemy({ type: 'ranged-drone', elitePhase: null }),
+      ).toBe('ranged-drone');
+      expect(
+        enemyVisualKindForEnemy({ type: 'hunter-drone', elitePhase: null }),
+      ).toBe('hunter-drone');
+    });
+
+    it('maps the one Elite by its authoritative phase and uses Armoured while entering', () => {
+      expect(
+        enemyVisualKindForEnemy({
+          type: 'elite-drone',
+          elitePhase: 'entering',
+        }),
+      ).toBe('elite-drone-armoured');
+      expect(
+        enemyVisualKindForEnemy({
+          type: 'elite-drone',
+          elitePhase: 'armoured',
+        }),
+      ).toBe('elite-drone-armoured');
+      expect(
+        enemyVisualKindForEnemy({
+          type: 'elite-drone',
+          elitePhase: 'vulnerable',
+        }),
+      ).toBe('elite-drone-vulnerable');
+      // The Elite is never mapped to a regular-role kind.
+      const eliteKinds = (['entering', 'armoured', 'vulnerable'] as const).map(
+        (elitePhase) =>
+          enemyVisualKindForEnemy({ type: 'elite-drone', elitePhase }),
+      );
+      expect(eliteKinds).not.toContain('basic-drone');
+      expect(eliteKinds).not.toContain('ranged-drone');
+      expect(eliteKinds).not.toContain('hunter-drone');
+    });
+
+    it('the Elite phase mapping is independent of texture readiness (pure role/phase data)', () => {
+      // The same authoritative phase always maps to the same kind, with no
+      // prepared/fallback input in the signature.
+      for (const phase of ['entering', 'armoured', 'vulnerable'] as const) {
+        expect(
+          enemyVisualKindForEnemy({ type: 'elite-drone', elitePhase: phase }),
+        ).toBe(
+          enemyVisualKindForEnemy({ type: 'elite-drone', elitePhase: phase }),
+        );
+      }
+    });
   });
 });

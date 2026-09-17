@@ -40,6 +40,7 @@ import {
   type ProjectileGeometry,
 } from './projectiles';
 import {
+  createEliteForEntry,
   reprojectEliteForViewport,
   spawnEnemyFromPlacement,
   stepEnemy,
@@ -57,7 +58,7 @@ import {
   type EliteDeflectionFeedback,
   type EliteDeflectionFeedbacks,
 } from './collision';
-import { enemyRenderedBounds } from '../content';
+import { ELITE_DRONE, enemyRenderedBounds } from '../content';
 import type { CombatDebugCommand } from './debug-command';
 import type { CombatTerminalResult } from '../mission';
 import {
@@ -113,9 +114,18 @@ import type {
  * projectiles, the Vulnerable homing Core with its active cap, active Elite
  * contact, and proportional resize reprojection for the Elite and its
  * projectiles. `eliteMovementStreams` is created per authored Elite identity
- * from its stable mission-member ordinal; the Elite itself remains created only
- * by `createEliteForEntry`/`createEliteAtAnchor`, so with no Elite member in the
- * production mission catalogue this owner stays production-unreachable.
+ * from its stable mission-member ordinal; the Elite itself is created only by
+ * `createEliteForEntry`/`createEliteAtAnchor`, never by the regular factory.
+ *
+ * V02-WI-06 E03 connects the canonical Mission 03 plan to this runtime: the
+ * authored `interception-03-e8` Elite member is routed explicitly to
+ * `createEliteForEntry` by `createAuthoredArrivalMember` (the same owner that
+ * Debug's authored-encounter spawn consumes), so the production mission
+ * catalogue now makes the Elite player-facing without any second spawn path.
+ * Elite destruction is accounted by the generic economy owner with the `+8`
+ * `ELITE_DRONE.playerDestructionReward`, and the generic terminal evaluation
+ * keeps the mission active until that final Elite resolves (Defeat still wins
+ * a same-step tie).
  */
 
 export const FIXED_STEP_SECONDS = 1 / 60;
@@ -937,7 +947,45 @@ function stepMission(
   return stepPlayerProjectiles(withEnemyProjectiles, stepSeconds);
 }
 
-/** Collects every authored Arrival Group whose exact step index has been
+/**
+ * Creates one authored Arrival Group member through its explicit type owner
+ * (V02-WI-06 E03): every regular role is built by the authored-staging factory
+ * with its content Hull and complete rendered bounds, while the one authored
+ * Elite member alone is routed to `createEliteForEntry` — it never falls
+ * through to a regular role or to the regular-enemy factory. The Elite keeps
+ * its stable authored mission-member ordinal, which is also its dedicated
+ * `elite-movement` stream identity (Epic §9.4).
+ */
+function createAuthoredArrivalMember(
+  state: CombatSimulationState,
+  member: RuntimeArrivalGroup['members'][number],
+  id: number,
+): CombatEnemy {
+  if (member.type === 'elite-drone') {
+    return createEliteForEntry({
+      id,
+      ordinal: member.ordinal,
+      viewportWidth: state.viewportWidth,
+      viewportHeight: state.viewportHeight,
+    });
+  }
+  return spawnEnemyFromPlacement({
+    id,
+    type: member.type,
+    hullIntegrity: state.enemyDefsByType[member.type].maximumHullIntegrity,
+    width: state.enemyBoundsByType[member.type].width,
+    height: state.enemyBoundsByType[member.type].height,
+    placement: member.placement,
+    boundsMinX: state.bounds.minX,
+    boundsMaxX: state.bounds.maxX,
+    viewportWidth: state.viewportWidth,
+    viewportHeight: state.viewportHeight,
+    ordinal: member.ordinal,
+  });
+}
+
+/**
+ * Collects every authored Arrival Group whose exact step index has been
  *  reached, spawning its ordered members against the current viewport and
  *  engagement band. Member order and placements are the authored data
  *  (V02-AC-003/004); overlap is allowed and never re-rolled. */
@@ -960,22 +1008,7 @@ function collectDueSpawns(
       break;
     }
     for (const member of group.members) {
-      spawned.push(
-        spawnEnemyFromPlacement({
-          id: nextEnemyId,
-          type: member.type,
-          hullIntegrity:
-            state.enemyDefsByType[member.type].maximumHullIntegrity,
-          width: state.enemyBoundsByType[member.type].width,
-          height: state.enemyBoundsByType[member.type].height,
-          placement: member.placement,
-          boundsMinX: state.bounds.minX,
-          boundsMaxX: state.bounds.maxX,
-          viewportWidth: state.viewportWidth,
-          viewportHeight: state.viewportHeight,
-          ordinal: member.ordinal,
-        }),
-      );
+      spawned.push(createAuthoredArrivalMember(state, member, nextEnemyId));
       nextEnemyId += 1;
     }
     currentEncounterId = group.encounterId;
@@ -1413,6 +1446,24 @@ function resolveCollisions(
 /** Applies destroyed-enemy reward and per-type count accounting exactly once
  *  per enemy (player-projectile destruction rewards the role value; Hunter
  *  kamikaze contact destroys with zero reward, Epic §9.3/§11.2/§12). */
+/**
+ * Authoritative per-role player-destruction reward (Epic §12). Regular roles
+ * carry theirs in the regular definition; the one authored Elite carries its
+ * `+8` in the explicit `ELITE_DRONE` content definition. The Elite never
+ * escapes and never grants a contact reward, so no escape/contact value is
+ * read here.
+ */
+function playerDestructionRewardFor(
+  defs: Readonly<Record<EnemyType, EnemyDefinition>>,
+  type: EnemyType,
+): number {
+  const regular = defs[type]?.playerDestructionReward;
+  if (regular !== undefined) {
+    return regular;
+  }
+  return type === ELITE_DRONE.type ? ELITE_DRONE.playerDestructionReward : 0;
+}
+
 function applyDestroyedAccounting(
   state: CombatSimulationState,
   input: {
@@ -1456,8 +1507,10 @@ function applyDestroyedAccounting(
       !input.destroyedByContact.some((contact) => contact.id === info.id),
   );
   for (const info of rewarded) {
-    pendingCombatRewards +=
-      state.enemyDefsByType[info.type]?.playerDestructionReward ?? 0;
+    pendingCombatRewards += playerDestructionRewardFor(
+      state.enemyDefsByType,
+      info.type,
+    );
   }
   return {
     destroyedCountByType,
@@ -2040,22 +2093,7 @@ function spawnEncounterForDebug(
     matchedAny = true;
     currentEncounterId = group.encounterId;
     for (const member of group.members) {
-      spawned.push(
-        spawnEnemyFromPlacement({
-          id: nextEnemyId,
-          type: member.type,
-          hullIntegrity:
-            state.enemyDefsByType[member.type].maximumHullIntegrity,
-          width: state.enemyBoundsByType[member.type].width,
-          height: state.enemyBoundsByType[member.type].height,
-          placement: member.placement,
-          boundsMinX: state.bounds.minX,
-          boundsMaxX: state.bounds.maxX,
-          viewportWidth: state.viewportWidth,
-          viewportHeight: state.viewportHeight,
-          ordinal: member.ordinal,
-        }),
-      );
+      spawned.push(createAuthoredArrivalMember(state, member, nextEnemyId));
       nextEnemyId += 1;
     }
   }

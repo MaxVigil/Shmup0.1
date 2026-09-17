@@ -20,13 +20,15 @@ import {
   resolveCombatGeometry,
 } from '../presentation-config/combat-config';
 import {
+  ENEMY_VISUAL_KINDS,
+  diamondOffsets,
+  enemyVisualKindForEnemy,
   enemyVisualMappingFor,
   resolveEnemyVisual,
   type EnemyVisualKind,
   type EnemyVisualResolution,
   type FallbackPolygon,
 } from '../presentation-config/enemy-visuals';
-import type { EnemyType } from '@domain/index';
 
 export interface CombatSceneContext {
   readonly geometry: CombatGeometry;
@@ -125,6 +127,26 @@ export class CombatScene extends Phaser.Scene {
   >();
   /** True while the aircraft danger flash is active (drives tint/redraw). */
   private aircraftFlashActive = false;
+  /**
+   * V02-WI-06 E03 solid `accent` diamonds for the Elite Vulnerable homing Cores,
+   * keyed by the authoritative enemy-projectile id. Each diamond is drawn from
+   * the projectile's authoritative square AABB and never owns lifetime,
+   * movement, or collision.
+   */
+  private readonly eliteCoreVisuals = new Map<
+    number,
+    Phaser.GameObjects.Graphics
+  >();
+  /**
+   * V02-WI-06 E03 local Armoured deflection diamonds rendered from the
+   * authoritative `eliteDeflectionFeedbacks` record (one authored Elite), keyed
+   * by Elite id. The stored impact point and the record's exact three-step
+   * lifetime are simulation-owned; the renderer only reflects them.
+   */
+  private readonly eliteDeflectionVisuals = new Map<
+    number,
+    Phaser.GameObjects.Graphics
+  >();
 
   constructor(context: CombatSceneContext) {
     super({ key: 'combat' });
@@ -150,6 +172,8 @@ export class CombatScene extends Phaser.Scene {
       this.destroyedEnemyFlashVisuals.clear();
       this.projectileVisuals.clear();
       this.enemyProjectileVisuals.clear();
+      this.eliteCoreVisuals.clear();
+      this.eliteDeflectionVisuals.clear();
       this.aircraftFlashActive = false;
       // A decode that is still in flight must not complete after disposal: the
       // scene-owned callbacks are detached so a late load/error can neither
@@ -188,14 +212,17 @@ export class CombatScene extends Phaser.Scene {
     this.syncDestroyedEnemyFlashes();
     this.syncProjectileVisuals();
     this.syncEnemyProjectileVisuals();
+    this.syncEliteDeflectionVisuals();
     this.applyAircraftFlash();
   }
 
   /** Resolves the per-role prepared-or-fallback visual once for the session
    *  (V02-AC-025): the result is fixed when Boot settled; Combat never issues
-   *  a second request or swaps a late fallback. */
+   *  a second request or swaps a late fallback. V02-WI-06 E03 resolves all five
+   *  approved enemy visuals, including both Elite state kinds, from the one
+   *  fixed session result. */
   private initEnemyVisualResolutions(): void {
-    for (const kind of REGULAR_VISUAL_KINDS) {
+    for (const kind of ENEMY_VISUAL_KINDS) {
       this.enemyVisualResolutions.set(
         kind,
         resolveEnemyVisual(
@@ -432,7 +459,10 @@ export class CombatScene extends Phaser.Scene {
         continue;
       }
       seen.add(enemy.id);
-      const kind = enemyVisualKindForType(enemy.type);
+      const kind = enemyVisualKindForEnemy({
+        type: enemy.type,
+        elitePhase: enemy.kind === 'elite' ? enemy.phase : null,
+      });
       const resolution = this.enemyVisualResolutions.get(kind);
       if (resolution === undefined) {
         continue;
@@ -530,7 +560,10 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
-  /** Renders one enemy as the prepared image (texture already registered). */
+  /** Renders one enemy as the prepared image (texture already registered).
+   *  V02-WI-06 E03: a kind change (the Elite Armoured → Vulnerable phase swap)
+   *  destroys the previous image and creates the newly mapped texture, so one
+   *  Elite always owns exactly ONE visual showing its authoritative state. */
   private upsertImageEnemyVisual(
     enemy: CombatEnemy,
     kind: EnemyVisualKind,
@@ -543,6 +576,16 @@ export class CombatScene extends Phaser.Scene {
       existing !== undefined &&
       !(existing instanceof Phaser.GameObjects.Image)
     ) {
+      existing.destroy();
+      this.enemyVisuals.delete(enemy.id);
+    } else if (
+      existing instanceof Phaser.GameObjects.Image &&
+      existing.texture.key !== key
+    ) {
+      // The authoritative phase changed: the previous state's image is
+      // released and the matching state texture is created instead. Texture
+      // readiness never delays this swap — it reflects the simulation state of
+      // this frame.
       existing.destroy();
       this.enemyVisuals.delete(enemy.id);
     }
@@ -727,6 +770,18 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Reflects the authoritative enemy-projectile snapshot into per-kind visuals
+   * (V02-WI-06 E03):
+   * - Ranged: solid horizontal `danger` rectangle (v0.2 §9.2);
+   * - Elite cannon: solid vertical `danger` rectangle using its authoritative
+   *   AABB (Epic §9.4);
+   * - Elite homing Core: solid `accent` diamond inscribed in its authoritative
+   *   square AABB, with no glow or trail.
+   * Every visual reflects position/size from the simulation and owns no
+   * lifetime, movement, turning, or collision. A fully faded Evacuation surface
+   * (opacity `0`) is removed and never re-created.
+   */
   private syncEnemyProjectileVisuals(): void {
     if (this.isShuttingDown) {
       return;
@@ -737,28 +792,46 @@ export class CombatScene extends Phaser.Scene {
     // faded projectile surface is removed/inert (never re-created).
     const opacity = evacuationEnemyOpacity(this.simState);
     const seen = new Set<number>();
+    const seenCores = new Set<number>();
     for (const projectile of enemyProjectiles) {
       if (opacity <= 0) {
         continue;
       }
-      // V02-WI-06 E02: Elite cannon/Core attacks are authoritative simulation
-      // state only; their `danger`/`accent` geometry presentation is owned by
-      // E03, so this Ranged-only surface deliberately skips every other kind
-      // instead of drawing an Elite projectile with the Ranged rectangle.
-      if (projectile.kind !== 'ranged') {
+      if (projectile.kind === 'elite-core') {
+        seenCores.add(projectile.id);
+        let diamond = this.eliteCoreVisuals.get(projectile.id);
+        if (diamond === undefined) {
+          diamond = this.add.graphics();
+          diamond.setDepth(COMBAT_RENDER_DEPTH.projectile);
+          this.eliteCoreVisuals.set(projectile.id, diamond);
+        }
+        diamond.setAlpha(opacity);
+        this.drawDiamond(
+          diamond,
+          projectile.centerX,
+          projectile.centerY,
+          projectile.width,
+          projectile.height,
+          this.geometry.eliteCoreProjectileColor,
+        );
         continue;
       }
       seen.add(projectile.id);
+      const color =
+        projectile.kind === 'elite-cannon'
+          ? this.geometry.eliteCannonProjectileColor
+          : this.geometry.rangedProjectileColor;
       let visual = this.enemyProjectileVisuals.get(projectile.id);
       if (visual === undefined) {
-        // The Ranged projectile is a solid horizontal `danger` rectangle whose
-        // complete bounds equal its authoritative AABB (v0.2 §9.2).
+        // Both kinds are solid `danger` rectangles whose complete bounds equal
+        // their authoritative AABB; only the orientation differs, which the
+        // authoritative width/height already expresses.
         visual = this.add.rectangle(
           projectile.centerX,
           projectile.centerY,
           projectile.width,
           projectile.height,
-          hexToNumber(this.geometry.rangedProjectileColor),
+          hexToNumber(color),
         );
         visual.setDepth(COMBAT_RENDER_DEPTH.projectile);
         this.enemyProjectileVisuals.set(projectile.id, visual);
@@ -774,6 +847,97 @@ export class CombatScene extends Phaser.Scene {
         this.enemyProjectileVisuals.delete(id);
       }
     }
+    for (const [id, visual] of this.eliteCoreVisuals) {
+      if (!seenCores.has(id)) {
+        visual.destroy();
+        this.eliteCoreVisuals.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Reflects the authoritative local Armoured deflection records (V02-WI-06
+   * E03, Epic §9.4): for every live `eliteDeflectionFeedbacks` entry exactly one
+   * solid `text-primary` diamond is drawn at the stored impact centre, sized
+   * `1.2%` of the viewport short side, and removed as soon as the record is gone
+   * (its exact three-step lifetime is simulation-owned). No other Elite feedback
+   * exists: no full-craft tint, shield, aura, particle, or animation.
+   *
+   * V02-WI-06 E03 C01: the local deflection consumes the SAME simulation-owned
+   * `evacuationEnemyOpacity` scalar as the Elite surface and the enemy
+   * projectiles. A committed Evacuated terminal stops authoritative stepping, so
+   * a record still inside its three-step lifetime can no longer expire; the
+   * exposure is therefore owned by the terminal-fade scalar, which removes the
+   * diamond at exact zero and never recreates it during fly-up. Pause and
+   * resize stay continuous because the alpha is re-read from the current
+   * snapshot on every render frame, and the frozen record itself is never
+   * mutated, cleared, or reinterpreted here.
+   */
+  private syncEliteDeflectionVisuals(): void {
+    if (this.isShuttingDown) {
+      return;
+    }
+    const records = Object.values(this.simState.eliteDeflectionFeedbacks);
+    const opacity = evacuationEnemyOpacity(this.simState);
+    const size =
+      this.geometry.shortSide * this.geometry.eliteDeflectionSizeRatio;
+    const seen = new Set<number>();
+    for (const record of records) {
+      if (opacity <= 0) {
+        // Committed-Evacuation fade complete: the still-frozen record stays a
+        // read-only simulation fact, and this surface is removed with the rest
+        // of the faded Combat presentation.
+        continue;
+      }
+      seen.add(record.enemyId);
+      let diamond = this.eliteDeflectionVisuals.get(record.enemyId);
+      if (diamond === undefined) {
+        diamond = this.add.graphics();
+        diamond.setDepth(COMBAT_RENDER_DEPTH.projectile);
+        this.eliteDeflectionVisuals.set(record.enemyId, diamond);
+      }
+      diamond.setAlpha(opacity);
+      this.drawDiamond(
+        diamond,
+        record.impactCenterX,
+        record.impactCenterY,
+        size,
+        size,
+        this.geometry.eliteDeflectionColor,
+      );
+    }
+    for (const [id, visual] of this.eliteDeflectionVisuals) {
+      if (!seen.has(id)) {
+        visual.destroy();
+        this.eliteDeflectionVisuals.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Draws one solid diamond presentation centred on the given point, with
+   * vertices inscribed in the `width × height` AABB (V02-WI-06 E03): the visual
+   * object is positioned at the authoritative centre and only its relative
+   * vertices are redrawn, so no position or size is duplicated outside the
+   * simulation snapshot.
+   */
+  private drawDiamond(
+    graphics: Phaser.GameObjects.Graphics,
+    centerX: number,
+    centerY: number,
+    width: number,
+    height: number,
+    color: string,
+  ): void {
+    graphics.setPosition(centerX, centerY);
+    graphics.clear();
+    graphics.fillStyle(hexToNumber(color), 1);
+    graphics.fillPoints(
+      diamondOffsets(width, height).map(
+        ([x, y]) => new Phaser.Math.Vector2(x, y),
+      ),
+      true,
+    );
   }
 
   private placeAircraft(): void {
@@ -890,32 +1054,6 @@ export class CombatScene extends Phaser.Scene {
       criticalHullVisible: this.simState.criticalHullMessageStepsRemaining > 0,
     });
   }
-}
-
-/** The three approved regular-enemy visual kinds consumed by V02-WI-04. */
-const REGULAR_VISUAL_KINDS: readonly EnemyVisualKind[] = [
-  'basic-drone',
-  'ranged-drone',
-  'hunter-drone',
-];
-
-/**
- * Maps the authoritative enemy type to its visual kind. V02-WI-06 E01 removes
- * the previous regular-role fallthrough: an Elite (or any unsupported type) must
- * never be silently rendered with the Hunter texture. The Elite presentation
- * consumer and its state-specific sprite mapping arrive with V02-WI-06 E03.
- */
-function enemyVisualKindForType(type: EnemyType): EnemyVisualKind {
-  if (type === 'basic-drone') {
-    return 'basic-drone';
-  }
-  if (type === 'ranged-drone') {
-    return 'ranged-drone';
-  }
-  if (type === 'hunter-drone') {
-    return 'hunter-drone';
-  }
-  throw new Error(`Unsupported enemy visual kind for type: ${type}`);
 }
 
 function enemyTextureKey(kind: EnemyVisualKind): string {
