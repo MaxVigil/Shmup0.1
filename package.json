@@ -22,6 +22,8 @@
     "build:evidence-uninstrumented": "SHMUP_EVIDENCE=1 vite build --outDir dist-evidence-uninstrumented",
     "preview:evidence": "vite preview --outDir dist-evidence --host 127.0.0.1 --port 4175",
     "preview:evidence-uninstrumented": "vite preview --outDir dist-evidence-uninstrumented --host 127.0.0.1 --port 4176",
+    "evidence:mission03-manual": "node scripts/mission03-manual-review.mjs",
+    "evidence:mission03-manual-verify": "node scripts/mission03-manual-verify.mjs",
     "evidence:pass-a": "playwright test -c playwright.evidence.config.ts",
     "evidence:legacy": "node scripts/run-legacy-proxy.mjs",
     "evidence:compare": "node scripts/compare-performance-evidence.mjs",
