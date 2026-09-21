@@ -1,22 +1,38 @@
 #!/usr/bin/env node
 /**
  * V02-WI-04 C05 machine-readable performance comparison package (Epic §20.1,
- * V02-AC-028; C03/C04 delta 8/9, C05 deltas 1-6). Reads the approved records
- * from `.agent-handoff/evidence/` and emits ONE comparison JSON that links:
+ * V02-AC-028; C03/C04 delta 8/9, C05 deltas 1-6; V02-WI-06 E04-C02). Reads the
+ * approved records from `.agent-handoff/evidence/` and emits ONE comparison JSON
+ * that links:
  *   - base legacy five-Basic production proxy (identity-hook method);
  *   - post-integration legacy five-Basic production proxy (same method);
  *   - instrumented regular maxima (Pass A);
- *   - uninstrumented regular timing/memory/cleanup (Pass B).
+ *   - uninstrumented regular timing/memory/cleanup (Pass B);
+ *   - instrumented Elite workload maxima/identity (Elite Pass A);
+ *   - uninstrumented Elite workload timing across the Armoured→Vulnerable
+ *     interval (Elite Pass B).
  *
  * Every local result is explicitly labelled non-reference proxy evidence and
  * never claims physical reference-device validation. The package FAILS
  * (non-zero exit) when any integrity fact cannot be produced truthfully:
  *   - the fixed session/canonical seeds are missing or mismatch across records;
+ *   - the canonical mission seed does not equal its canonical FNV-1a derivation;
  *   - the regular workload is not proven EXACT (role object must be exactly
  *     3 Basic + 1 Ranged + 1 Hunter + 0 Elite AND exactRegularWorkloadSteps
  *     > 0 — either alone is insufficient);
  *   - the canonical Ranged path is missing (no active enemy projectile and no
  *     enemy-projectile collision candidate work);
+ *   - the Elite workload is not proven EXACT (not exactly one created Elite with
+ *     no multi-Elite step, the Top entry and the exact anchor activation step,
+ *     one complete 720-step Armoured phase followed by one complete 360-step
+ *     Vulnerable phase in that order, continuous player fire on every
+ *     activated-Elite step, both cannon streams, both projectile collision
+ *     candidate paths, and the permitted simultaneous two-Core cap);
+ *   - the Elite timing sample does not stay inside that workload across the
+ *     Armoured→Vulnerable interval (ordered probes missing, malformed, or
+ *     contradicting the phase order, the anchor row, the two cannon streams,
+ *     continuous player fire, or the permitted Core cap; a terminal, Result
+ *     Overlay, Game Over, or Base frame invalidates the sample);
  *   - build identity is missing or unknown;
  *   - the legacy benchmark method or fixed seed differs between sides;
  *   - a timing record carries instrumented maxima (timing must be
@@ -73,6 +89,27 @@ export const COUNTER_SYMBOLS = [
   'activeEnemiesByRoleMax',
   'activeEnemyProjectilesMax',
   'activePlayerProjectilesMax',
+  // V02-WI-06 E04-C02 Elite workload counters (Pass A only). The Elite workload
+  // CONTRACT key and every observed Elite counter name must be compile-time
+  // absent from every timing artifact.
+  'eliteWorkload',
+  'eliteCreationSteps',
+  'activeEliteSteps',
+  'eliteEntrySteps',
+  'elitePresenceViolationSteps',
+  'anchorSteps',
+  'armouredSteps',
+  'vulnerableSteps',
+  'eliteWorkloadPlayerFireSteps',
+  'phaseOrder',
+  'phaseDurations',
+  'leftCannonProjectilesObserved',
+  'rightCannonProjectilesObserved',
+  'eliteCannonProjectilesMax',
+  'cannonPairSteps',
+  'homingCoresObserved',
+  'maxActiveHomingCores',
+  'homingCoreActiveSteps',
 ];
 
 /** Scenario-only identity APIs that MAY remain in the authorized
@@ -81,8 +118,21 @@ export const COUNTER_SYMBOLS = [
 export const SCENARIO_SYMBOLS = [
   '__shmupEvidence__',
   '__legacyBenchmarkIdentity__',
+  '__shmupEliteWorkload__',
   'runBenchmarkScenario',
   'readActiveByType',
+  'readEliteWorkload',
+  // V02-WI-06 E04-C02 Elite workload identity observation fields (scenarios
+  // gate only). They are the identity facts the uninstrumented Pass B probe
+  // reads, so they may remain in the scenario artifact but must never reach the
+  // ordinary bundle.
+  'elitePhaseStepsElapsed',
+  'eliteAnchorRowAligned',
+  'eliteActivated',
+  'eliteCount',
+  'activeCannonLeft',
+  'activeCannonRight',
+  'activeHomingCores',
 ];
 
 export const RECORD_FILES = [
@@ -90,7 +140,82 @@ export const RECORD_FILES = [
   'v02-wi-04-uninstrumented-regular-workload.json',
   'base-legacy-five-basic.json',
   'post-integration-legacy-five-basic.json',
+  'v02-wi-06-instrumented-elite-workload.json',
+  'v02-wi-06-uninstrumented-elite-workload.json',
 ];
+
+const REGULAR_PASS_A_FILE = RECORD_FILES[0];
+const REGULAR_PASS_B_FILE = RECORD_FILES[1];
+const BASE_LEGACY_FILE = RECORD_FILES[2];
+const POST_LEGACY_FILE = RECORD_FILES[3];
+const ELITE_PASS_A_FILE = RECORD_FILES[4];
+const ELITE_PASS_B_FILE = RECORD_FILES[5];
+
+/** The fixed, ordered raw Elite Pass B workload probe contract (V02-WI-06
+ *  E04-C02): one pre-sample probe plus the timing sample's start/middle/end
+ *  probes. */
+export const ELITE_PROBE_ORDER = [
+  'pre-sample',
+  'sample-start',
+  'sample-mid',
+  'sample-end',
+];
+
+/** The complete required key set of one raw Elite workload probe. */
+const ELITE_PROBE_KEYS = [
+  'label',
+  'combatScreenVisible',
+  'canvasCount',
+  'combatHudCount',
+  'countdownText',
+  'dialogCount',
+  'resultOverlayCount',
+  'gameOverScreenCount',
+  'operationsScreenCount',
+  'missionSeed',
+  'eliteCount',
+  'eliteActivated',
+  'elitePhase',
+  'elitePhaseStepsElapsed',
+  'eliteAnchorRowAligned',
+  'activeCannonLeft',
+  'activeCannonRight',
+  'activeHomingCores',
+  'activePlayerProjectiles',
+  'playerHullIntegrity',
+];
+
+const ELITE_PHASES = ['entering', 'armoured', 'vulnerable'];
+const ELITE_ARMOURED_PHASE_STEPS = 720;
+const ELITE_VULNERABLE_PHASE_STEPS = 360;
+/** The authored Elite phase cycle (`Armoured → Vulnerable → repeat`, §9.4). */
+const ELITE_PHASE_CYCLE = ['armoured', 'vulnerable'];
+/** The sample must start inside the final 30 fixed steps of the Armoured
+ *  phase, so the `6000 ms` window covers the Armoured→Vulnerable transition. */
+const ELITE_ARMOURED_LATE_STEPS = ELITE_ARMOURED_PHASE_STEPS - 30;
+/** The earliest Vulnerable step on which the permitted simultaneous two-Core
+ *  cap can be observed (the second Core launches `2.5 s` after the first). */
+const ELITE_CAP_WINDOW_MIN_STEPS = 300;
+
+/** The 32-bit FNV-1a over the ASCII RNG-input string (Technical Foundation §8):
+ *  the canonical mission-seed derivation, implemented here so the recorded seed
+ *  is verified against its derivation rather than trusted as a magic number. */
+export function fnv1a32(input) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/** The canonical Mission 03 seed both Elite evidence passes must record. The
+ *  mission seed is derived per mission INSTANCE ordinal; both Elite passes start
+ *  the first mission instance of a fresh seeded session, so it equals the
+ *  regular workload's canonical seed and is verified against the derivation. */
+export const ELITE_CANONICAL_MISSION_SEED = fnv1a32(
+  `shmup-mvp:rng-v1|${SESSION_SEED}|combat-mission|0`,
+);
 
 function scanAssetsForSymbols(assetDir, symbols) {
   const files = existsSync(join(assetDir, 'assets'))
@@ -158,6 +283,59 @@ export function isValidCleanupObject(cleanup) {
     cleanup.combatHudCount === 0 &&
     typeof cleanup.dialogOverlayCount === 'number' &&
     cleanup.dialogOverlayCount === 0
+  );
+}
+
+/**
+ * V02-WI-06 E04-C02-C01 (review finding 1): the Elite records must additionally
+ * prove that the scenario-only Elite workload identity surface was released, so
+ * the Elite cleanup contract is STRICTER than the generic one: the generic
+ * fields plus an exact numeric `eliteWorkloadSurfaceCount === 0`. A missing,
+ * malformed, or non-zero count fails.
+ */
+export function isValidEliteCleanupObject(cleanup) {
+  return (
+    isValidCleanupObject(cleanup) &&
+    typeof cleanup.eliteWorkloadSurfaceCount === 'number' &&
+    cleanup.eliteWorkloadSurfaceCount === 0
+  );
+}
+
+/** The assigned controlled-sequence environment contract: every linked record
+ *  must be measured at the minimum-width supported viewport and on the same
+ *  machine/browser, so the comparison is like-for-like (Epic §20.1). */
+export const EVIDENCE_VIEWPORT = { width: 1366, height: 768 };
+
+/** The canonical Elite workload scenario identity (Epic §8.3.1, §9.4): the
+ *  authored Mission 03 Elite Encounter created at the `05:20` final arrival,
+ *  simulated with the canonical fixed `1/60 s` step and the authored phase
+ *  lengths. Both Elite passes must declare this identity so they are provably
+ *  the same workload method rather than compared through free-form prose. */
+export const ELITE_CREATION_STEP = 320 * 60;
+export const ELITE_SCENARIO_IDENTITY = {
+  scenario: 'm03-e8',
+  encounterId: 'interception-03-e8',
+  creationStep: ELITE_CREATION_STEP,
+  fixedStepId: '1/60',
+  fixedStepsPerSecond: 60,
+  armouredPhaseSteps: ELITE_ARMOURED_PHASE_STEPS,
+  vulnerablePhaseSteps: ELITE_VULNERABLE_PHASE_STEPS,
+};
+
+/** Deep structural equality for the structured record identities, so a
+ *  reordered or added key cannot masquerade as an equal identity. */
+export function sameStructuredIdentity(left, right) {
+  if (left === null || right === null) {
+    return false;
+  }
+  if (typeof left !== 'object' || typeof right !== 'object') {
+    return false;
+  }
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return (
+    leftKeys.join('|') === rightKeys.join('|') &&
+    leftKeys.every((key) => left[key] === right[key])
   );
 }
 
@@ -262,6 +440,169 @@ export function derivePassBWorkloadFacts(probes) {
   };
 }
 
+/**
+ * V02-WI-06 E04-C02: one raw Elite workload probe is usable only when it has
+ * exactly the Elite probe contract keys, carries the expected contract label,
+ * and every value has its exact type/domain.
+ */
+export function isValidEliteWorkloadProbe(probe, expectedLabel) {
+  if (probe === null || typeof probe !== 'object' || Array.isArray(probe)) {
+    return false;
+  }
+  const keys = Object.keys(probe);
+  if (
+    keys.length !== ELITE_PROBE_KEYS.length ||
+    !ELITE_PROBE_KEYS.every((key) => keys.includes(key))
+  ) {
+    return false;
+  }
+  return (
+    probe.label === expectedLabel &&
+    typeof probe.combatScreenVisible === 'boolean' &&
+    isNonNegativeInteger(probe.canvasCount) &&
+    isNonNegativeInteger(probe.combatHudCount) &&
+    (probe.countdownText === null || typeof probe.countdownText === 'string') &&
+    isNonNegativeInteger(probe.dialogCount) &&
+    isNonNegativeInteger(probe.resultOverlayCount) &&
+    isNonNegativeInteger(probe.gameOverScreenCount) &&
+    isNonNegativeInteger(probe.operationsScreenCount) &&
+    isNonNegativeInteger(probe.missionSeed) &&
+    isNonNegativeInteger(probe.eliteCount) &&
+    typeof probe.eliteActivated === 'boolean' &&
+    (probe.elitePhase === null || ELITE_PHASES.includes(probe.elitePhase)) &&
+    isNonNegativeInteger(probe.elitePhaseStepsElapsed) &&
+    typeof probe.eliteAnchorRowAligned === 'boolean' &&
+    isNonNegativeInteger(probe.activeCannonLeft) &&
+    isNonNegativeInteger(probe.activeCannonRight) &&
+    isNonNegativeInteger(probe.activeHomingCores) &&
+    isNonNegativeInteger(probe.activePlayerProjectiles) &&
+    isNonNegativeInteger(probe.playerHullIntegrity)
+  );
+}
+
+/**
+ * Recomputes the authored-phase-progress facts from the ordered probes: the
+ * sample must start inside the final 30 fixed steps of the `12 s` Armoured
+ * phase, the observed phases must follow the authored `Armoured → Vulnerable →
+ * repeat` cycle without a skipped or backwards transition, the same phase must
+ * always advance, and a Vulnerable probe inside the permitted two-Core window
+ * must show the cap.
+ */
+export function deriveElitePhaseProgress(probes) {
+  const list = Array.isArray(probes) ? probes : [];
+  let previous = null;
+  let cycleOrdered = true;
+  let capWindowObserved = false;
+  for (const probe of list) {
+    if (previous !== null) {
+      if (probe.elitePhase !== previous.elitePhase) {
+        const previousIndex = ELITE_PHASE_CYCLE.indexOf(previous.elitePhase);
+        const expected =
+          ELITE_PHASE_CYCLE[(previousIndex + 1) % ELITE_PHASE_CYCLE.length];
+        if (probe.elitePhase !== expected) {
+          cycleOrdered = false;
+        }
+      } else if (
+        probe.elitePhaseStepsElapsed < previous.elitePhaseStepsElapsed
+      ) {
+        // The same phase must never rewind. Two probes may legitimately be
+        // taken inside the same executed fixed step, so equality is allowed.
+        cycleOrdered = false;
+      }
+    }
+    if (
+      probe.elitePhase === 'vulnerable' &&
+      probe.elitePhaseStepsElapsed >= ELITE_CAP_WINDOW_MIN_STEPS &&
+      probe.activeHomingCores === 2
+    ) {
+      capWindowObserved = true;
+    }
+    previous = probe;
+  }
+  const lateArmouredStart =
+    list[0]?.elitePhase === 'armoured' &&
+    (list[0]?.elitePhaseStepsElapsed ?? 0) >= ELITE_ARMOURED_LATE_STEPS;
+  const vulnerableObserved = list.some(
+    (probe) => probe.elitePhase === 'vulnerable',
+  );
+  return {
+    lateArmouredStart,
+    vulnerableObserved,
+    cycleOrdered,
+    authoredPhaseProgress:
+      lateArmouredStart && vulnerableObserved && cycleOrdered,
+    capWindowObserved,
+  };
+}
+
+/**
+ * Recomputes every accepted Elite Pass B workload fact from the raw probe array
+ * only (V02-WI-06 E04-C02): the exact Elite workload across the required
+ * Armoured→Vulnerable interval, both cannon streams, continuous player fire, and
+ * the permitted simultaneous two-Core cap. Summary booleans can never make these
+ * facts pass; a disagreement with them is itself a failure.
+ */
+export function deriveEliteWorkloadFacts(probes) {
+  const list = Array.isArray(probes) ? probes : [];
+  const structureValid =
+    list.length === ELITE_PROBE_ORDER.length &&
+    list.every((probe, index) =>
+      isValidEliteWorkloadProbe(probe, ELITE_PROBE_ORDER[index]),
+    );
+  const usable = list.every(
+    (probe) =>
+      probe !== null && typeof probe === 'object' && !Array.isArray(probe),
+  )
+    ? list
+    : [];
+  const complete = structureValid && usable.length === ELITE_PROBE_ORDER.length;
+  const progress = deriveElitePhaseProgress(complete ? usable : []);
+  return {
+    structureValid,
+    probeCount: list.length,
+    eliteActive:
+      complete &&
+      usable.every(
+        (probe) => probe.eliteCount === 1 && probe.eliteActivated === true,
+      ),
+    anchorRow:
+      complete && usable.every((probe) => probe.eliteAnchorRowAligned === true),
+    activeCombat:
+      complete &&
+      usable.every(
+        (probe) =>
+          probe.combatScreenVisible === true &&
+          probe.canvasCount === 1 &&
+          probe.combatHudCount === 1,
+      ),
+    countdownFinal:
+      complete && usable.every((probe) => probe.countdownText === '00:00'),
+    authoredPhaseProgress: progress.authoredPhaseProgress,
+    lateArmouredStart: progress.lateArmouredStart,
+    vulnerableObserved: progress.vulnerableObserved,
+    cycleOrdered: progress.cycleOrdered,
+    cannonStreams:
+      complete &&
+      usable[0].activeCannonLeft >= 1 &&
+      usable[0].activeCannonRight >= 1 &&
+      usable[1].activeCannonLeft >= 1 &&
+      usable[1].activeCannonRight >= 1,
+    playerFire:
+      complete && usable.every((probe) => probe.activePlayerProjectiles >= 1),
+    coreCap: complete && progress.capWindowObserved,
+    terminalSeen:
+      complete &&
+      usable.some(
+        (probe) =>
+          probe.dialogCount > 0 ||
+          probe.resultOverlayCount > 0 ||
+          probe.gameOverScreenCount > 0,
+      ),
+    baseSeen:
+      complete && usable.some((probe) => probe.operationsScreenCount > 0),
+  };
+}
+
 function requiredTimingFields(check, record, prefix) {
   if (record === null) {
     return;
@@ -345,10 +686,25 @@ export function evaluateEvidenceComparison(options = {}) {
     }
   }
 
-  const passA = readRecordFrom(evidenceDir, RECORD_FILES[0]);
-  const passB = readRecordFrom(evidenceDir, RECORD_FILES[1]);
-  const baseLegacy = readRecordFrom(evidenceDir, RECORD_FILES[2]);
-  const postLegacy = readRecordFrom(evidenceDir, RECORD_FILES[3]);
+  const passA = readRecordFrom(evidenceDir, REGULAR_PASS_A_FILE);
+  const passB = readRecordFrom(evidenceDir, REGULAR_PASS_B_FILE);
+  const baseLegacy = readRecordFrom(evidenceDir, BASE_LEGACY_FILE);
+  const postLegacy = readRecordFrom(evidenceDir, POST_LEGACY_FILE);
+  const elitePassA = readRecordFrom(evidenceDir, ELITE_PASS_A_FILE);
+  const elitePassB = readRecordFrom(evidenceDir, ELITE_PASS_B_FILE);
+
+  // -------------------------------------------------------------------------
+  // 0. Canonical seed derivation (Technical Foundation §8): the fixed mission
+  //    seed every workload record carries is verified against the canonical
+  //    FNV-1a derivation rather than trusted as a recorded constant.
+  // -------------------------------------------------------------------------
+  check(
+    fnv1a32(`shmup-mvp:rng-v1|${SESSION_SEED}|combat-mission|0`) ===
+      CANONICAL_MISSION_SEED &&
+      ELITE_CANONICAL_MISSION_SEED === CANONICAL_MISSION_SEED,
+    'canonical-seed-derivation',
+    `the recorded canonical mission seed must equal its FNV-1a derivation (derived ${ELITE_CANONICAL_MISSION_SEED}, recorded constant ${CANONICAL_MISSION_SEED})`,
+  );
 
   // -------------------------------------------------------------------------
   // 1. Fixed seed identity across Pass A and Pass B.
@@ -551,6 +907,311 @@ export function evaluateEvidenceComparison(options = {}) {
   );
 
   // -------------------------------------------------------------------------
+  // 3c. V02-WI-06 E04-C02 Elite workload (Epic §9.4, §20.1; V02-AC-009–010,
+  //     V02-AC-028). Pass A proves the exact workload identity from observed
+  //     per-step counters; Pass B proves that the uninstrumented timing sample
+  //     stayed inside that workload across the Armoured→Vulnerable interval.
+  //     Both records must share the canonical Mission 03 seed, and Pass B must
+  //     carry no instrumentation.
+  // -------------------------------------------------------------------------
+  const eliteMaxima = elitePassA?.observedMaxima ?? {};
+  const eliteCounters = eliteMaxima.eliteWorkload ?? null;
+  const eliteRoleMax = eliteMaxima.activeEnemiesByRole ?? {};
+  const elitePhaseOrder = Array.isArray(eliteCounters?.phaseOrder)
+    ? eliteCounters.phaseOrder
+    : [];
+  const elitePhaseDurations = Array.isArray(eliteCounters?.phaseDurations)
+    ? eliteCounters.phaseDurations
+    : [];
+  check(
+    elitePassA != null,
+    'elite-pass-a-record-present',
+    `the Elite Pass A instrumented record ${ELITE_PASS_A_FILE} must exist`,
+  );
+  check(
+    elitePassB != null,
+    'elite-pass-b-record-present',
+    `the Elite Pass B uninstrumented record ${ELITE_PASS_B_FILE} must exist`,
+  );
+  check(
+    elitePassA?.sessionSeed === SESSION_SEED &&
+      elitePassB?.sessionSeed === SESSION_SEED,
+    'elite-seeds-fixed',
+    `both Elite records must use the fixed session seed ${SESSION_SEED} (got ${elitePassA?.sessionSeed} / ${elitePassB?.sessionSeed})`,
+  );
+  check(
+    elitePassA?.canonicalSeed === ELITE_CANONICAL_MISSION_SEED &&
+      elitePassB?.canonicalSeed === ELITE_CANONICAL_MISSION_SEED,
+    'elite-canonical-seed-identity',
+    `both Elite records must record the canonical Mission 03 seed ${ELITE_CANONICAL_MISSION_SEED} (got ${elitePassA?.canonicalSeed} / ${elitePassB?.canonicalSeed})`,
+  );
+  check(
+    eliteCounters != null && eliteCounters.eliteCreationSteps === 1,
+    'elite-pass-a-created',
+    `Pass A must observe exactly one Elite creation (got ${eliteCounters?.eliteCreationSteps})`,
+  );
+  check(
+    eliteRoleMax['elite-drone'] === 1 &&
+      eliteCounters != null &&
+      eliteCounters.elitePresenceViolationSteps === 0,
+    'elite-pass-a-single-elite',
+    `Pass A must observe exactly one active Elite and no step with more than one (got ${JSON.stringify(eliteRoleMax)} / ${eliteCounters?.elitePresenceViolationSteps})`,
+  );
+  check(
+    eliteCounters != null &&
+      eliteCounters.eliteEntrySteps >= 1 &&
+      eliteCounters.anchorSteps >= 1,
+    'elite-pass-a-entry-and-anchor',
+    `Pass A must observe the Top entry and the exact anchor activation step (got entry ${eliteCounters?.eliteEntrySteps}, anchor ${eliteCounters?.anchorSteps})`,
+  );
+  check(
+    elitePhaseOrder[0] === 'armoured' &&
+      elitePhaseOrder[1] === 'vulnerable' &&
+      elitePhaseDurations[0] === ELITE_ARMOURED_PHASE_STEPS &&
+      elitePhaseDurations[1] === ELITE_VULNERABLE_PHASE_STEPS &&
+      eliteCounters.armouredSteps >= ELITE_ARMOURED_PHASE_STEPS &&
+      eliteCounters.vulnerableSteps >= ELITE_VULNERABLE_PHASE_STEPS,
+    'elite-pass-a-complete-phases',
+    `Pass A must observe one complete 12 s Armoured phase followed by one complete 6 s Vulnerable phase (got order ${JSON.stringify(elitePhaseOrder)}, durations ${JSON.stringify(elitePhaseDurations)}, steps ${eliteCounters?.armouredSteps}/${eliteCounters?.vulnerableSteps})`,
+  );
+  check(
+    eliteCounters != null &&
+      eliteCounters.activeEliteSteps >=
+        ELITE_ARMOURED_PHASE_STEPS + ELITE_VULNERABLE_PHASE_STEPS &&
+      eliteCounters.eliteWorkloadPlayerFireSteps ===
+        eliteCounters.activeEliteSteps,
+    'elite-pass-a-continuous-player-fire',
+    `Pass A must observe continuous player fire on every activated-Elite step (got ${eliteCounters?.eliteWorkloadPlayerFireSteps} of ${eliteCounters?.activeEliteSteps})`,
+  );
+
+  check(
+    eliteCounters != null &&
+      eliteCounters.leftCannonProjectilesObserved >= 1 &&
+      eliteCounters.rightCannonProjectilesObserved >= 1 &&
+      eliteCounters.leftCannonProjectilesObserved ===
+        eliteCounters.rightCannonProjectilesObserved &&
+      eliteCounters.cannonPairSteps >= 1,
+    'elite-pass-a-cannon-streams',
+    `Pass A must observe both Elite cannon streams active (got left ${eliteCounters?.leftCannonProjectilesObserved}, right ${eliteCounters?.rightCannonProjectilesObserved}, pair steps ${eliteCounters?.cannonPairSteps})`,
+  );
+  check(
+    eliteCounters != null &&
+      eliteCounters.homingCoresObserved >= 2 &&
+      eliteCounters.maxActiveHomingCores === 2 &&
+      eliteCounters.homingCoreActiveSteps >= 1,
+    'elite-pass-a-core-cap',
+    `Pass A must observe homing Core creation/activity with the simultaneous cap of two (got observed ${eliteCounters?.homingCoresObserved}, max active ${eliteCounters?.maxActiveHomingCores})`,
+  );
+  check(
+    eliteCounters != null &&
+      eliteMaxima.activePlayerProjectiles >= 1 &&
+      eliteMaxima.activeEnemyProjectiles >= 1 &&
+      (eliteMaxima.collisionWorkMax?.playerProjectileCandidates ?? 0) > 0 &&
+      (eliteMaxima.collisionWorkMax?.enemyProjectileCandidates ?? 0) > 0,
+    'elite-pass-a-collision-and-projectiles',
+    `Pass A must observe player/enemy projectile maxima and both projectile collision candidate paths (got ${JSON.stringify({ player: eliteMaxima.activePlayerProjectiles, enemy: eliteMaxima.activeEnemyProjectiles, work: eliteMaxima.collisionWorkMax })})`,
+  );
+  check(
+    eliteMaxima.exactRegularWorkloadSteps === 0 &&
+      (eliteRoleMax['basic-drone'] ?? 0) === 0 &&
+      (eliteRoleMax['ranged-drone'] ?? 0) === 0 &&
+      (eliteRoleMax['hunter-drone'] ?? 0) === 0,
+    'elite-pass-a-elite-only',
+    `the Elite workload record must contain only the one authored Elite (got ${JSON.stringify({ exact: eliteMaxima.exactRegularWorkloadSteps, roles: eliteRoleMax })})`,
+  );
+  check(
+    isValidEliteCleanupObject(elitePassA?.cleanup),
+    'elite-pass-a-cleanup-object',
+    `the Elite Pass A record must carry a machine-readable cleanup object with operationsVisible true, exact zero canvas/hud/dialog counts AND an exact zero Elite workload identity surface count (got ${JSON.stringify(elitePassA?.cleanup)})`,
+  );
+  check(
+    elitePassB?.observedMaxima == null,
+    'elite-pass-b-uninstrumented',
+    'the Elite Pass B timing record must NOT carry observedMaxima (timing must be uninstrumented)',
+  );
+  check(
+    elitePassB?.buildIdentifier != null &&
+      !elitePassB.buildIdentifier.includes('unknown'),
+    'elite-pass-b-build-identity',
+    `the Elite Pass B buildIdentifier must not be unknown (got ${elitePassB?.buildIdentifier})`,
+  );
+
+  const eliteProbeFacts = deriveEliteWorkloadFacts(
+    elitePassB?.workloadValidity?.probes,
+  );
+  const eliteValidity = elitePassB?.workloadValidity;
+  const eliteDerivedAccepted =
+    eliteProbeFacts.structureValid &&
+    eliteProbeFacts.eliteActive &&
+    eliteProbeFacts.anchorRow &&
+    eliteProbeFacts.activeCombat &&
+    eliteProbeFacts.countdownFinal &&
+    eliteProbeFacts.authoredPhaseProgress &&
+    eliteProbeFacts.cannonStreams &&
+    eliteProbeFacts.playerFire &&
+    eliteProbeFacts.coreCap &&
+    !eliteProbeFacts.terminalSeen &&
+    !eliteProbeFacts.baseSeen;
+  check(
+    eliteProbeFacts.structureValid,
+    'elite-pass-b-probe-structure',
+    `the Elite Pass B raw probes must be exactly ${JSON.stringify(ELITE_PROBE_ORDER)} with every contract key and value type (got ${JSON.stringify(elitePassB?.workloadValidity?.probes)})`,
+  );
+  check(
+    eliteProbeFacts.eliteActive && eliteProbeFacts.anchorRow,
+    'elite-pass-b-elite-active-on-anchor',
+    `every Elite Pass B probe must show the one activated Elite on its authored anchor row (got ${JSON.stringify(eliteProbeFacts)})`,
+  );
+  check(
+    eliteProbeFacts.activeCombat && eliteProbeFacts.countdownFinal,
+    'elite-pass-b-combat-active',
+    `every Elite Pass B probe must show the Combat Screen, exactly one canvas, the Combat HUD, and the 00:00 Countdown (got ${JSON.stringify(eliteProbeFacts)})`,
+  );
+  check(
+    eliteProbeFacts.authoredPhaseProgress,
+    'elite-pass-b-authored-phase-progress',
+    `the Elite Pass B probes must start inside the last 30 fixed steps of the 12 s Armoured phase and then follow the authored Armoured→Vulnerable cycle without a wrong or backwards phase/order (got ${JSON.stringify(elitePassB?.workloadValidity?.probes?.map((probe) => [probe?.elitePhase, probe?.elitePhaseStepsElapsed]))}, facts ${JSON.stringify({ lateArmouredStart: eliteProbeFacts.lateArmouredStart, vulnerableObserved: eliteProbeFacts.vulnerableObserved, cycleOrdered: eliteProbeFacts.cycleOrdered })})`,
+  );
+  check(
+    eliteProbeFacts.cannonStreams && eliteProbeFacts.playerFire,
+    'elite-pass-b-attack-streams',
+    `the Elite Pass B probes must show both cannon streams active and continuous player fire (got ${JSON.stringify(elitePassB?.workloadValidity?.probes?.map((probe) => [probe?.activeCannonLeft, probe?.activeCannonRight, probe?.activePlayerProjectiles]))})`,
+  );
+  check(
+    eliteProbeFacts.coreCap,
+    'elite-pass-b-core-cap',
+    `the Elite Pass B sample must observe the permitted simultaneous cap of two homing Cores inside the Vulnerable window (got ${JSON.stringify(elitePassB?.workloadValidity?.probes?.map((probe) => [probe?.elitePhase, probe?.elitePhaseStepsElapsed, probe?.activeHomingCores]))})`,
+  );
+  check(
+    !eliteProbeFacts.terminalSeen && !eliteProbeFacts.baseSeen,
+    'elite-pass-b-no-terminal',
+    `no Elite Pass B probe may show a terminal/Result Overlay/Game Over/Base frame (got ${JSON.stringify(eliteProbeFacts)})`,
+  );
+  check(
+    eliteValidity != null &&
+      eliteValidity.eliteActiveThroughout === eliteProbeFacts.eliteActive &&
+      eliteValidity.anchorRowThroughout === eliteProbeFacts.anchorRow &&
+      eliteValidity.combatActiveThroughout === eliteProbeFacts.activeCombat &&
+      eliteValidity.countdownRemainedFinal === eliteProbeFacts.countdownFinal &&
+      eliteValidity.authoredPhaseProgress ===
+        eliteProbeFacts.authoredPhaseProgress &&
+      eliteValidity.cannonStreamsActive === eliteProbeFacts.cannonStreams &&
+      eliteValidity.playerFireContinuous === eliteProbeFacts.playerFire &&
+      eliteValidity.coreCapObserved === eliteProbeFacts.coreCap &&
+      eliteValidity.terminalOrResultSeen === eliteProbeFacts.terminalSeen &&
+      eliteValidity.baseOrOperationsSeen === eliteProbeFacts.baseSeen &&
+      eliteValidity.probeCount === eliteProbeFacts.probeCount &&
+      Array.isArray(eliteValidity.probeOrder) &&
+      eliteValidity.probeOrder.join('|') === ELITE_PROBE_ORDER.join('|') &&
+      eliteValidity.valid === eliteDerivedAccepted,
+    'elite-pass-b-summary-consistency',
+    `the Elite Pass B summary flags must equal the facts recomputed from the raw probes: summary ${JSON.stringify({ eliteActiveThroughout: eliteValidity?.eliteActiveThroughout, anchorRowThroughout: eliteValidity?.anchorRowThroughout, combatActiveThroughout: eliteValidity?.combatActiveThroughout, countdownRemainedFinal: eliteValidity?.countdownRemainedFinal, authoredPhaseProgress: eliteValidity?.authoredPhaseProgress, cannonStreamsActive: eliteValidity?.cannonStreamsActive, playerFireContinuous: eliteValidity?.playerFireContinuous, coreCapObserved: eliteValidity?.coreCapObserved, terminalOrResultSeen: eliteValidity?.terminalOrResultSeen, baseOrOperationsSeen: eliteValidity?.baseOrOperationsSeen, probeCount: eliteValidity?.probeCount, probeOrder: eliteValidity?.probeOrder, valid: eliteValidity?.valid })} vs recomputed ${JSON.stringify({ ...eliteProbeFacts, derivedAccepted: eliteDerivedAccepted })}`,
+  );
+  check(
+    typeof elitePassB?.sampleWindowMs === 'number' &&
+      elitePassB.sampleWindowMs >= 6000,
+    'elite-pass-b-sample-window',
+    `the Elite Pass B sampling window must remain the unchanged 6000 ms window (got ${elitePassB?.sampleWindowMs})`,
+  );
+  check(
+    isValidEliteCleanupObject(elitePassB?.cleanup),
+    'elite-pass-b-cleanup-object',
+    `the Elite Pass B record must carry a machine-readable cleanup object with operationsVisible true, exact zero canvas/hud/dialog counts AND an exact zero Elite workload identity surface count (got ${JSON.stringify(elitePassB?.cleanup)})`,
+  );
+  check(
+    Array.isArray(elitePassB?.consoleErrors) &&
+      elitePassB.consoleErrors.length === 0,
+    'elite-pass-b-console-errors',
+    `the Elite Pass B timing record must carry an EMPTY consoleErrors array (got ${JSON.stringify(elitePassB?.consoleErrors)})`,
+  );
+
+  // -------------------------------------------------------------------------
+  // 3d. V02-WI-06 E04-C02-C01: assigned like-for-like environment and workload
+  //     identity contract (Epic §20.1). Every linked record must be measured at
+  //     the same viewport on the same machine/browser; every record for the
+  //     CURRENT candidate must carry a build identifier tied to the current
+  //     HEAD (the immutable base proxy stays tied to its known base revision);
+  //     and both Elite passes must declare the same canonical scenario and
+  //     fixed-step identity so the two-pass method is proven structurally.
+  // -------------------------------------------------------------------------
+  const environmentRecords = [
+    ['base-legacy', baseLegacy],
+    ['post-legacy', postLegacy],
+    ['pass-a', passA],
+    ['pass-b', passB],
+    ['elite-pass-a', elitePassA],
+    ['elite-pass-b', elitePassB],
+  ];
+  for (const [name, record] of environmentRecords) {
+    check(
+      record?.viewport?.width === EVIDENCE_VIEWPORT.width &&
+        record?.viewport?.height === EVIDENCE_VIEWPORT.height,
+      `${name}-viewport`,
+      `${name} viewport must be exactly ${EVIDENCE_VIEWPORT.width}x${EVIDENCE_VIEWPORT.height} (got ${JSON.stringify(record?.viewport)})`,
+    );
+  }
+  const machineBrowserIdentity = (record) =>
+    record == null
+      ? null
+      : JSON.stringify({ machine: record.machine, browser: record.browser });
+  const referenceEnvironment = machineBrowserIdentity(passB ?? elitePassB);
+  const environmentMismatches = environmentRecords
+    .filter(
+      ([, record]) =>
+        machineBrowserIdentity(record) !== referenceEnvironment ||
+        record?.machine == null ||
+        typeof record?.browser !== 'string',
+    )
+    .map(([name]) => name);
+  check(
+    referenceEnvironment !== null && environmentMismatches.length === 0,
+    'machine-browser-identity',
+    `all six linked records must report the same machine and browser identity for the controlled sequence (mismatches: ${JSON.stringify(environmentMismatches)}, reference ${referenceEnvironment})`,
+  );
+  const currentHeadShort = currentFingerprint.head.slice(0, 7);
+  for (const [name, record] of [
+    ['post-legacy', postLegacy],
+    ['pass-a', passA],
+    ['pass-b', passB],
+    ['elite-pass-a', elitePassA],
+    ['elite-pass-b', elitePassB],
+  ]) {
+    check(
+      typeof record?.buildIdentifier === 'string' &&
+        record.buildIdentifier.includes(currentHeadShort) &&
+        !record.buildIdentifier.includes('unknown'),
+      `${name}-current-build-identity`,
+      `${name} buildIdentifier must be tied to the current HEAD ${currentHeadShort} and not be unknown (got ${record?.buildIdentifier})`,
+    );
+  }
+  check(
+    sameStructuredIdentity(
+      elitePassA?.scenarioIdentity,
+      elitePassB?.scenarioIdentity,
+    ),
+    'elite-scenario-identity',
+    `both Elite records must declare the SAME structured scenario identity (got Pass A ${JSON.stringify(elitePassA?.scenarioIdentity)} vs Pass B ${JSON.stringify(elitePassB?.scenarioIdentity)})`,
+  );
+  check(
+    sameStructuredIdentity(
+      elitePassA?.scenarioIdentity,
+      ELITE_SCENARIO_IDENTITY,
+    ) &&
+      sameStructuredIdentity(
+        elitePassB?.scenarioIdentity,
+        ELITE_SCENARIO_IDENTITY,
+      ),
+    'elite-scenario-identity-canonical',
+    `both Elite records must declare the canonical Mission 03 Elite scenario identity ${JSON.stringify(ELITE_SCENARIO_IDENTITY)} (got Pass A ${JSON.stringify(elitePassA?.scenarioIdentity)}, Pass B ${JSON.stringify(elitePassB?.scenarioIdentity)})`,
+  );
+  check(
+    eliteCounters != null &&
+      eliteCounters.eliteCreationMissionStep === ELITE_CREATION_STEP,
+    'elite-pass-a-creation-step',
+    `Pass A must observe the Elite created on the authored fixed step ${ELITE_CREATION_STEP} (got ${eliteCounters?.eliteCreationMissionStep})`,
+  );
+
+  // -------------------------------------------------------------------------
   // 4. Build identity + same benchmark method + fixed seed.
   // -------------------------------------------------------------------------
   check(
@@ -585,6 +1246,7 @@ export function evaluateEvidenceComparison(options = {}) {
   requiredTimingFields(check, baseLegacy, 'base-legacy');
   requiredTimingFields(check, postLegacy, 'post-legacy');
   requiredTimingFields(check, passB, 'pass-b');
+  requiredTimingFields(check, elitePassB, 'elite-pass-b');
   if (passB) {
     check(
       typeof passB.frameTimeMs?.count === 'number' &&
@@ -596,6 +1258,19 @@ export function evaluateEvidenceComparison(options = {}) {
       typeof passB.canonicalSeed === 'number',
       'pass-b-canonical-seed-field',
       'Pass B must record the canonical seed',
+    );
+  }
+  if (elitePassB) {
+    check(
+      typeof elitePassB.frameTimeMs?.count === 'number' &&
+        elitePassB.frameTimeMs.count > 100,
+      'elite-pass-b-sample-size',
+      `Elite Pass B frame sample must exceed 100 frames (got ${elitePassB.frameTimeMs?.count})`,
+    );
+    check(
+      typeof elitePassB.canonicalSeed === 'number',
+      'elite-pass-b-canonical-seed-field',
+      'the Elite Pass B record must record the canonical seed',
     );
   }
 
@@ -646,6 +1321,8 @@ export function evaluateEvidenceComparison(options = {}) {
     ['pass-b', passB],
     ['base-legacy', baseLegacy],
     ['post-legacy', postLegacy],
+    ['elite-pass-a', elitePassA],
+    ['elite-pass-b', elitePassB],
   ]) {
     const ownership = readRecordOwnership(record);
     check(
@@ -673,11 +1350,12 @@ export function evaluateEvidenceComparison(options = {}) {
   // -------------------------------------------------------------------------
   const packageRecord = {
     label:
-      'V02-WI-04 C05 performance comparison package — every linked record is non-reference local proxy evidence; no physical reference-device validation is claimed',
+      'V02-WI-04 C05 + V02-WI-06 E04-C02 performance comparison package — every linked record is non-reference local proxy evidence; no physical reference-device validation is claimed',
     expectedRunId,
     sourceFingerprint: currentFingerprint,
     fixedSessionSeed: SESSION_SEED,
     canonicalMissionSeed: CANONICAL_MISSION_SEED,
+    eliteCanonicalMissionSeed: ELITE_CANONICAL_MISSION_SEED,
     machine: passB?.machine ?? passA?.machine ?? null,
     checks,
     assertionsPassed: failures.length === 0,
@@ -767,6 +1445,60 @@ export function evaluateEvidenceComparison(options = {}) {
         requestsDuringRun: passB?.requestsDuringRun ?? null,
         pageErrors: passB?.pageErrors ?? null,
       },
+      eliteInstrumentedMaxima: {
+        path: ELITE_PASS_A_FILE,
+        buildIdentifier: elitePassA?.buildIdentifier ?? null,
+        sessionSeed: elitePassA?.sessionSeed ?? null,
+        canonicalSeed: elitePassA?.canonicalSeed ?? null,
+        runId: readRecordOwnership(elitePassA).runId,
+        sourceFingerprint: readRecordOwnership(elitePassA).sourceFingerprint,
+        workloadMethod: elitePassA?.workloadMethod ?? null,
+        scenarioIdentity: elitePassA?.scenarioIdentity ?? null,
+        timingScope: elitePassA?.timingScope ?? null,
+        observedMaxima: elitePassA?.observedMaxima ?? null,
+        cleanup: elitePassA?.cleanup ?? null,
+        eliteCleanupValid: isValidEliteCleanupObject(elitePassA?.cleanup),
+        pageErrors: elitePassA?.pageErrors ?? null,
+      },
+      eliteUninstrumentedTiming: {
+        path: ELITE_PASS_B_FILE,
+        buildIdentifier: elitePassB?.buildIdentifier ?? null,
+        sessionSeed: elitePassB?.sessionSeed ?? null,
+        canonicalSeed: elitePassB?.canonicalSeed ?? null,
+        runId: readRecordOwnership(elitePassB).runId,
+        sourceFingerprint: readRecordOwnership(elitePassB).sourceFingerprint,
+        workloadMethod: elitePassB?.workloadMethod ?? null,
+        scenarioIdentity: elitePassB?.scenarioIdentity ?? null,
+        timingScope: elitePassB?.timingScope ?? null,
+        sampleWindowMs: elitePassB?.sampleWindowMs ?? null,
+        workloadValidity: elitePassB?.workloadValidity ?? null,
+        derivedEliteWorkloadFacts: eliteProbeFacts,
+        cleanup: elitePassB?.cleanup ?? null,
+        eliteCleanupValid: isValidEliteCleanupObject(elitePassB?.cleanup),
+        consoleErrors: elitePassB?.consoleErrors ?? null,
+        frameTimeMs: elitePassB?.frameTimeMs ?? null,
+        sustainedFps: elitePassB?.sustainedFps ?? null,
+        minimumSustainedWindowFps:
+          elitePassB?.minimumSustainedWindowFps ?? null,
+        longTasks: elitePassB?.longTasks ?? null,
+        heapUsedBeforeGcBytes: elitePassB?.heapUsedBeforeGcBytes ?? null,
+        heapUsedAfterGcBytes: elitePassB?.heapUsedAfterGcBytes ?? null,
+        requestsDuringRun: elitePassB?.requestsDuringRun ?? null,
+        pageErrors: elitePassB?.pageErrors ?? null,
+      },
+    },
+    environmentIdentity: {
+      requiredViewport: EVIDENCE_VIEWPORT,
+      referenceMachine: (passB ?? elitePassB)?.machine ?? null,
+      referenceBrowser: (passB ?? elitePassB)?.browser ?? null,
+      currentHeadShort,
+      perRecord: environmentRecords.map(([name, record]) => ({
+        name,
+        viewport: record?.viewport ?? null,
+        buildIdentifier: record?.buildIdentifier ?? null,
+        machineAndBrowserMatchReference:
+          machineBrowserIdentity(record) === referenceEnvironment,
+      })),
     },
   };
 

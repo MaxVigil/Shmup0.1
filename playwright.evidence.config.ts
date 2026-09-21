@@ -2,10 +2,14 @@ import { defineConfig } from '@playwright/test';
 
 /**
  * V02-WI-04 C03 Pass A evidence harness config (Epic §20.1, V02-AC-028).
- * Runs ONLY the evidence-workload spec against the evidence-only production
+ * Runs ONLY the evidence-workload specs against the evidence-only production
  * build (instrumented counters, compile-time enabled) served on 4175. This
  * config is never selected by the default `verify:browser` projects, so the
  * evidence build is not part of the ordinary gates.
+ *
+ * V02-WI-06 E04-C02 adds the Elite workload identity project: the same
+ * instrumented build and the same server, but the exact Elite §20.1 workload at
+ * the authored `05:20` Elite creation step.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -30,6 +34,10 @@ export default defineConfig({
     {
       name: 'evidence',
       testMatch: /wi04-evidence-performance\.spec\.ts/,
+    },
+    {
+      name: 'elite-evidence',
+      testMatch: /wi06-evidence-elite-pass-a\.spec\.ts/,
     },
   ],
   webServer: [

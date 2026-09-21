@@ -14,6 +14,7 @@ import {
   type CombatInputCommand,
   type CombatObservability,
   type CombatSimulationState,
+  type EliteWorkloadObservation,
   type TerminalCommitOutcome,
 } from '@application/combat';
 import { createCombatHudBridge } from './hud-bridge/combat-hud-bridge';
@@ -73,6 +74,7 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
   let devObservabilitySurface: (() => CombatObservability) | null = null;
   let evidenceWindowSurface: CombatEvidenceWindow | null = null;
   let legacyIdentitySurface: unknown | null = null;
+  let eliteWorkloadIdentitySurface: unknown | null = null;
   const clearOwnedWindowSurfaces = (): void => {
     if (import.meta.env.DEV && devObservabilitySurface !== null) {
       try {
@@ -106,6 +108,16 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
         // cleanup must never mask the original failure
       }
       legacyIdentitySurface = null;
+    }
+    if (EVIDENCE_SCENARIOS_ENABLED && eliteWorkloadIdentitySurface !== null) {
+      try {
+        if (window.__shmupEliteWorkload__ === eliteWorkloadIdentitySurface) {
+          delete window.__shmupEliteWorkload__;
+        }
+      } catch {
+        // cleanup must never mask the original failure
+      }
+      eliteWorkloadIdentitySurface = null;
     }
   };
   const rollback = (): void => {
@@ -226,10 +238,14 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
                 runtime.getState().evidence?.record() ?? null,
             }
           : {}),
-        runBenchmarkScenario: (scenario: 'legacy-five-basic' | 'm01-e5') => {
+        runBenchmarkScenario: (
+          scenario: 'legacy-five-basic' | 'm01-e5' | 'm03-e8',
+        ) => {
           if (
             disposed ||
-            (scenario !== 'legacy-five-basic' && scenario !== 'm01-e5')
+            (scenario !== 'legacy-five-basic' &&
+              scenario !== 'm01-e5' &&
+              scenario !== 'm03-e8')
           ) {
             return;
           }
@@ -269,6 +285,70 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
       };
       window.__legacyBenchmarkIdentity__ = legacyIdentitySurfaceInstance;
       legacyIdentitySurface = legacyIdentitySurfaceInstance;
+    }
+    // V02-WI-06 E04-C02 Elite workload identity observer (scenarios gate): the
+    // UNINSTRUMENTED scenario build reads the CURRENT Elite workload facts per
+    // probe, so the Elite timing sample can prove the exact workload across the
+    // Armoured→Vulnerable interval and the permitted Core cap with no counter
+    // compiled in. Read-only: it never spawns, mutates, or times anything. The
+    // derivation is inlined here (the same pattern as the legacy five-Basic
+    // identity observer above) so its field names cannot reach the ordinary
+    // artifact through an exported helper.
+    if (EVIDENCE_SCENARIOS_ENABLED) {
+      const eliteWorkloadSurfaceInstance = {
+        readEliteWorkload: (): EliteWorkloadObservation => {
+          const state = runtime.getState();
+          let eliteCount = 0;
+          let eliteActivated = false;
+          let elitePhase: EliteWorkloadObservation['elitePhase'] = null;
+          let elitePhaseStepsElapsed = 0;
+          let eliteAnchorRowAligned = false;
+          for (const enemy of state.enemies) {
+            if (enemy.kind !== 'elite') {
+              continue;
+            }
+            eliteCount += 1;
+            if (eliteCount === 1) {
+              eliteActivated = enemy.activated;
+              elitePhase = enemy.phase;
+              elitePhaseStepsElapsed = enemy.phaseStepsElapsed;
+              eliteAnchorRowAligned =
+                enemy.activated && enemy.centerY === state.viewportHeight * 0.2;
+            }
+          }
+          let activeCannonLeft = 0;
+          let activeCannonRight = 0;
+          let activeHomingCores = 0;
+          for (const projectile of state.enemyProjectiles) {
+            if (projectile.kind === 'elite-cannon') {
+              if (projectile.velocityX < 0) {
+                activeCannonLeft += 1;
+              } else {
+                activeCannonRight += 1;
+              }
+              continue;
+            }
+            if (projectile.kind === 'elite-core') {
+              activeHomingCores += 1;
+            }
+          }
+          return {
+            missionSeed: state.missionSeed,
+            eliteCount,
+            eliteActivated,
+            elitePhase,
+            elitePhaseStepsElapsed,
+            eliteAnchorRowAligned,
+            activeCannonLeft,
+            activeCannonRight,
+            activeHomingCores,
+            activePlayerProjectiles: state.projectiles.length,
+            playerHullIntegrity: state.playerHullIntegrity,
+          };
+        },
+      };
+      window.__shmupEliteWorkload__ = eliteWorkloadSurfaceInstance;
+      eliteWorkloadIdentitySurface = eliteWorkloadSurfaceInstance;
     }
 
     const submitCommand = (command: CombatInputCommand): void => {

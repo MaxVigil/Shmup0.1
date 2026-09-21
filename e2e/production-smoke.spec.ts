@@ -886,6 +886,23 @@ test('the production artifact is locally servable and hygienic with a distinct l
     '__shmupDevObservability__',
     'submitEvidenceBenchmark',
     'spawn-legacy-final-group',
+    // V02-WI-06 E04-C02: the Elite workload identity surface, its read API and
+    // observation field names, the evidence-only Elite workload
+    // scenario/preparation, and the Pass A Elite workload counter contract must
+    // ALSO be compile-time absent from the ordinary production artifact.
+    '__shmupEliteWorkload__',
+    'readEliteWorkload',
+    'buildEliteWorkloadObservation',
+    'prepareEliteWorkloadBenchmark',
+    'eliteWorkload',
+    'maxActiveHomingCores',
+    'elitePhaseStepsElapsed',
+    'eliteAnchorRowAligned',
+    'eliteActivated',
+    'eliteCount',
+    'activeCannonLeft',
+    'activeCannonRight',
+    'activeHomingCores',
   ]) {
     expect(jsContents.includes(symbol)).toBe(false);
   }

@@ -64,8 +64,14 @@ export type {
   CollisionEvidenceSink,
   CollisionWorkTotals,
   CombatEvidenceAccumulator,
+  CombatEvidenceEnemy,
+  CombatEvidenceEnemyProjectile,
   CombatEvidenceRecord,
   CombatEvidenceWindow,
+  ElitePhaseName,
+  EliteWorkloadCounters,
+  EliteWorkloadIdentityWindow,
+  EliteWorkloadObservation,
   LegacyBenchmarkIdentityWindow,
 } from './evidence';
 export {

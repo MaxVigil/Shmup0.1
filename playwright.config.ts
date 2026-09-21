@@ -39,8 +39,12 @@ export default defineConfig({
       // is not repeated against the dev server. V02-WI-04 C03: the evidence
       // build Pass A and the legacy proxy harness are separate evidence-only
       // runs (own configs/ports) and never run against the dev server.
+      // V02-WI-06 E04-C02: the Elite workload identity/timing harnesses are the
+      // same kind of evidence-only run (instrumented build and
+      // production-optimized uninstrumented scenario build, own configs/ports)
+      // and therefore never run against the dev server either.
       testIgnore:
-        /production-smoke\.spec\.ts|wi04-evidence-performance\.spec\.ts|legacy-proxy-performance\.spec\.ts/,
+        /production-smoke\.spec\.ts|wi04-evidence-performance\.spec\.ts|legacy-proxy-performance\.spec\.ts|wi06-evidence-elite-pass-a\.spec\.ts|wi06-evidence-elite-pass-b\.spec\.ts/,
     },
     {
       name: 'production',

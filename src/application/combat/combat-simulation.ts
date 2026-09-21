@@ -44,6 +44,8 @@ import {
   reprojectEliteForViewport,
   spawnEnemyFromPlacement,
   stepEnemy,
+  ELITE_ANCHOR_VIEWPORT_FRACTION_X,
+  ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
   ELITE_CANNON_INTERVAL_STEPS,
   ELITE_CORE_INTERVAL_STEPS,
   type CombatEnemy,
@@ -179,6 +181,10 @@ const RANGED_MIN_INTERVAL_STEPS = 60;
 const RANGED_MAX_INTERVAL_STEPS = 180;
 /** At most `2` Elite homing Cores may be active at the same time (Epic §9.4). */
 const ELITE_CORE_MAX_ACTIVE = 2;
+/** The one authored Mission 03 Elite Encounter (Epic §8.3.1). Used only by the
+ *  compile-time-gated E04-C02 Elite workload preparation so the Elite workload
+ *  begins at the authored Elite creation step. */
+const ELITE_WORKLOAD_ENCOUNTER_ID = 'interception-03-e8';
 
 const REGULAR_TYPES: readonly EnemyType[] = [
   'basic-drone',
@@ -780,10 +786,18 @@ export function stepCombatSimulation(
   const stepped = stepEvacuationAndResolveTerminal(withCollisions);
   if (EVIDENCE_COUNTERS_ENABLED && evidenceSink !== null) {
     // Observed workload maxima after the collision phase (surviving entities).
+    // The Elite workload facts read the same authoritative post-collision state,
+    // including the authored anchor for the CURRENT viewport. This whole branch
+    // (and every value it reads) is dead code in every other build.
     stepped.evidence?.recordStep(
       stepped.enemies,
       stepped.projectiles.length,
-      stepped.enemyProjectiles.length,
+      stepped.enemyProjectiles,
+      {
+        centerX: stepped.viewportWidth * ELITE_ANCHOR_VIEWPORT_FRACTION_X,
+        centerY: stepped.viewportHeight * ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
+      },
+      stepped.missionStepCount,
       evidenceSink,
     );
   }
@@ -2113,6 +2127,47 @@ function spawnEncounterForDebug(
 }
 
 /**
+ * V02-WI-06 E04-C02 evidence-only Elite workload preparation (Epic §20.1,
+ * V02-AC-028). It places Mission 03 on the single fixed step immediately before
+ * the authored `05:20` Elite Arrival Group and consumes every earlier Mission 03
+ * Arrival Group, so the next executed step creates the one authored Elite at its
+ * exact authored creation step through the UNMODIFIED authored schedule owner
+ * (`collectDueSpawns` → `createAuthoredArrivalMember` → `createEliteForEntry`).
+ *
+ * No Elite value is authored here: entry speed and Top entry, the `50% VW,
+ * 20% VH` anchor and activation, the per-Elite `elite-movement` stream, the
+ * `Armoured 12 s → Vulnerable 6 s` cycle, both cannon streams, the Vulnerable
+ * homing Core and its active cap, and every collision/economy rule remain the
+ * accepted production owners. The only state changed is the consumed arrival
+ * plan and the mission clock, which is exactly the state a natural Mission 03
+ * run holds one step before the Elite is created. Compile-time absent from
+ * every build that is not a scenario-bearing evidence build.
+ */
+function prepareEliteWorkloadBenchmark(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  const eliteGroup = state.arrivalGroups.find(
+    (group) => group.encounterId === ELITE_WORKLOAD_ENCOUNTER_ID,
+  );
+  if (eliteGroup === undefined) {
+    return state;
+  }
+  const missionStepCount = eliteGroup.stepIndex - 1;
+  const missionTimeSeconds = missionStepCount * FIXED_STEP_SECONDS;
+  return {
+    ...state,
+    missionStepCount,
+    missionTimeSeconds,
+    countdownSeconds: computeCountdown(
+      state.finalArrivalTimeSeconds,
+      missionTimeSeconds,
+    ),
+    arrivalGroups: [eliteGroup],
+    arrivalGroupIndex: 0,
+  };
+}
+
+/**
  * V02-WI-04 C03 evidence-only legacy five-Basic benchmark spawn (Epic §20.1):
  * five Basic Drones across the current engagement band through the authored
  * staging spawn owner (V02-DEC-018 normalized Top fractions). It reproduces
@@ -2162,13 +2217,16 @@ export interface CombatSimulationRuntime {
    *  commitment advances only through executed fixed steps while the
    *  authoritative lifecycle is running. */
   readonly beginEvacuation: () => void;
-  /** V02-WI-04 C03/C04 evidence-only benchmark scenarios (Epic §20.1). Present
-   *  only in scenario-bearing builds (compile-time absent from the ordinary
-   *  production artifact). `legacy-five-basic` reproduces the accepted v0.1
-   *  final group; `m01-e5` materialises the authored Mission 01 e5 Encounter
-   *  through the deterministic debug spawn (V02-WI-04 C04). */
+  /** V02-WI-04 C03/C04 / V02-WI-06 E04-C02 evidence-only benchmark scenarios
+   *  (Epic §20.1). Present only in scenario-bearing builds (compile-time absent
+   *  from the ordinary production artifact). `legacy-five-basic` reproduces the
+   *  accepted v0.1 final group; `m01-e5` materialises the authored Mission 01 e5
+   *  Encounter through the deterministic debug spawn (V02-WI-04 C04); `m03-e8`
+   *  positions Mission 03 immediately before its authored `05:20` Elite Arrival
+   *  Group so the Elite workload begins at the authored creation step
+   *  (V02-WI-06 E04-C02). */
   readonly submitEvidenceBenchmark?: (
-    scenario: 'legacy-five-basic' | 'm01-e5',
+    scenario: 'legacy-five-basic' | 'm01-e5' | 'm03-e8',
   ) => void;
   readonly dispose: () => void;
 }
@@ -2266,13 +2324,14 @@ export function createCombatSimulationRuntime(
       }
       state = beginEvacuation(state);
     },
-    // V02-WI-04 C03/C04 evidence-only benchmark scenarios (Epic §20.1 legacy
-    // proxy + exact e5 materialization). The method is compile-time absent
-    // from the ordinary production artifact through the scenarios gate.
+    // V02-WI-04 C03/C04 / V02-WI-06 E04-C02 evidence-only benchmark scenarios
+    // (Epic §20.1: legacy proxy, exact e5 materialization, Elite workload
+    // preparation). The method is compile-time absent from the ordinary
+    // production artifact through the scenarios gate.
     ...(EVIDENCE_SCENARIOS_ENABLED
       ? {
           submitEvidenceBenchmark(
-            scenario: 'legacy-five-basic' | 'm01-e5',
+            scenario: 'legacy-five-basic' | 'm01-e5' | 'm03-e8',
           ): void {
             if (disposed) {
               return;
@@ -2281,6 +2340,8 @@ export function createCombatSimulationRuntime(
               state = spawnLegacyFiveBasicBenchmark(state);
             } else if (scenario === 'm01-e5') {
               state = spawnEncounterForDebug(state, 'interception-01-e5');
+            } else if (scenario === 'm03-e8') {
+              state = prepareEliteWorkloadBenchmark(state);
             }
           },
         }
