@@ -305,6 +305,71 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
   await dialog.getByRole('button', { name: 'Spawn E1' }).click();
   await expect(activeRow).toContainText('Basic 5');
 
+  // V02-WI-07 D01: one deterministic spawn action per approved enemy type. The
+  // Debug Elite is created at its fixed anchor and its phase read model and
+  // phase actions become available only while that current Elite exists.
+  const elitePhaseRow = dialog
+    .locator('.ds-field-row')
+    .filter({ has: page.getByText('Elite Phase', { exact: true }) });
+  await expect(
+    dialog.getByRole('button', { name: 'Elite: Armoured' }),
+  ).toBeDisabled();
+  await expect(
+    dialog.getByRole('button', { name: 'Elite: Vulnerable' }),
+  ).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Spawn Ranged' }).click();
+  await expect(activeRow).toContainText('Ranged 1');
+  await dialog.getByRole('button', { name: 'Spawn Hunter' }).click();
+  await expect(activeRow).toContainText('Hunter 1');
+  await dialog.getByRole('button', { name: 'Spawn Elite' }).click();
+  await expect(activeRow).toContainText('Elite 1');
+  await expect(elitePhaseRow).toContainText('Entering');
+  const eliteTimeRow = dialog
+    .locator('.ds-field-row')
+    .filter({ has: page.getByText('Elite Phase Time', { exact: true }) });
+  await expect(eliteTimeRow).toContainText('—');
+
+  // The two Elite phase actions run through the single authoritative phase
+  // transition owner: the phase row follows the accepted transition exactly.
+  await expect(
+    dialog.getByRole('button', { name: 'Elite: Vulnerable' }),
+  ).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Elite: Vulnerable' }).click();
+  await expect(elitePhaseRow).toContainText('Vulnerable');
+  await expect(eliteTimeRow).toContainText('0.0 s');
+  await dialog.getByRole('button', { name: 'Elite: Armoured' }).click();
+  await expect(elitePhaseRow).toContainText('Armoured');
+
+  // Every authored Encounter of the CURRENT mission has exactly one action: the
+  // replacement for the previous hard-coded `Spawn E1`/`Spawn E5` subset.
+  await expect(dialog.getByRole('button', { name: 'Spawn E5' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Spawn E6' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Spawn E2' }).click();
+  await expect(activeRow).toContainText('Basic 7');
+
+  // The v0.2 observability contract is complete: both destruction CAUSES and the
+  // escaped counts render by role beside the committed economy.
+  await expect(
+    dialog.locator('.ds-field-row').filter({
+      has: page.getByText('Destroyed by Projectile', { exact: true }),
+    }),
+  ).toBeVisible();
+  await expect(
+    dialog
+      .locator('.ds-field-row')
+      .filter({ has: page.getByText('Destroyed by Contact', { exact: true }) }),
+  ).toBeVisible();
+  await expect(
+    dialog
+      .locator('.ds-field-row')
+      .filter({ has: page.getByText('Combat Rewards', { exact: true }) }),
+  ).toBeVisible();
+  await expect(
+    dialog
+      .locator('.ds-field-row')
+      .filter({ has: page.getByText('Escape Penalties', { exact: true }) }),
+  ).toBeVisible();
+
   // F1 closes Debug from the running origin and resumes.
   await page.keyboard.press('F1');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -366,4 +431,47 @@ test('development Debug Win/Lose enter the normal S12 result flow exactly once (
       { timeout: 5000 },
     )
     .toBe('100');
+});
+
+test('development Debug Evacuate Mission enters the normal Evacuation result flow exactly once (Epic §13.4/§17, V02-AC-015/026)', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await startCombat(page);
+
+  // The forced successful Evacuation reuses the same immutable terminal, the
+  // same committed exit, and the same atomic save/result path as the natural
+  // five-second Evacuation: no second countdown, no direct result write.
+  await page.keyboard.press('F1');
+  const debug = page.getByRole('dialog');
+  await expect(debug.getByRole('heading', { name: 'Debug' })).toBeVisible();
+  await debug.getByRole('button', { name: 'Evacuate Mission' }).click();
+
+  // Debug closes through the authoritative lifecycle so the committed exit can
+  // run; the result opens only after the Aircraft leaves the viewport.
+  const result = page.getByRole('dialog');
+  await expect(result.getByRole('heading', { name: 'EVACUATED' })).toBeVisible({
+    timeout: 20000,
+  });
+  await expect(debug.getByRole('heading', { name: 'Debug' })).toHaveCount(0);
+  await expect(result).toContainText('Mission not completed');
+  await expect(result.getByText('Completion reward')).toHaveCount(0);
+  await expect(result.getByText('Mission unlocked')).toHaveCount(0);
+  await expect(result.getByText('Retained 50%')).toBeVisible();
+
+  // Continue returns to Operations: the untouched run retained 0 Credits, no
+  // completion and no unlock, and no Combat/Debug residue remains.
+  await result.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await expect(page.locator('canvas')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Credits: 12')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Interception 03 (Locked)' }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Interception 01 (Completed)' }),
+  ).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
 });

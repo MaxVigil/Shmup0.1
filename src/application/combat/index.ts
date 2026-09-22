@@ -80,8 +80,10 @@ export {
 } from './debug-command';
 export type {
   CombatDebugCommand,
+  CombatDebugElitePhase,
   CombatDebugHullValue,
   CombatObservability,
+  CombatObservabilityElite,
   DebugEligibilityContext,
 } from './debug-command';
 export {
@@ -142,10 +144,12 @@ export type {
 } from './projectiles';
 export {
   activateElite,
+  activateEliteAtAnchor,
   createEliteAtAnchor,
   createEliteForEntry,
   drawEliteMovementDecision,
   eliteAcceptsProjectileDamage,
+  enterElitePhase,
   isEliteContactActive,
   isEliteProjectileTargetEligible,
   isEnemyAnyPortionVisible,

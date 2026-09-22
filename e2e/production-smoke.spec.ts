@@ -602,8 +602,26 @@ test('production has no Debug UI, F1 has no effect, and no Debug label is reacha
   await page.keyboard.press('F1');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(
-    page.getByText(/God Mode|Win Mission|Lose Mission/i),
+    page.getByText(
+      /God Mode|Win Mission|Lose Mission|Evacuate Mission|Elite: Armoured|Elite: Vulnerable|Spawn Elite|Elite Phase/i,
+    ),
   ).toHaveCount(0);
+  // The development observability global and the evidence workload surfaces
+  // stay compile-time absent from the ordinary production artifact.
+  expect(
+    await page.evaluate(
+      () =>
+        typeof (window as Window & Record<string, unknown>)
+          .__shmupDevObservability__,
+    ),
+  ).toBe('undefined');
+  expect(
+    await page.evaluate(
+      () =>
+        typeof (window as Window & Record<string, unknown>)
+          .__shmupEliteWorkload__,
+    ),
+  ).toBe('undefined');
 
   // The non-Debug lifecycle shell is unaffected in production.
   await page.getByRole('button', { name: 'Pause' }).click();

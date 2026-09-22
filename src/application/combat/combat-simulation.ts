@@ -5,6 +5,7 @@ import type {
   WeaponDefinition,
 } from '@application/content';
 import type { EnemyType } from '@domain/index';
+import { isEnemyType } from '@domain/index';
 import {
   createEliteMovementStream,
   createRangedFireStream,
@@ -40,7 +41,10 @@ import {
   type ProjectileGeometry,
 } from './projectiles';
 import {
+  activateEliteAtAnchor,
+  createEliteAtAnchor,
   createEliteForEntry,
+  enterElitePhase,
   reprojectEliteForViewport,
   spawnEnemyFromPlacement,
   stepEnemy,
@@ -49,6 +53,7 @@ import {
   ELITE_CANNON_INTERVAL_STEPS,
   ELITE_CORE_INTERVAL_STEPS,
   type CombatEnemy,
+  type EliteEnemyState,
 } from './enemies';
 import {
   resolveAircraftContacts,
@@ -1602,6 +1607,39 @@ function evaluateTerminalResult(
 }
 
 /**
+ * The single owner of the immutable `Evacuated` terminal and its shared
+ * committed-exit centre phase (Epic §13.4/§13.7, V02-DEC-028, V02-AC-015): the
+ * natural countdown's exact zero step and the development Debug forced
+ * Evacuation both resolve through this function, so neither can drift from the
+ * other. Defeat keeps unconditional priority — an already-defeated Aircraft can
+ * never resolve as `Evacuated`. Remaining active enemies are deliberately left
+ * untouched: they become gameplay-inactive through the shared committed exit
+ * (fade over the exact 30 centre steps) and never add an escape penalty. The
+ * committed result is not presented here; the entry relays it through the
+ * unchanged atomic commit/exit/result path. A state that already owns a
+ * terminal result is a strict no-op.
+ */
+function resolveEvacuatedTerminal(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  if (state.terminalResult !== null) {
+    return state;
+  }
+  if (state.playerDefeated) {
+    return evaluateTerminalResult(state);
+  }
+  return {
+    ...state,
+    // The commitment is resolved: no countdown may remain live during the
+    // committed exit (v0.2 §13.4 `00:00`).
+    evacuationStepsRemaining: 0,
+    terminalResult: { kind: 'evacuated' },
+    exitPhase: 'centre',
+    exitCentreStepsRemaining: EXIT_CENTRE_STEPS,
+  };
+}
+
+/**
  * V02-WI-05 E02 authoritative pure Evacuation commitment (Epic §13.4,
  * V02-DEC-027, V02-AC-014): accepted exactly once for an active, non-terminal,
  * not-yet-committed simulation. It records the irreversible `300`-step
@@ -1648,14 +1686,9 @@ function stepEvacuationAndResolveTerminal(
     return { ...decremented, terminalResult: { kind: 'defeat' } };
   }
   // The exact step that reduces remainingSteps to 0 resolves Evacuated when
-  // the Aircraft remains operational.
+  // the Aircraft remains operational, through the ONE shared terminal owner.
   if (remainingSteps === 0) {
-    return {
-      ...decremented,
-      terminalResult: { kind: 'evacuated' },
-      exitPhase: 'centre',
-      exitCentreStepsRemaining: EXIT_CENTRE_STEPS,
-    };
+    return resolveEvacuatedTerminal(decremented);
   }
   // Countdown still running: normal Combat continues on later steps and
   // ordinary Success stays suppressed (V02-DEC-027).
@@ -2000,11 +2033,12 @@ function resizeSimulation(
 }
 
 /**
- * V02-WI-04 deterministic Debug command transform (Epic §17, V02-AC-026).
- * Reuses existing identity/geometry/content owners and never duplicates spawn,
- * collision, or result logic. Commands are strict no-ops after the terminal
- * result freeze; forced Success/Defeat enter the existing terminal-result
- * relay through `evaluateTerminalResult` (the runtime/entry relays once).
+ * V02-WI-04/WI-07 deterministic Debug command transform (Epic §17,
+ * V02-AC-026). Reuses existing identity/geometry/content/phase owners and never
+ * duplicates spawn, collision, phase, or result logic. Commands are strict
+ * no-ops after the terminal result freeze; forced Success/Defeat/Evacuation
+ * enter the existing terminal-result relay through `evaluateTerminalResult` /
+ * `resolveEvacuatedTerminal` (the runtime/entry relays once).
  */
 export function applyDebugCommand(
   state: CombatSimulationState,
@@ -2028,38 +2062,21 @@ export function applyDebugCommand(
         return state;
       }
       return { ...state, playerHullIntegrity: command.hull };
-    case 'combat-debug/spawn-standard-enemy': {
-      // Exactly one Basic Drone at the fixed valid top-edge band position
-      // through the authored-staging spawn owner (no RNG consumed).
-      const enemy = spawnEnemyFromPlacement({
-        id: state.nextEnemyId,
-        type: 'basic-drone',
-        hullIntegrity:
-          state.enemyDefsByType['basic-drone'].maximumHullIntegrity,
-        width: state.enemyBoundsByType['basic-drone'].width,
-        height: state.enemyBoundsByType['basic-drone'].height,
-        placement: {
-          kind: 'top',
-          engagementBandFraction: 0.5,
-        },
-        boundsMinX: state.bounds.minX,
-        boundsMaxX: state.bounds.maxX,
-        viewportWidth: state.viewportWidth,
-        viewportHeight: state.viewportHeight,
-        ordinal: 0,
-      });
-      return {
-        ...state,
-        enemies: [...state.enemies, enemy],
-        nextEnemyId: state.nextEnemyId + 1,
-      };
-    }
+    case 'combat-debug/spawn-enemy':
+      // One approved enemy type through its canonical creation owner: a regular
+      // role reuses the current mission's authored Spawn Placement, and the
+      // Elite is created at its fixed anchor. No RNG is consumed.
+      return spawnEnemyForDebug(state, command.enemyType);
     case 'combat-debug/spawn-encounter': {
       // Spawns one approved authored Encounter's Arrival Groups deterministically
       // at the current mission time and marks those groups as spawned (no
       // re-roll, no reactive adaptation). Already-spawned encounters are no-ops.
       return spawnEncounterForDebug(state, command.encounterId);
     }
+    case 'combat-debug/set-elite-phase':
+      // Epic §17: the current Elite alone, through the one authoritative phase
+      // transition owner. No Elite is a strict no-op.
+      return setCurrentElitePhaseForDebug(state, command.phase);
     case 'combat-debug/win-mission':
       // Normal Success even if enemies remain: mark every Arrival Group
       // spawned and resolve active enemies, then evaluate the terminal state
@@ -2079,6 +2096,13 @@ export function applyDebugCommand(
         playerHullIntegrity: 0,
         playerDefeated: true,
       });
+    case 'combat-debug/evacuate-mission':
+      // Epic §17: the forced successful Evacuation resolves through the SAME
+      // immutable terminal + shared committed-exit owner the natural
+      // five-second zero step uses. No countdown is run, no economy is
+      // recalculated, and no result is written directly; the entry relays the
+      // frozen terminal through the unchanged atomic commit/exit/result path.
+      return resolveEvacuatedTerminal(state);
   }
 }
 
@@ -2124,6 +2148,204 @@ function spawnEncounterForDebug(
     arrivalGroupIndex: Math.min(state.arrivalGroupIndex, remaining.length),
     currentEncounterId,
   };
+}
+
+/**
+ * V02-WI-07 D01/D01-C01 deterministic Debug enemy spawn (Epic §17,
+ * V02-AC-026): exactly one approved enemy type through its canonical creation
+ * owner, with no duplicated spawn, identity, geometry, or attack logic.
+ *
+ * - `Basic`/`Ranged` reuse the accepted Debug Top geometry: the engagement-band
+ *   centre, which is the Aircraft's initial automatic-fire column (this also
+ *   keeps the destruction-feedback review deterministic). Canonical Basic
+ *   behaviour consumes no RNG stream.
+ * - `Hunter` owns no Top-entry state machine (it enters horizontally and then
+ *   steers), so its Debug spawn reuses the CURRENT mission's authored Side
+ *   Placement instead of inventing an entry region. Every approved mission
+ *   authors at least one Hunter; a mission that authors no Hunter keeps the
+ *   command a strict no-op. Canonical Hunter behaviour consumes no RNG stream.
+ * - `Elite` is never routed through the regular-enemy factory: it is created at
+ *   its fixed `50% VW, 20% VH` anchor, still `entering`, by
+ *   `createEliteAtAnchor`.
+ *
+ * Every spawned enemy receives the stable Debug identity from
+ * `debugEnemyOrdinal`, and each spawned `Ranged`/`Elite` additionally receives
+ * its OWN canonical per-enemy RNG stream under that identity. A Debug spawn can
+ * therefore never share, replace, consume, or shift an authored enemy's stream,
+ * and repeated Debug spawns never share one stream with each other.
+ *
+ * The command is reached only through the eligible development Debug lifecycle
+ * (paused Debug Overlay, exact Active Mission Instance, build-time DEV_MODE), so
+ * no production or post-terminal path can reach it.
+ */
+function spawnEnemyForDebug(
+  state: CombatSimulationState,
+  enemyType: EnemyType,
+): CombatSimulationState {
+  // Runtime defence for an out-of-contract command: a type outside the approved
+  // EnemyType vocabulary is a strict no-op rather than an invalid spawn.
+  if (!isEnemyType(enemyType)) {
+    return state;
+  }
+  const id = state.nextEnemyId;
+  const ordinal = debugEnemyOrdinal(state);
+  if (enemyType === 'elite-drone') {
+    return {
+      ...state,
+      enemies: [
+        ...state.enemies,
+        createEliteAtAnchor({
+          id,
+          ordinal,
+          viewportWidth: state.viewportWidth,
+          viewportHeight: state.viewportHeight,
+        }),
+      ],
+      nextEnemyId: id + 1,
+      // Its own canonical `elite-movement` stream, kept beside the authored
+      // ones so no authored Elite identity or stream object is touched.
+      eliteMovementStreams: {
+        ...state.eliteMovementStreams,
+        [ordinal]: createEliteMovementStream(state.missionSeed, ordinal),
+      },
+    };
+  }
+  const placement = debugSpawnPlacementFor(state, enemyType);
+  if (placement === null) {
+    return state;
+  }
+  const bounds = state.enemyBoundsByType[enemyType];
+  const enemy = spawnEnemyFromPlacement({
+    id,
+    type: enemyType,
+    hullIntegrity: state.enemyDefsByType[enemyType].maximumHullIntegrity,
+    width: bounds.width,
+    height: bounds.height,
+    placement,
+    boundsMinX: state.bounds.minX,
+    boundsMaxX: state.bounds.maxX,
+    viewportWidth: state.viewportWidth,
+    viewportHeight: state.viewportHeight,
+    ordinal,
+  });
+  if (enemyType === 'ranged-drone') {
+    return {
+      ...state,
+      enemies: [...state.enemies, enemy],
+      nextEnemyId: id + 1,
+      // Its own canonical `ranged-fire` stream: the normal activation,
+      // first-shot, and cadence owners drive a fully independent Ranged.
+      rangedFireStreams: {
+        ...state.rangedFireStreams,
+        [ordinal]: createRangedFireStream(state.missionSeed, ordinal),
+      },
+    };
+  }
+  // Basic and Hunter own no RNG stream in canonical behaviour.
+  return {
+    ...state,
+    enemies: [...state.enemies, enemy],
+    nextEnemyId: id + 1,
+  };
+}
+
+/**
+ * The Spawn Placement a Debug regular-role spawn uses (Epic §17). Basic and
+ * Ranged use the canonical Top entry at the engagement-band centre; the Hunter
+ * reuses the current mission's authored Side Placement (its only valid entry
+ * region), or `null` when the mission authors no Hunter so the command stays a
+ * strict no-op instead of inventing geometry.
+ */
+function debugSpawnPlacementFor(
+  state: CombatSimulationState,
+  enemyType: EnemyType,
+): ResolvedSpawnPlacement | null {
+  if (enemyType !== 'hunter-drone') {
+    return { kind: 'top', engagementBandFraction: 0.5 };
+  }
+  for (const group of flattenArrivalGroups(state.enemyPlan)) {
+    for (const member of group.members) {
+      if (member.type === 'hunter-drone') {
+        return member.placement;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The stable, deterministic, non-colliding identity a Debug-spawned enemy
+ * receives (V02-WI-07 D01-C01, Epic §17).
+ *
+ * Authored mission-member ordinals occupy exactly the closed range
+ * `[0, authoredMemberCount)` of the validated resolved plan. The Debug identity
+ * space starts at `authoredMemberCount` and is offset by the enemy's own
+ * monotonic mission `id`, so a Debug identity can never equal an authored
+ * member ordinal. Consequently:
+ * - a Debug-spawned Ranged/Elite owns its own canonical per-enemy RNG stream
+ *   and can never share, replace, consume, or shift an authored enemy's stream;
+ * - repeated Debug spawns of the same role each receive a distinct identity and
+ *   therefore a distinct, mutually independent stream;
+ * - the value is a pure function of the immutable resolved plan and the
+ *   deterministic spawn sequence, so an identical command sequence replays
+ *   identically.
+ *
+ * `Spawn Encounter` is deliberately NOT part of this identity space: it
+ * materializes an authored Arrival Group (removing it from the remaining plan),
+ * so its members keep their authored identities and streams — and because the
+ * group is consumed, two enemies can never hold the same authored identity.
+ */
+function debugEnemyOrdinal(state: CombatSimulationState): number {
+  return authoredMemberCount(state) + state.nextEnemyId;
+}
+
+/** Total authored mission-member count (the exclusive upper bound of every
+ *  authored member ordinal) from the immutable resolved plan. */
+function authoredMemberCount(state: CombatSimulationState): number {
+  let count = 0;
+  for (const group of flattenArrivalGroups(state.enemyPlan)) {
+    count += group.members.length;
+  }
+  return count;
+}
+
+/**
+ * V02-WI-07 D01 authoritative Debug Elite phase command (Epic §17,
+ * V02-AC-026). The current Elite — the first Elite in stable creation order — is
+ * moved to the requested active phase through the SAME owner the natural phase
+ * boundary uses (`enterElitePhase`). A not-yet-active Elite first reaches its
+ * canonical `50% VW, 20% VH` anchor activation through `activateEliteAtAnchor`
+ * (never an off-anchor activation), and the Debug transform owns no phase timer,
+ * attack timer, movement decision, or presentation state of its own: the drawn
+ * horizontal decision and its remaining interval are preserved, and the next
+ * executed fixed step draws exactly one further decision from the same
+ * dedicated stream. A simulation without an Elite, or an Elite already in the
+ * requested phase, is a strict no-op returning the same state.
+ */
+function setCurrentElitePhaseForDebug(
+  state: CombatSimulationState,
+  phase: 'armoured' | 'vulnerable',
+): CombatSimulationState {
+  const index = state.enemies.findIndex((enemy) => enemy.kind === 'elite');
+  if (index < 0) {
+    return state;
+  }
+  const current = state.enemies[index] as EliteEnemyState;
+  const active = current.activated
+    ? current
+    : activateEliteAtAnchor(current, state.viewportWidth, state.viewportHeight);
+  const next = enterElitePhase(
+    active,
+    phase,
+    state.viewportWidth,
+    state.viewportHeight,
+  );
+  if (next === current) {
+    return state;
+  }
+  const enemies = [...state.enemies];
+  enemies[index] = next;
+  return { ...state, enemies };
 }
 
 /**

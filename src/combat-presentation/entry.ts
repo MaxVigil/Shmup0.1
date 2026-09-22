@@ -711,13 +711,18 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
         // repeated or racing commands after the first terminal are strict no-ops.
         const after = runtime.getState();
         relayTerminalIfPresent(after);
-        // V02-WI-04 C01: forced Success runs the same committed 0.5 s centre
-        // phase and 60% VH/s upward exit as natural Success. The Debug Overlay
-        // holds the runtime paused, so it is closed through the authoritative
-        // lifecycle (unpausing when Debug opened from running Combat) before the
-        // committed exit advances; the exit itself still waits for the campaign
-        // transaction to commit through the `authorizeCommittedExit` seam.
-        if (after.terminalResult?.kind === 'success') {
+        // V02-WI-04 C01 / V02-WI-07 D01: forced Success and forced Evacuation
+        // run the same committed 0.5 s centre phase and 60% VH/s upward exit as
+        // their natural outcomes. The Debug Overlay holds the runtime paused, so
+        // it is closed through the authoritative lifecycle (unpausing when Debug
+        // opened from running Combat) before the committed exit advances; the
+        // exit itself still waits for the campaign transaction to commit through
+        // the `authorizeCommittedExit` seam. Forced Defeat needs no close: its
+        // committed result is presented through the unchanged session path.
+        if (
+          after.terminalResult?.kind === 'success' ||
+          after.terminalResult?.kind === 'evacuated'
+        ) {
           input.store.dispatch({
             type: 'combat-lifecycle/close-debug',
             missionInstanceOrdinal: input.snapshot.missionInstanceOrdinal,

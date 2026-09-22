@@ -4,15 +4,18 @@ import { ELITE_DRONE, enemyRenderedBounds } from '@application/content';
 import { createTestCombatState } from '@test-support/domain';
 import {
   activateElite,
+  activateEliteAtAnchor,
   createEliteAtAnchor,
   createEliteForEntry,
   eliteAcceptsProjectileDamage,
+  enterElitePhase,
   spawnEnemyFromPlacement,
   stepEnemy,
   ELITE_ANCHOR_VIEWPORT_FRACTION_X,
   ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
   ELITE_ARMOURED_PHASE_STEPS,
   ELITE_CANNON_INTERVAL_STEPS,
+  ELITE_CORE_INTERVAL_STEPS,
   ELITE_ENTRY_SPEED_VIEWPORT_HEIGHT_PER_SECOND,
   ELITE_PHASE_CYCLE_STEPS,
   ELITE_VULNERABLE_PHASE_STEPS,
@@ -1113,5 +1116,123 @@ describe('Elite phase foundation inside the real fixed-step pipeline', () => {
       'hunter-drone': 0,
       'elite-drone': 0,
     });
+  });
+});
+
+describe('Extracted canonical Elite owners reused by the development Debug surface (V02-WI-07 D01, Epic §17)', () => {
+  it('activateEliteAtAnchor is the exact anchor activation the natural entry path uses', () => {
+    const entering = createElite();
+    expect(entering.activated).toBe(false);
+    const activated = activateEliteAtAnchor(
+      entering,
+      VIEWPORT.width,
+      VIEWPORT.height,
+    );
+    // Same state as stepping the entry to the anchor-reaching step.
+    const viaStep = stepEliteExact(entering, 1);
+    expect(activated.centerX).toBe(viaStep.centerX);
+    expect(activated.centerY).toBe(viaStep.centerY);
+    expect(activated).toMatchObject({
+      activated: true,
+      phase: 'armoured',
+      phaseStepsElapsed: 0,
+      phaseStepsRemaining: ELITE_ARMOURED_PHASE_STEPS,
+      attackStepsRemaining: ELITE_CANNON_INTERVAL_STEPS,
+      hasEnteredVisibleArea: true,
+    });
+    // Idempotent: an already active Elite is returned unchanged.
+    expect(
+      activateEliteAtAnchor(activated, VIEWPORT.width, VIEWPORT.height),
+    ).toBe(activated);
+  });
+
+  it('enterElitePhase is the exact transition the natural phase boundary uses', () => {
+    // The natural Armoured → Vulnerable boundary and the extracted owner agree
+    // on phase, timers, and geometry.
+    const lastArmoured = stepEliteExact(
+      activate(),
+      ELITE_ARMOURED_PHASE_STEPS - 1,
+    );
+    expect(lastArmoured.phaseStepsRemaining).toBe(1);
+    const viaBoundary = stepEliteExact(lastArmoured, 1);
+    const viaOwner = enterElitePhase(
+      lastArmoured,
+      'vulnerable',
+      VIEWPORT.width,
+      VIEWPORT.height,
+    );
+    expect(viaOwner).toEqual(viaBoundary);
+    expect(viaOwner.phase).toBe('vulnerable');
+    expect(viaOwner.phaseStepsElapsed).toBe(0);
+    expect(viaOwner.phaseStepsRemaining).toBe(ELITE_VULNERABLE_PHASE_STEPS);
+    expect(viaOwner.attackStepsRemaining).toBe(ELITE_CORE_INTERVAL_STEPS);
+    // The drawn decision and its remaining interval survive the transition.
+    const decided = activateElite(createElite(), {
+      direction: 1,
+      intervalSteps: 140,
+    });
+    const fromDecision: EliteEnemyState = {
+      ...decided,
+      movementDecisionStepsRemaining: 120,
+    };
+    const transitioned = enterElitePhase(
+      fromDecision,
+      'vulnerable',
+      VIEWPORT.width,
+      VIEWPORT.height,
+    );
+    expect(transitioned.horizontalDirection).toBe(1);
+    expect(transitioned.movementDecisionStepsRemaining).toBe(120);
+  });
+
+  it('enterElitePhase cannot activate an entering Elite and re-entering the current phase is a no-op', () => {
+    const entering = createElite();
+    expect(
+      enterElitePhase(entering, 'vulnerable', VIEWPORT.width, VIEWPORT.height),
+    ).toBe(entering);
+    const armoured = activate();
+    expect(
+      enterElitePhase(armoured, 'armoured', VIEWPORT.width, VIEWPORT.height),
+    ).toBe(armoured);
+    // Vulnerable → Armoured uses the same owner without drift.
+    const vulnerable = enterElitePhase(
+      armoured,
+      'vulnerable',
+      VIEWPORT.width,
+      VIEWPORT.height,
+    );
+    const backToArmoured = enterElitePhase(
+      vulnerable,
+      'armoured',
+      VIEWPORT.width,
+      VIEWPORT.height,
+    );
+    expect(backToArmoured.phase).toBe('armoured');
+    expect(backToArmoured.phaseStepsRemaining).toBe(ELITE_ARMOURED_PHASE_STEPS);
+    expect(backToArmoured.attackStepsRemaining).toBe(
+      ELITE_CANNON_INTERVAL_STEPS,
+    );
+    expect(backToArmoured.width).toBeCloseTo(ARMOURED_BOUNDS.widthPx, 9);
+  });
+
+  it('enterElitePhase clamps the new phase geometry inside the viewport', () => {
+    const armoured = activate();
+    const atRightEdge: EliteEnemyState = {
+      ...armoured,
+      centerX: VIEWPORT.width - armoured.width / 2,
+      horizontalDirection: 1,
+    };
+    const vulnerable = enterElitePhase(
+      atRightEdge,
+      'vulnerable',
+      VIEWPORT.width,
+      VIEWPORT.height,
+    );
+    // The wider Vulnerable bounds stay fully inside and the direction is forced
+    // inward without consuming a draw.
+    expect(vulnerable.centerX + vulnerable.width / 2).toBeLessThanOrEqual(
+      VIEWPORT.width,
+    );
+    expect(vulnerable.centerX).toBe(VIEWPORT.width - vulnerable.width / 2);
   });
 });

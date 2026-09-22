@@ -1302,3 +1302,69 @@ describe('V02-WI-05 E02 C01 authorizeCommittedExit guard (Epic §13.3–13.5)', 
     expect(runtime.getState().exitAuthorized).toBe(true);
   });
 });
+
+describe('V02-WI-07 forced successful Evacuation runtime path (Epic §13.4/§13.7, §17, V02-AC-014/015/023/026)', () => {
+  it('reuses the shared committed centre-and-up exit exactly like a natural Evacuation', () => {
+    const runtime = createTestCombatRuntime({ missionId: 'interception-03' });
+    // Materialize the authored Elite Encounter so an active enemy survives the
+    // forced Evacuation (the natural zero step leaves remaining enemies alone).
+    runtime.submitDebug({
+      type: 'combat-debug/spawn-encounter',
+      encounterId: 'interception-03-e8',
+    });
+    expect(
+      runtime.getState().enemies.some((enemy) => enemy.kind === 'elite'),
+    ).toBe(true);
+
+    runtime.submitDebug({ type: 'combat-debug/evacuate-mission' });
+    let state = runtime.getState();
+    expect(state.terminalResult).toEqual({ kind: 'evacuated' });
+    expect(state.exitPhase).toBe('centre');
+    expect(state.exitAuthorized).toBe(false);
+    // Frozen until the unchanged campaign transaction authorizes the exit.
+    const frozen = runtime.advance(5);
+    expect(frozen).toBe(state);
+    runtime.authorizeCommittedExit();
+    state = runtime.advance(FIXED_STEP_SECONDS);
+    expect(state.exitAuthorized).toBe(true);
+    expect(state.exitCentreStepsRemaining).toBe(EXIT_CENTRE_STEPS - 1);
+    // The committed Evacuation fade runs over the same exact centre steps.
+    expect(evacuationEnemyOpacity(state)).toBeCloseTo(
+      (EXIT_CENTRE_STEPS - 1) / EXIT_CENTRE_STEPS,
+      9,
+    );
+    // A forced Evacuation keeps its active enemies; they never become Escaped
+    // and never add an escape penalty (Epic §18).
+    expect(state.escapedCountByType).toEqual({
+      'basic-drone': 0,
+      'ranged-drone': 0,
+      'hunter-drone': 0,
+      'elite-drone': 0,
+    });
+    expect(state.pendingEscapePenalties).toBe(0);
+    // 30 centre steps + 85 fly-up steps fully exit the 1280x600 viewport.
+    for (let index = 0; index < 30 + 90; index += 1) {
+      state = runtime.advance(FIXED_STEP_SECONDS);
+      if (state.exitPhase === 'complete') {
+        break;
+      }
+    }
+    expect(state.exitPhase).toBe('complete');
+    // The immutable terminal is unchanged by the whole exit sequence.
+    expect(state.terminalResult).toEqual({ kind: 'evacuated' });
+    // Repeated/racing commands are strict no-ops after the terminal freeze.
+    runtime.submitDebug({ type: 'combat-debug/evacuate-mission' });
+    runtime.submitDebug({ type: 'combat-debug/win-mission' });
+    expect(runtime.getState().terminalResult).toEqual({ kind: 'evacuated' });
+  });
+
+  it('resolves through the unchanged atomic-commit seam exactly once', () => {
+    const runtime = createTestCombatRuntime();
+    runtime.submitDebug({ type: 'combat-debug/evacuate-mission' });
+    expect(runtime.getState().exitAuthorized).toBe(false);
+    runtime.authorizeCommittedExit();
+    expect(runtime.getState().exitAuthorized).toBe(true);
+    runtime.authorizeCommittedExit(); // inert
+    expect(runtime.getState().exitAuthorized).toBe(true);
+  });
+});

@@ -88,9 +88,13 @@ interface EnemyCommonState {
    */
   readonly activated: boolean;
   /**
-   * Stable zero-based mission-member ordinal in authored encounter order
-   * (Epic §9.2, V02-AC-006): the deterministic `ranged-fire` stream ordinal.
-   * Never removal-sensitive or derived from runtime state.
+   * Stable deterministic enemy identity (Epic §9.2, V02-AC-006): the zero-based
+   * authored mission-member ordinal for an authored enemy, and a
+   * non-colliding Debug identity (outside the authored member-ordinal range) for
+   * a development Debug-spawned enemy (V02-WI-07 D01-C01). It is the
+   * deterministic `ranged-fire` / `elite-movement` per-enemy stream key for the
+   * roles that own a stream. Never removal-sensitive or derived from runtime
+   * state, and never shared between two live enemies.
    */
   readonly ordinal: number;
 }
@@ -199,9 +203,10 @@ export interface EnemyStepInput {
   readonly aircraftCenterY: number;
   /**
    * The Elite's dedicated deterministic `elite-movement` stream, present only
-   * for an Elite (supplied by the simulation from the Elite's stable authored
-   * member ordinal). No other role consumes it, and no draw happens when it is
-   * absent.
+   * for an Elite (supplied by the simulation from that Elite's stable identity:
+   * its authored mission-member ordinal, or its non-colliding Debug identity for
+   * a development Debug spawn, V02-WI-07 D01-C01). No other role consumes it, and
+   * no draw happens when it is absent.
    */
   readonly eliteMovementStream?: Mulberry32 | undefined;
 }
@@ -750,12 +755,46 @@ function stepElite(
   return { enemy: stepElitePhaseBoundary(moved, input), newlyActivated: false };
 }
 
+/**
+ * Canonical "the Elite has reached its fixed anchor" activation owner (Epic
+ * §9.4, V02-AC-009): the centre snaps exactly to `50% VW, 20% VH`, the visible
+ * latch is set, and the explicit idempotent `activateElite` transition starts
+ * the Armoured phase, its fresh `90`-step cannon timer, and (when the caller
+ * supplies one) the movement decision drawn in that same fixed step.
+ *
+ * `stepEnteringElite` calls it on the exact anchor-reaching step. The
+ * development Debug phase command (Epic §17) reuses the same owner so a
+ * not-yet-active current Elite enters its canonical phase position through the
+ * authoritative geometry/activation code instead of an invented placement or a
+ * second phase machine.
+ */
+export function activateEliteAtAnchor(
+  elite: EliteEnemyState,
+  viewportWidth: number,
+  viewportHeight: number,
+  decision?: EliteMovementDecision | undefined,
+): EliteEnemyState {
+  if (elite.activated) {
+    // The canonical activation is idempotent: an already active Elite is
+    // returned unchanged, never re-snapped or re-timed.
+    return elite;
+  }
+  return activateElite(
+    {
+      ...elite,
+      centerX: viewportWidth * ELITE_ANCHOR_VIEWPORT_FRACTION_X,
+      centerY: viewportHeight * ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
+      hasEnteredVisibleArea: true,
+    },
+    decision,
+  );
+}
+
 /** Entry descent, exact anchor clamp, and same-step idempotent activation. */
 function stepEnteringElite(
   elite: EliteEnemyState,
   input: EnemyStepInput,
 ): EnemyStepResult {
-  const anchorX = input.viewportWidth * ELITE_ANCHOR_VIEWPORT_FRACTION_X;
   const anchorY = input.viewportHeight * ELITE_ANCHOR_VIEWPORT_FRACTION_Y;
   const movedY =
     elite.centerY +
@@ -771,12 +810,6 @@ function stepEnteringElite(
       newlyActivated: false,
     };
   }
-  const atAnchor: EliteEnemyState = {
-    ...elite,
-    centerX: anchorX,
-    centerY: anchorY,
-    hasEnteredVisibleArea: true,
-  };
   // Activation initializes the phase, attack, and movement-decision states on
   // this same authoritative step; each retains its full value until the next
   // executed fixed step.
@@ -784,7 +817,15 @@ function stepEnteringElite(
     input.eliteMovementStream === undefined
       ? undefined
       : drawEliteMovementDecision(input.eliteMovementStream);
-  return { enemy: activateElite(atAnchor, decision), newlyActivated: true };
+  return {
+    enemy: activateEliteAtAnchor(
+      elite,
+      input.viewportWidth,
+      input.viewportHeight,
+      decision,
+    ),
+    newlyActivated: true,
+  };
 }
 
 /** Active horizontal movement with the scheduled `elite-movement` decisions. */
@@ -843,27 +884,60 @@ function stepElitePhaseBoundary(
   }
   const nextPhase: 'armoured' | 'vulnerable' =
     elite.phase === 'armoured' ? 'vulnerable' : 'armoured';
-  const bounds = eliteBoundsForPhase(
+  return enterElitePhase(
+    elite,
     nextPhase,
-    Math.min(input.viewportWidth, input.viewportHeight),
+    input.viewportWidth,
+    input.viewportHeight,
+  );
+}
+
+/**
+ * The single authoritative Elite phase-transition owner (Epic §9.4,
+ * V02-AC-009/§17). Entering an active phase reinitializes that phase's exact
+ * full duration (`Armoured 720` / `Vulnerable 360`), its fresh attack timer
+ * (`90` cannon / `150` Core), and its complete rendered bounds, and clamps the
+ * new geometry inside the viewport while preserving the drawn horizontal
+ * decision, its remaining interval, and the RNG state.
+ *
+ * `stepElitePhaseBoundary` calls it on every natural boundary, and the
+ * development Debug `Elite: Armoured` / `Elite: Vulnerable` commands reuse the
+ * identical transition — there is no second phase machine, no parallel timer,
+ * and no invented presentation state. An Elite that has not been activated
+ * cannot enter an active phase through this owner (its canonical activation is
+ * `activateEliteAtAnchor`), and re-entering the phase it already owns is a
+ * strict no-op returning the same state.
+ */
+export function enterElitePhase(
+  elite: EliteEnemyState,
+  phase: 'armoured' | 'vulnerable',
+  viewportWidth: number,
+  viewportHeight: number,
+): EliteEnemyState {
+  if (!elite.activated || elite.phase === phase) {
+    return elite;
+  }
+  const bounds = eliteBoundsForPhase(
+    phase,
+    Math.min(viewportWidth, viewportHeight),
   );
   return clampEliteHorizontally(
     {
       ...elite,
-      phase: nextPhase,
+      phase,
       phaseStepsElapsed: 0,
       phaseStepsRemaining:
-        nextPhase === 'armoured'
+        phase === 'armoured'
           ? ELITE_ARMOURED_PHASE_STEPS
           : ELITE_VULNERABLE_PHASE_STEPS,
       attackStepsRemaining:
-        nextPhase === 'armoured'
+        phase === 'armoured'
           ? ELITE_CANNON_INTERVAL_STEPS
           : ELITE_CORE_INTERVAL_STEPS,
       width: bounds.width,
       height: bounds.height,
     },
-    input.viewportWidth,
+    viewportWidth,
   );
 }
 

@@ -9,6 +9,7 @@ const BASE_OBSERVABILITY: CombatObservability = {
   missionTimeSeconds: 42,
   countdownSeconds: 148,
   currentEncounterId: 'interception-01-e1',
+  elite: null,
   playerHullIntegrity: 100,
   godModeEnabled: false,
   activeEnemiesByType: {
@@ -29,13 +30,19 @@ const BASE_OBSERVABILITY: CombatObservability = {
   destroyedEnemiesByType: {
     'basic-drone': 7,
     'ranged-drone': 0,
-    'hunter-drone': 0,
+    'hunter-drone': 3,
+    'elite-drone': 0,
+  },
+  destroyedByProjectileEnemiesByType: {
+    'basic-drone': 5,
+    'ranged-drone': 0,
+    'hunter-drone': 2,
     'elite-drone': 0,
   },
   destroyedByContactEnemiesByType: {
-    'basic-drone': 0,
+    'basic-drone': 2,
     'ranged-drone': 0,
-    'hunter-drone': 0,
+    'hunter-drone': 1,
     'elite-drone': 0,
   },
   escapedEnemiesByType: {
@@ -84,8 +91,8 @@ function renderDebugOverlay(
   return { getObservability, submitDebugAction, onClose };
 }
 
-describe('DebugOverlay (Combat §11, DS §8.24)', () => {
-  it('shows only the approved observability values and sections', () => {
+describe('DebugOverlay (Combat §11, Epic §17, DS §8.24)', () => {
+  it('shows exactly the approved observability values and sections', () => {
     renderDebugOverlay();
     expect(screen.getByRole('heading', { name: 'Debug' })).toBeDefined();
     expect(screen.getByText('Combat Seed')).toBeDefined();
@@ -96,20 +103,63 @@ describe('DebugOverlay (Combat §11, DS §8.24)', () => {
     expect(screen.getByText('148 s')).toBeDefined();
     expect(screen.getByText('Current Encounter')).toBeDefined();
     expect(screen.getByText('interception-01-e1')).toBeDefined();
+    expect(screen.getByText('Elite Phase')).toBeDefined();
+    expect(screen.getByText('Elite Phase Time')).toBeDefined();
     expect(screen.getByText('Player Hull')).toBeDefined();
     expect(screen.getByText('100')).toBeDefined();
     expect(screen.getByText('Active Enemies')).toBeDefined();
     expect(screen.getByText('Basic 3 · Ranged 1')).toBeDefined();
     expect(screen.getByText('Destroyed Enemies')).toBeDefined();
-    expect(screen.getByText('Basic 7')).toBeDefined();
+    expect(screen.getByText('Basic 7 · Hunter 3')).toBeDefined();
+    expect(screen.getByText('Destroyed by Projectile')).toBeDefined();
+    // The exact projectile remainder per role, with non-zero overlapping total
+    // (Basic 7, Hunter 3) and contact (Basic 2, Hunter 1) counts.
+    expect(screen.getByText('Basic 5 · Hunter 2')).toBeDefined();
+    expect(screen.getByText('Destroyed by Contact')).toBeDefined();
+    expect(screen.getByText('Basic 2 · Hunter 1')).toBeDefined();
     expect(screen.getByText('Escaped Enemies')).toBeDefined();
     expect(screen.getByText('Basic 1')).toBeDefined();
     expect(screen.getByText('Combat Rewards')).toBeDefined();
     expect(screen.getByText('9')).toBeDefined();
     expect(screen.getByText('Escape Penalties')).toBeDefined();
     expect(screen.getByText('2')).toBeDefined();
+    // No Elite in this simulation: both Elite rows are absent values.
+    const elitePhase = screen.getByText('Elite Phase').closest('.ds-field-row');
+    const elitePhaseTime = screen
+      .getByText('Elite Phase Time')
+      .closest('.ds-field-row');
+    expect(elitePhase?.textContent).toContain('—');
+    expect(elitePhaseTime?.textContent).toContain('—');
     // No FPS, hitboxes, coordinates, or extra diagnostics.
     expect(screen.queryByText(/fps|hitbox|coordinat/i)).toBeNull();
+  });
+
+  it('shows the current Elite phase and its authoritative phase time with Elite in the role formatting', () => {
+    renderDebugOverlay({
+      ...BASE_OBSERVABILITY,
+      elite: { phase: 'vulnerable', phaseElapsedSeconds: 1.5 },
+      activeEnemiesByType: {
+        'basic-drone': 0,
+        'ranged-drone': 0,
+        'hunter-drone': 0,
+        'elite-drone': 1,
+      },
+    });
+    expect(screen.getByText('Vulnerable')).toBeDefined();
+    expect(screen.getByText('1.5 s')).toBeDefined();
+    expect(screen.getByText('Elite 1')).toBeDefined();
+  });
+
+  it('shows an entering Elite with no active phase time', () => {
+    renderDebugOverlay({
+      ...BASE_OBSERVABILITY,
+      elite: { phase: 'entering', phaseElapsedSeconds: 0 },
+    });
+    expect(screen.getByText('Entering')).toBeDefined();
+    const elitePhaseTime = screen
+      .getByText('Elite Phase Time')
+      .closest('.ds-field-row');
+    expect(elitePhaseTime?.textContent).toContain('—');
   });
 
   it('refreshes observability on open and relays every approved action', () => {
@@ -117,19 +167,27 @@ describe('DebugOverlay (Combat §11, DS §8.24)', () => {
     const firstCallCount = getObservability.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Set Hull: 25' }));
     fireEvent.click(screen.getByRole('button', { name: 'Spawn Basic' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Spawn Ranged' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Spawn Hunter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Spawn Elite' }));
     fireEvent.click(screen.getByRole('button', { name: 'Spawn E1' }));
     fireEvent.click(screen.getByRole('button', { name: 'Win Mission' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Evacuate Mission' }));
     expect(submitDebugAction.mock.calls.map((call) => call[0])).toEqual([
       { type: 'combat-debug/set-hull', hull: 25 },
-      { type: 'combat-debug/spawn-standard-enemy' },
+      { type: 'combat-debug/spawn-enemy', enemyType: 'basic-drone' },
+      { type: 'combat-debug/spawn-enemy', enemyType: 'ranged-drone' },
+      { type: 'combat-debug/spawn-enemy', enemyType: 'hunter-drone' },
+      { type: 'combat-debug/spawn-enemy', enemyType: 'elite-drone' },
       {
         type: 'combat-debug/spawn-encounter',
         encounterId: 'interception-01-e1',
       },
       { type: 'combat-debug/win-mission' },
+      { type: 'combat-debug/evacuate-mission' },
     ]);
     // Refreshed on open and after each accepted action, never per frame.
-    expect(getObservability.mock.calls.length).toBe(firstCallCount + 4);
+    expect(getObservability.mock.calls.length).toBe(firstCallCount + 8);
   });
 
   it('Set Hull is disabled while God Mode is enabled', () => {
@@ -187,7 +245,7 @@ describe('DebugOverlay (Combat §11, DS §8.24)', () => {
     expect(screen.queryByRole('heading', { name: 'Debug' })).toBeNull();
   });
 
-  it('addresses the CURRENT mission authored encounters instead of a hard-coded Mission 01 (V02-WI-05 M02-R01)', () => {
+  it('addresses EVERY authored Encounter of the CURRENT mission in authored order (V02-WI-05 M02-R01, V02-WI-07 D01)', () => {
     const { submitDebugAction } = renderDebugOverlay(BASE_OBSERVABILITY, [
       'interception-02-e1',
       'interception-02-e2',
@@ -196,8 +254,16 @@ describe('DebugOverlay (Combat §11, DS §8.24)', () => {
       'interception-02-e5',
       'interception-02-e6',
     ]);
-    fireEvent.click(screen.getByRole('button', { name: 'Spawn E1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Spawn E5' }));
+    // One action per authored Encounter: no hard-coded first/fifth subset.
+    for (const index of [1, 2, 3, 4, 5, 6]) {
+      expect(
+        screen.getByRole('button', { name: `Spawn E${index}` }),
+      ).toBeDefined();
+    }
+    expect(screen.queryByRole('button', { name: 'Spawn E7' })).toBeNull();
+    for (const index of [1, 2, 3, 4, 5, 6]) {
+      fireEvent.click(screen.getByRole('button', { name: `Spawn E${index}` }));
+    }
     expect(submitDebugAction.mock.calls.map((call) => call[0])).toEqual([
       {
         type: 'combat-debug/spawn-encounter',
@@ -205,12 +271,28 @@ describe('DebugOverlay (Combat §11, DS §8.24)', () => {
       },
       {
         type: 'combat-debug/spawn-encounter',
+        encounterId: 'interception-02-e2',
+      },
+      {
+        type: 'combat-debug/spawn-encounter',
+        encounterId: 'interception-02-e3',
+      },
+      {
+        type: 'combat-debug/spawn-encounter',
+        encounterId: 'interception-02-e4',
+      },
+      {
+        type: 'combat-debug/spawn-encounter',
         encounterId: 'interception-02-e5',
+      },
+      {
+        type: 'combat-debug/spawn-encounter',
+        encounterId: 'interception-02-e6',
       },
     ]);
   });
 
-  it('keeps an absent authored encounter inert instead of relaying a foreign identity (V02-WI-05 M02-R01)', () => {
+  it('renders one action per authored encounter and none for an absent identity (V02-WI-05 M02-R01)', () => {
     const { submitDebugAction } = renderDebugOverlay(BASE_OBSERVABILITY, [
       'interception-01-e1',
     ]);
@@ -219,13 +301,41 @@ describe('DebugOverlay (Combat §11, DS §8.24)', () => {
       type: 'combat-debug/spawn-encounter',
       encounterId: 'interception-01-e1',
     });
-    // The mission has no fifth authored Encounter: the action is disabled and
-    // a forced activation still relays nothing.
-    const spawnE5 = screen.getByRole('button', {
-      name: 'Spawn E5',
-    }) as HTMLButtonElement;
-    expect(spawnE5.disabled).toBe(true);
-    fireEvent.click(spawnE5);
+    // The mission has no fifth authored Encounter, so no foreign-identity
+    // action exists to relay at all.
+    expect(screen.queryByRole('button', { name: 'Spawn E5' })).toBeNull();
     expect(submitDebugAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('enables the Elite phase actions only while a current Elite exists', () => {
+    const first = renderDebugOverlay();
+    const armoured = screen.getByRole('button', {
+      name: 'Elite: Armoured',
+    }) as HTMLButtonElement;
+    const vulnerable = screen.getByRole('button', {
+      name: 'Elite: Vulnerable',
+    }) as HTMLButtonElement;
+    expect(armoured.disabled).toBe(true);
+    expect(vulnerable.disabled).toBe(true);
+    expect(first.submitDebugAction).not.toHaveBeenCalled();
+
+    cleanup();
+    const second = renderDebugOverlay({
+      ...BASE_OBSERVABILITY,
+      elite: { phase: 'armoured', phaseElapsedSeconds: 3 },
+    });
+    const enabledArmoured = screen.getByRole('button', {
+      name: 'Elite: Armoured',
+    }) as HTMLButtonElement;
+    const enabledVulnerable = screen.getByRole('button', {
+      name: 'Elite: Vulnerable',
+    }) as HTMLButtonElement;
+    expect(enabledArmoured.disabled).toBe(false);
+    expect(enabledVulnerable.disabled).toBe(false);
+    fireEvent.click(enabledVulnerable);
+    expect(second.submitDebugAction).toHaveBeenCalledWith({
+      type: 'combat-debug/set-elite-phase',
+      phase: 'vulnerable',
+    });
   });
 });
