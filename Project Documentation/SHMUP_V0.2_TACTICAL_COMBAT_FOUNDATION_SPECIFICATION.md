@@ -889,8 +889,43 @@ Saved game data could not be loaded.
 [Start New Game]
 ```
 
-- Debug diagnostics record the validation/migration cause without exposing secrets.
+- During Boot, development-only console diagnostics identify the rejected
+  campaign field or migration condition by path without printing the stored
+  record or secret values. For a rejected legacy migration, report its original
+  field-specific cause when the persisted row establishes that cause; if the
+  row's provenance is ambiguous, report the missing current-row format marker
+  without inventing a legacy cause. The player-facing Save Data Error Screen
+  remains generic, and production emits no technical save-data diagnostics.
 - Selecting `Start New Game` uses the destructive confirmation before replacing campaign state.
+- The version-1 → version-2 database upgrade may migrate a legacy C03 campaign
+  only when its row envelope has no `rowFormatVersion` property at all and the
+  complete C03 campaign validation passes. Any present marker, including the
+  current number in a version-1 database, is conflicting provenance: do not
+  rewrite the row, mark it current, or seed the mission-attempt allocator.
+  Boot must keep the existing non-overwriting Save Data Error path; development
+  diagnostics report the truthful rejected path without inventing a migration
+  cause. An explicit non-current marker reports `rowFormatVersion`; an exact
+  current marker on a row that still carries the obsolete C03 counter remains
+  invalid under the existing campaign validation. A valid, genuinely unmarked
+  C03 row still migrates and preserves Campaign and Settings under the existing
+  rule.
+
+**DECISION V02-DEC-034 (2026-09-23; Product Owner approved):** A failed Boot
+cannot open the Combat Debug Overlay. The approved diagnostic surface for
+startup save validation and migration is therefore the development console;
+the alternative of adding a new player-facing or pre-Combat Debug panel is
+rejected. The rule changes diagnostic placement only, not save validation,
+migration, replacement authority, or player-facing error copy. A later change
+to that surface requires a new explicit product decision.
+
+**DECISION V02-DEC-035 (2026-09-24; Product Owner approved):** The database
+upgrade must enforce the same row-envelope provenance rule as the read-side
+diagnostic before it rewrites a version-1 row. Checking only the campaign value
+could silently convert a row with an explicit wrong format marker into playable
+progress; that alternative is rejected. The guard is confined to the existing
+upgrade transaction, preserves a conflicting row unchanged, and requires no
+schema version or dependency change. A later broader migration policy requires
+a separate compatibility decision and migration evidence.
 
 ### 14.3 Refresh or close during active mission
 
@@ -1101,7 +1136,11 @@ The v0.2 Debug Overlay must expose:
 - spawn each approved enemy/Encounter as permitted by deterministic debug commands;
 - move Elite to Armoured or Vulnerable through the authoritative phase logic;
 - simulate next-start recovery from `missionInProgress` and insufficient-Repair Game Over;
-- path-qualified validation or migration failure diagnostics.
+
+Startup validation and migration diagnostics are not Combat Debug Overlay
+fields: a failed Boot cannot enter Combat or open that Overlay. They use only
+the development console boundary in §14.2. No technical cause is added to the
+player-facing Save Data Error Screen or production output.
 
 Production mode must not expose Debug UI or development seeds/logs outside the approved diagnostics boundary.
 
@@ -1216,7 +1255,7 @@ v0.2 must not:
 
 ### V02-AC-021 — Corrupted save
 
-**Given** validation or migration fails, **when** Boot reads campaign data, **then** the error Screen opens, existing data is not overwritten, diagnostics identify the cause, and only an explicitly confirmed New Game replaces it.
+**Given** validation or migration fails, **when** Boot reads campaign data, **then** the error Screen opens, existing data is not overwritten, and only an explicitly confirmed New Game replaces it. A version-1 database row with any explicit `rowFormatVersion` must not be promoted to current progress even if its C03 campaign fields are otherwise valid. In a development build, the console identifies the cause by path without disclosing the stored record or secret values; a rejected legacy migration retains its original field-specific cause when it can be established from the row. In production, no technical save-data diagnostic is emitted and the player-facing error copy stays generic.
 
 ### V02-AC-022 — Minimal Combat UI
 
@@ -1341,6 +1380,8 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-031 | Approved | exact mission-start cleanup recovery                 | failed Combat initialization cannot become a free abort, paid Defeat, or trapped shell |
 | V02-DEC-032 | Approved | exact eight-Encounter Mission 03 staging             | regular and Elite runtime geometry is explicit; final arrival remains `05:20` |
 | V02-DEC-033 | Approved | exact Elite entry, movement RNG, attacks, entry/contact, and deflection contract | E02 has deterministic fixed-step geometry and no agent-authored combat values |
+| V02-DEC-034 | Approved | Boot save-data causes use development-console diagnostics, not Combat Debug Overlay | failed Boot has no Combat Overlay; generic player error and production silence remain |
+| V02-DEC-035 | Approved | version-1 upgrade requires an unmarked row envelope before C03 migration | conflicting marker cannot be rewritten into playable progress or seed the allocator |
 
 ## 23. Consistency and Definition of Ready audit
 

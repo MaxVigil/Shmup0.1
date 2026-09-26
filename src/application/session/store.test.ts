@@ -683,3 +683,165 @@ describe('V02-WI-05 E01: Evacuation Confirmation through the Session Store', () 
     );
   });
 });
+
+describe('V02-WI-07 D02-A: development-only Credits reconciliation', () => {
+  it('mirrors the committed Credits for the exact originating identity', () => {
+    const store = initializedStore();
+    const snapshot = snapshotFor(store);
+    store.dispatch({ type: 'mission/start', snapshot });
+    expect(store.getState()?.credits).toBe(12);
+
+    store.dispatch({
+      type: 'session/debug-set-credits',
+      credits: 7,
+      missionId: snapshot.missionId,
+      missionAttemptId: snapshot.missionAttemptId,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+    });
+    expect(store.getState()?.credits).toBe(7);
+    // Nothing else changed: the marker/runStatus are not session-owned.
+    expect(store.getState()?.runStatus).toBe('active');
+    expect(store.getState()?.activeMission).not.toBe('none');
+  });
+
+  it('is a strict no-op without an Active Mission, for a stale instance, for another mission, and for an invalid value', () => {
+    const store = initializedStore();
+    const snapshot = snapshotFor(store);
+
+    // No Active Mission.
+    store.dispatch({
+      type: 'session/debug-set-credits',
+      credits: 7,
+      missionId: snapshot.missionId,
+      missionAttemptId: snapshot.missionAttemptId,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+    });
+    expect(store.getState()?.credits).toBe(12);
+
+    store.dispatch({ type: 'mission/start', snapshot });
+    // A different (stale or newer) Mission Instance ordinal.
+    store.dispatch({
+      type: 'session/debug-set-credits',
+      credits: 7,
+      missionId: snapshot.missionId,
+      missionAttemptId: snapshot.missionAttemptId,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal + 99,
+    });
+    expect(store.getState()?.credits).toBe(12);
+    // Same ordinal, different durable attempt id (D02-A-C01 F1).
+    store.dispatch({
+      type: 'session/debug-set-credits',
+      credits: 7,
+      missionId: snapshot.missionId,
+      missionAttemptId: snapshot.missionAttemptId + 1,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+    });
+    expect(store.getState()?.credits).toBe(12);
+    // Same ordinal and attempt, different mission.
+    store.dispatch({
+      type: 'session/debug-set-credits',
+      credits: 7,
+      missionId: 'interception-02',
+      missionAttemptId: snapshot.missionAttemptId,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+    });
+    expect(store.getState()?.credits).toBe(12);
+    // Out-of-domain values are rejected by the domain guard.
+    for (const credits of [-1, 12.5, Number.NaN]) {
+      store.dispatch({
+        type: 'session/debug-set-credits',
+        credits,
+        missionId: snapshot.missionId,
+        missionAttemptId: snapshot.missionAttemptId,
+        missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+      });
+    }
+    expect(store.getState()?.credits).toBe(12);
+  });
+
+  it('treats an already-equal value as a no-op returning the same state object', () => {
+    const store = initializedStore();
+    const snapshot = snapshotFor(store);
+    store.dispatch({ type: 'mission/start', snapshot });
+    const before = store.getState();
+    store.dispatch({
+      type: 'session/debug-set-credits',
+      credits: before!.credits,
+      missionId: snapshot.missionId,
+      missionAttemptId: snapshot.missionAttemptId,
+      missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+    });
+    expect(store.getState()).toBe(before);
+  });
+
+  it('never writes a late value into a resolved or newer Mission Instance', () => {
+    const store = initializedStore();
+    const first = snapshotFor(store);
+    store.dispatch({ type: 'mission/start', snapshot: first });
+    store.dispatch({
+      type: 'mission/result',
+      result: successMissionResult({
+        missionInstanceOrdinal: first.missionInstanceOrdinal,
+      }),
+    });
+    expect(store.getState()?.activeMission).toBe('none');
+
+    store.dispatch({
+      type: 'session/debug-set-credits',
+      credits: 7,
+      missionId: first.missionId,
+      missionAttemptId: first.missionAttemptId,
+      missionInstanceOrdinal: first.missionInstanceOrdinal,
+    });
+    // The resolved instance's completion is inert; the committed session values
+    // from the result are untouched.
+    expect(store.getState()?.credits).toBe(20);
+  });
+
+  it('does not overwrite a newer run that reuses the local ordinal after a confirmed New Game (D02-A-C01 F1)', () => {
+    const store = initializedStore();
+    const first = snapshotFor(store);
+    store.dispatch({ type: 'mission/start', snapshot: first });
+    expect(store.getState()?.credits).toBe(12);
+
+    // A confirmed New Game resets the session (and its local ordinal counter)
+    // while the durable attempt allocator never reuses ids.
+    store.dispatch({
+      type: 'session/new-game',
+      session: initializeSession(123456789, CONTENT_CATALOGUE),
+    });
+    const second = {
+      ...snapshotFor(store),
+      missionId: 'interception-02' as const,
+      missionAttemptId: first.missionAttemptId + 1,
+    };
+    store.dispatch({ type: 'mission/start', snapshot: second });
+    expect(store.getState()?.activeMission).toMatchObject({
+      missionId: 'interception-02',
+      missionInstanceOrdinal: first.missionInstanceOrdinal,
+      missionAttemptId: second.missionAttemptId,
+    });
+
+    // The delayed completion of the OLD run carries the reused local ordinal
+    // and the old mission/attempt identity: an ordinal-only match would corrupt
+    // the newer run, so the full-identity guard must reject it.
+    store.dispatch({
+      type: 'session/debug-set-credits',
+      credits: 7,
+      missionId: first.missionId,
+      missionAttemptId: first.missionAttemptId,
+      missionInstanceOrdinal: first.missionInstanceOrdinal,
+    });
+    expect(store.getState()?.credits).toBe(12);
+
+    // The matching identity of the newer run still applies exactly.
+    store.dispatch({
+      type: 'session/debug-set-credits',
+      credits: 7,
+      missionId: second.missionId,
+      missionAttemptId: second.missionAttemptId,
+      missionInstanceOrdinal: second.missionInstanceOrdinal,
+    });
+    expect(store.getState()?.credits).toBe(7);
+  });
+});

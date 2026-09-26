@@ -603,7 +603,7 @@ test('production has no Debug UI, F1 has no effect, and no Debug label is reacha
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(
     page.getByText(
-      /God Mode|Win Mission|Lose Mission|Evacuate Mission|Elite: Armoured|Elite: Vulnerable|Spawn Elite|Elite Phase/i,
+      /God Mode|Win Mission|Lose Mission|Evacuate Mission|Elite: Armoured|Elite: Vulnerable|Spawn Elite|Elite Phase|Set Credits|missionInProgress|runStatus|Reload for Recovery/i,
     ),
   ).toHaveCount(0);
   // The development observability global and the evidence workload surfaces
@@ -628,6 +628,49 @@ test('production has no Debug UI, F1 has no effect, and no Debug label is reacha
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
   await page.getByRole('button', { name: 'Resume' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('production keeps the unreadable-campaign copy generic and emits no technical save-data diagnostic (V02-AC-021, DELIVERY-AC-003)', async ({
+  page,
+}) => {
+  const consoleMessages: { type: string; text: string }[] = [];
+  page.on('console', (message) =>
+    consoleMessages.push({ type: message.type(), text: message.text() }),
+  );
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  // A current-format row whose value fails campaign validation drives the real
+  // non-overwriting Save Data Error path in the production artifact.
+  await seedPersistedCampaign(page, {
+    schemaVersion: 1,
+    runStatus: 'active',
+    credits: -5,
+    aircraftId: 'german-fighter',
+    hullIntegrity: 100,
+    equippedWeapon: 'machine-gun',
+    unlockedMissionIds: ['interception-01'],
+    completedMissionIds: [],
+    missionInProgress: null,
+    pilotId: 'pilot-shevchenko',
+  });
+  await page.reload();
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect(
+    page.getByText('Saved game data could not be loaded.'),
+  ).toBeVisible();
+
+  // The development diagnostic surface (and every technical save-data cause) is
+  // absent from production output; the player copy stays generic.
+  const technicalOutput = consoleMessages.filter((message) =>
+    /Save Data Error diagnostics|rowFormatVersion|credits must be a non-negative integer|nextMissionAttemptId/i.test(
+      message.text,
+    ),
+  );
+  expect(technicalOutput).toEqual([]);
+  expect(pageErrors).toEqual([]);
 });
 
 test('runtime requests stay on localhost, request no prohibited asset, and load each manifest asset once (MASTER-AC-014, DELIVERY-AC-002)', async ({

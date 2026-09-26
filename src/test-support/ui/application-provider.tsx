@@ -5,6 +5,7 @@ import type { SessionStore } from '@application/session';
 import type { AssetPreloadResult } from '@application/ports';
 import type { SessionSeedSource } from '@application/ports';
 import type { ApplicationContextValue } from '@ui/application-context';
+import type { CampaignStorePort } from '@application/persistence';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import {
   InMemoryCampaignStore,
@@ -107,14 +108,19 @@ export function WithApplication({
   children,
   assets = ALL_ICONS_READY,
   store = createSessionStore(),
+  campaignStore,
 }: {
   readonly children: ReactNode;
   readonly assets?: AssetPreloadResult;
   readonly store?: SessionStore;
+  /** Overrides the fresh in-memory campaign port (V02-WI-07 D02-A tests seed a
+   *  persisted campaign to exercise the authoritative Debug campaign reads). */
+  readonly campaignStore?: CampaignStorePort;
 }): ReactElement {
   const value = createApplicationContextValue({
     store,
     preparedAssets: assets,
+    ...(campaignStore === undefined ? {} : { campaignStore }),
   });
   return (
     <ApplicationContext.Provider value={value}>

@@ -19,6 +19,11 @@ import {
   createMissionStartRecoveryController,
 } from '@application/mission';
 import type { MissionStartRecoveryController } from '@application/mission';
+import {
+  createDebugCampaignCommand,
+  type ActiveMissionIdentity,
+  type DebugCampaignCommand,
+} from '@application/persistence';
 import { mapCommitMissionOutcome } from '@combat-presentation/terminal-commit';
 import type {
   CombatTerminalResult,
@@ -55,6 +60,27 @@ const DebugOverlayComponent = DEV_MODE
   : null;
 
 /**
+ * V02-WI-07 D02-A-C02 F4: the mission-lifetime development Debug campaign
+ * command together with the immutable Mission Snapshot identity it is bound to.
+ */
+interface DebugCampaignBinding {
+  readonly origin: ActiveMissionIdentity;
+  readonly command: DebugCampaignCommand;
+}
+
+/** True only for the exact same Mission Snapshot identity. */
+function sameMissionIdentity(
+  first: ActiveMissionIdentity,
+  second: ActiveMissionIdentity,
+): boolean {
+  return (
+    first.missionId === second.missionId &&
+    first.attemptId === second.attemptId &&
+    first.missionInstanceOrdinal === second.missionInstanceOrdinal
+  );
+}
+
+/**
  * Combat Screen host (S07, S13): the full-viewport black canvas container plus
  * the approved Combat lifecycle shell — the global utility cluster (Pause then
  * Settings at `space-4` from the upper-right), the single blocking Combat
@@ -78,6 +104,48 @@ export function CombatScreen(): ReactElement | null {
   // own opener capture would see `<body>`; the explicit ref keeps canonical focus
   // restoration (DS §8.5, DS-AC-005) exact for both entry origins.
   const evacuateButtonRef = useRef<HTMLButtonElement>(null);
+  // V02-WI-07 D02-A-C01 F2 / D02-A-C02 F4: the development-only campaign Debug
+  // command is owned HERE for one logical active mission, and it is BOUND at
+  // construction to the immutable identity of the Mission Snapshot it was
+  // created for (mission id, globally unique durable attempt id, and local
+  // Mission Instance ordinal). Its single-flight latch and pending state
+  // survive Debug Overlay close/reopen, while a stale instance can never act on
+  // another run. The binding is re-established if the mounted screen ever sees
+  // a different Active Mission identity (the session router normally unmounts
+  // Combat between missions, so this stays defensive and cannot create a second
+  // command for the same mission). The build-time DEV_MODE gate keeps the whole
+  // surface out of production builds (the guarded initializer is dead code
+  // there).
+  const debugCampaignCommandRef = useRef<DebugCampaignBinding | null>(null);
+  const activeSnapshot: ActiveMissionIdentity | null =
+    session.activeMission === 'none'
+      ? null
+      : {
+          missionId: session.activeMission.missionId,
+          attemptId: session.activeMission.missionAttemptId,
+          missionInstanceOrdinal: session.activeMission.missionInstanceOrdinal,
+        };
+  const boundCommand = debugCampaignCommandRef.current;
+  if (
+    DEV_MODE &&
+    activeSnapshot !== null &&
+    (boundCommand === null ||
+      !sameMissionIdentity(boundCommand.origin, activeSnapshot))
+  ) {
+    debugCampaignCommandRef.current = {
+      origin: activeSnapshot,
+      command: createDebugCampaignCommand({
+        store,
+        campaignStore,
+        debugMode: DEV_MODE,
+        origin: activeSnapshot,
+        navigate: () => {
+          window.location.reload();
+        },
+      }),
+    };
+  }
+  const debugCampaignCommand = debugCampaignCommandRef.current?.command ?? null;
   const sessionRef = useRef<CombatSession | null>(null);
   const recoveryControllerRef = useRef<MissionStartRecoveryController | null>(
     null,
@@ -550,6 +618,7 @@ export function CombatScreen(): ReactElement | null {
       ) : null}
       {DEV_MODE &&
       DebugOverlayComponent !== null &&
+      debugCampaignCommand !== null &&
       lifecycle.overlay === 'debug' ? (
         <Suspense fallback={null}>
           <DebugOverlayComponent
@@ -558,6 +627,7 @@ export function CombatScreen(): ReactElement | null {
             getObservability={getObservability}
             submitDebugAction={submitDebugAction}
             encounterIds={debugEncounterIds}
+            campaignCommand={debugCampaignCommand}
           />
         </Suspense>
       ) : null}

@@ -370,6 +370,33 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
       .filter({ has: page.getByText('Escape Penalties', { exact: true }) }),
   ).toBeVisible();
 
+  // V02-WI-07 D02-A: the persisted-campaign rows come from CampaignStorePort —
+  // Credits, the exact active-mission marker, and runStatus — and the two
+  // bounded Credit controls apply through the atomic campaign transaction.
+  const creditsRow = dialog
+    .locator('.ds-field-row')
+    .filter({ has: page.getByText('Credits', { exact: true }) });
+  const markerRow = dialog
+    .locator('.ds-field-row')
+    .filter({ has: page.getByText('missionInProgress', { exact: true }) });
+  const runStatusRow = dialog
+    .locator('.ds-field-row')
+    .filter({ has: page.getByText('runStatus', { exact: true }) });
+  await expect(creditsRow).toContainText('12');
+  await expect(markerRow).toContainText('interception-01');
+  await expect(markerRow).toContainText('attempt');
+  await expect(runStatusRow).toContainText('active');
+  // The real start persisted an exact marker, so recovery is eligible.
+  await expect(
+    dialog.getByRole('button', { name: 'Reload for Recovery' }),
+  ).toBeEnabled();
+
+  await expect(
+    dialog.getByRole('button', { name: 'Set Credits: 8' }),
+  ).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Set Credits: 7' }).click();
+  await expect(creditsRow).toContainText('7');
+
   // F1 closes Debug from the running origin and resumes.
   await page.keyboard.press('F1');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -473,5 +500,79 @@ test('development Debug Evacuate Mission enters the normal Evacuation result flo
   await expect(
     page.getByRole('button', { name: 'Interception 01 (Completed)' }),
   ).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
+test('development Debug Set Credits: 8 then Lose Mission takes the paid full-Repair branch exactly (Epic §12.4, V02-AC-016/026)', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await startCombat(page);
+
+  await page.keyboard.press('F1');
+  const debug = page.getByRole('dialog');
+  const creditsRow = debug
+    .locator('.ds-field-row')
+    .filter({ has: page.getByText('Credits', { exact: true }) });
+  await debug.getByRole('button', { name: 'Set Credits: 8' }).click();
+  await expect(creditsRow).toContainText('8');
+
+  // The accepted Lose Mission command runs the normal Defeat transaction: the
+  // paid full Repair deducts exactly 8 Credits and restores Hull 100.
+  await debug.getByRole('button', { name: 'Lose Mission' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'MISSION FAILED' }),
+  ).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('-8 Credits')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await expect(page.getByText('Credits: 0')).toBeVisible();
+
+  // The paid full Repair is durable: the next mission starts at Hull 100.
+  await page.getByRole('button', { name: 'Interception 01' }).click();
+  await page.getByRole('button', { name: 'Start Mission' }).click();
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
+  await expect
+    .poll(
+      () => page.locator('.ds-combat-hud__track').getAttribute('aria-valuenow'),
+      { timeout: 5000 },
+    )
+    .toBe('100');
+  expect(pageErrors).toEqual([]);
+});
+
+test('development Debug Set Credits: 7 then Lose Mission opens the existing Game Over Screen exactly once (Epic §12.4/§13.6, V02-AC-016/026)', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await startCombat(page);
+
+  await page.keyboard.press('F1');
+  const debug = page.getByRole('dialog');
+  const creditsRow = debug
+    .locator('.ds-field-row')
+    .filter({ has: page.getByText('Credits', { exact: true }) });
+  await debug.getByRole('button', { name: 'Set Credits: 7' }).click();
+  await expect(creditsRow).toContainText('7');
+
+  // 7 Credits cannot pay the 8-Credit Repair: no partial deduction, no mission
+  // Result, and the terminal Game Over Screen owns the run.
+  await debug.getByRole('button', { name: 'Lose Mission' }).click();
+  await expect(page.getByTestId('game-over-screen')).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.getByTestId('game-over-screen')).toHaveCount(1);
+  await expect(
+    page.getByRole('heading', { name: 'MISSION FAILED' }),
+  ).toHaveCount(0);
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(0);
+
+  // Reloading the terminal run keeps the retained 7 Credits and the cleared
+  // marker: recovery resolves exactly once, never twice.
+  await page.reload();
+  await expect(page.getByTestId('game-over-screen')).toBeVisible();
+  await expect(page.getByTestId('game-over-screen')).toHaveCount(1);
   expect(pageErrors).toEqual([]);
 });

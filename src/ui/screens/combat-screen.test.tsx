@@ -32,6 +32,7 @@ import {
   campaignSchemaContext,
 } from '@test-support/persistence';
 import { ApplicationContext } from '../application-context';
+import type { DebugOverlayProps } from '../overlays/debug-overlay';
 import { CombatScreen } from './combat-screen';
 
 /**
@@ -75,13 +76,22 @@ vi.mock('@application/combat', async (importOriginal) => {
 
 // S13: the Debug Overlay is lazy-loaded only in development builds; the mock
 // keeps the CombatScreen tests deterministic without loading the real module.
+// It also records the props it receives, so the tests can prove that the
+// mission-lifetime D02-A campaign command is injected (D02-A-C01 F2).
+const debugOverlayProps = vi.hoisted(() => ({
+  calls: [] as DebugOverlayProps[],
+}));
 vi.mock('@ui/overlays/debug-overlay', () => ({
-  DebugOverlay: () => <div data-testid="debug-overlay-mock">Debug</div>,
+  DebugOverlay: (props: DebugOverlayProps) => {
+    debugOverlayProps.calls.push(props);
+    return <div data-testid="debug-overlay-mock">Debug</div>;
+  },
 }));
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  debugOverlayProps.calls.length = 0;
 });
 
 function storeWithActiveMission(): SessionStore {
@@ -593,10 +603,66 @@ describe('CombatScreen', () => {
     await act(async () => {});
     expect(store.getState()?.combatLifecycle.overlay).toBe('debug');
     expect(screen.getByTestId('debug-overlay-mock')).toBeDefined();
+    // D02-A-C01 F2: the screen owns ONE campaign Debug command for the logical
+    // active mission and injects that same instance into the Overlay, so its
+    // single-flight latch and pending state survive close/reopen.
+    const opened = debugOverlayProps.calls.at(-1)!.campaignCommand;
+    expect(typeof opened.setCredits).toBe('function');
+    expect(typeof opened.requestRecoveryReload).toBe('function');
+    expect(opened.isCreditsPending()).toBe(false);
+    // The command is bound to the mission it was created for (D02-A-C02 F4).
+    expect(opened.origin).toEqual({
+      missionId: 'interception-01',
+      attemptId: 0,
+      missionInstanceOrdinal: 0,
+    });
     fireEvent.keyDown(window, { code: 'F1' });
     await act(async () => {});
     expect(store.getState()?.combatLifecycle.overlay).toBe('none');
     expect(screen.queryByTestId('debug-overlay-mock')).toBeNull();
+    fireEvent.keyDown(window, { code: 'F1' });
+    await act(async () => {});
+    expect(debugOverlayProps.calls.at(-1)!.campaignCommand).toBe(opened);
+
+    // A different Active Mission identity while this screen instance stays
+    // mounted rebinds the command: the stale instance remains inert at its own
+    // boundary and the new instance carries the new originating identity (the
+    // session router normally unmounts Combat between missions, so this is the
+    // defensive path).
+    store.dispatch({
+      type: 'mission/start-failed',
+      missionId: 'interception-01',
+      missionAttemptId: 0,
+      missionInstanceOrdinal: 0,
+    });
+    const session = store.getState();
+    if (session === null) {
+      throw new Error('Expected an initialized session.');
+    }
+    store.dispatch({
+      type: 'mission/start',
+      snapshot: {
+        missionId: 'interception-01',
+        missionInstanceOrdinal: 1,
+        missionAttemptId: 1,
+        combatMissionSeed: 4321,
+        aircraftId: session.aircraftId,
+        hullIntegrity: session.hullIntegrity,
+        equippedWeapon: session.equippedWeapon,
+        pilot: session.pilot,
+        mouseMovementEnabled: session.mouseMovementEnabled,
+      },
+    });
+    await act(async () => {});
+    fireEvent.keyDown(window, { code: 'F1' });
+    await act(async () => {});
+    const rebound = debugOverlayProps.calls.at(-1)!.campaignCommand;
+    expect(rebound).not.toBe(opened);
+    expect(rebound.origin).toEqual({
+      missionId: 'interception-01',
+      attemptId: 1,
+      missionInstanceOrdinal: 1,
+    });
   });
 
   it('shared Settings changes are relayed to the simulation for use on Resume (AC-038)', async () => {

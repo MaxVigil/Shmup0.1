@@ -62,6 +62,7 @@ async function readStoredCampaign(page: Page): Promise<{
     nextMissionAttemptId?: unknown;
     credits: number;
     hullIntegrity: number;
+    runStatus: string;
   };
 }> {
   return page.evaluate(
@@ -90,6 +91,41 @@ async function readStoredCampaign(page: Page): Promise<{
     },
     { dbName: DB_NAME },
   );
+}
+
+/** The path-qualified diagnostic shape Boot records for an unreadable campaign
+ *  (Epic §14.2, V02-DEC-034, V02-AC-021). Declared locally: `e2e/` never
+ *  imports application or Domain modules. */
+interface SaveDataDiagnostic {
+  readonly path: string;
+  readonly message: string;
+}
+
+/**
+ * Captures the development-only Save Data Error diagnostics (V02-WI-07 D02-B).
+ * Boot records them through ONE `console.warn('Save Data Error diagnostics:', …)`
+ * call; the console arguments are read as data so a test asserts the exact
+ * path-qualified causes instead of a formatted string. Register the returned
+ * collector before navigating; it accumulates one entry per console call.
+ */
+function captureSaveDataDiagnostics(page: Page): SaveDataDiagnostic[] {
+  const captured: SaveDataDiagnostic[] = [];
+  page.on('console', (message) => {
+    const args = message.args();
+    if (args.length < 2) {
+      return;
+    }
+    void (async () => {
+      const [label, payload] = await Promise.all([
+        args[0].jsonValue(),
+        args[1].jsonValue(),
+      ]);
+      if (label === 'Save Data Error diagnostics:' && Array.isArray(payload)) {
+        captured.push(...(payload as SaveDataDiagnostic[]));
+      }
+    })();
+  });
+  return captured;
 }
 
 test('a C03-shaped version-1 database upgrades, removes the obsolete counter, preserves Campaign and Settings, and allocates the first version-2 attempt id strictly above the legacy counter (V02-WI-02 C05)', async ({
@@ -380,6 +416,71 @@ test('reload during an active mission resolves exactly once as Defeat with paid 
   }, DB_NAME);
   expect(rows).toBe(1);
 });
+
+test('V02-WI-07 D02-A: the Debug campaign rows read the authoritative record, Set Credits: 7 applies atomically, and Reload for Recovery resolves the marker once as Game Over (V02-AC-016/018/020/026)', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await expect(page.getByText('Credits: 12')).toBeVisible();
+  await page.getByRole('button', { name: 'Interception 01' }).click();
+  await page.getByRole('button', { name: 'Start Mission' }).click();
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
+
+  // The development Debug surface reads the PERSISTED campaign, not the session.
+  await page.keyboard.press('F1');
+  const dialog = page.getByRole('dialog');
+  const row = (label: string) =>
+    dialog
+      .locator('.ds-field-row')
+      .filter({ has: page.getByText(label, { exact: true }) });
+  const persisted = await readStoredCampaign(page);
+  const marker = persisted.value.missionInProgress;
+  expect(marker).not.toBeNull();
+  await expect(row('Credits')).toContainText('12');
+  await expect(row('missionInProgress')).toContainText(
+    `interception-01 · attempt ${marker!.attemptId}`,
+  );
+  await expect(row('runStatus')).toContainText('active');
+
+  // Set Credits: 7 (below the 8-Credit Repair cost) through the atomic campaign
+  // transaction; the durable record is updated before the session reflects it.
+  await dialog.getByRole('button', { name: 'Set Credits: 7' }).click();
+  await expect(row('Credits')).toContainText('7');
+  await expect
+    .poll(async () => (await readStoredCampaign(page)).value.credits)
+    .toBe(7);
+  // The exact marker is untouched by a Credit change.
+  expect((await readStoredCampaign(page)).value.missionInProgress).toEqual(
+    marker,
+  );
+
+  // Reload for Recovery performs browser navigation only; Boot owns recovery.
+  await dialog.getByRole('button', { name: 'Reload for Recovery' }).click();
+  await expect(page.getByTestId('game-over-screen')).toBeVisible({
+    timeout: 20000,
+  });
+  await expect(page.getByText('GAME OVER')).toBeVisible();
+  // No partial deduction, the exact marker cleared, and no Combat restored.
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(0);
+  await expect(page.getByTestId('combat-screen')).toHaveCount(0);
+  const afterRecovery = await readStoredCampaign(page);
+  expect(afterRecovery.value.credits).toBe(7);
+  expect(afterRecovery.value.runStatus).toBe('game-over');
+  expect(afterRecovery.value.missionInProgress).toBeNull();
+  await expect(page.getByTestId('game-over-screen')).toHaveCount(1);
+
+  // A second reload is inert: the cleared marker is never re-resolved.
+  await page.reload();
+  await expect(page.getByTestId('game-over-screen')).toBeVisible();
+  const afterSecond = await readStoredCampaign(page);
+  expect(afterSecond.value.credits).toBe(7);
+  expect(afterSecond.value.runStatus).toBe('game-over');
+  expect(afterSecond.value.missionInProgress).toBeNull();
+});
 test('a Combat initialization failure clears the persisted marker, allows retry, and never deducts on reload (Base AC-014 correction)', async ({
   page,
 }) => {
@@ -625,6 +726,161 @@ async function seedVersion1Database(
     },
   );
 }
+/** Seeds a REAL version-1 database whose campaign row carries the EXACT given
+ *  envelope (V02-WI-07 D02-B-C01 F1; V02-DEC-035). A wrong-marker fixture needs
+ *  a `rowFormatVersion` property that the accepted C03 seeding helper never
+ *  writes; every other acceptance rule (the application still opens version 2
+ *  and still rejects the row) is unchanged. Playwright's argument serializer
+ *  drops `undefined` property values, so `presentUndefinedMarker: true`
+ *  reconstructs a present-undefined marker INSIDE the page instead of
+ *  transporting it as data. */
+async function seedVersion1CampaignRow(
+  page: Page,
+  row: Record<string, unknown>,
+  settings: { mouseMovementEnabled: boolean } = { mouseMovementEnabled: true },
+  presentUndefinedMarker = false,
+): Promise<void> {
+  await page.addInitScript(
+    ({ dbName, row: seededRow, settings: seededSettings, undefinedMarker }) => {
+      const envelope: Record<string, unknown> = undefinedMarker
+        ? {
+            id: seededRow.id,
+            rowFormatVersion: undefined,
+            value: seededRow.value,
+          }
+        : seededRow;
+      const created = new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open(dbName, 1);
+        request.onupgradeneeded = () => {
+          const database = request.result;
+          if (!database.objectStoreNames.contains('campaign')) {
+            database.createObjectStore('campaign', { keyPath: 'id' });
+          }
+          if (!database.objectStoreNames.contains('userSettings')) {
+            database.createObjectStore('userSettings', { keyPath: 'id' });
+          }
+        };
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction(
+            ['campaign', 'userSettings'],
+            'readwrite',
+          );
+          transaction.objectStore('campaign').put(envelope);
+          transaction
+            .objectStore('userSettings')
+            .put({ id: 'current', value: seededSettings });
+          transaction.oncomplete = () => {
+            database.close();
+            resolve();
+          };
+          transaction.onerror = () => reject(transaction.error);
+        };
+        request.onerror = () => {
+          const error = request.error;
+          if (error instanceof DOMException && error.name === 'VersionError') {
+            resolve();
+            return;
+          }
+          reject(error);
+        };
+      });
+      (window as { __v1Created?: Promise<void> }).__v1Created = created;
+    },
+    {
+      dbName: DB_NAME,
+      row,
+      settings,
+      undefinedMarker: presentUndefinedMarker,
+    },
+  );
+}
+
+/** Writes a campaign row whose `rowFormatVersion` property is PRESENT but
+ *  `undefined` into the current database (V02-WI-07 D02-B-C01 F1 boundary) and
+ *  reports whether the property survived the IndexedDB round trip. The property
+ *  is constructed inside the page, so the real structured-clone semantics
+ *  decide; Chromium keeps it. */
+async function writePresentUndefinedMarkerRow(
+  page: Page,
+  value: Record<string, unknown>,
+): Promise<boolean> {
+  return page.evaluate(
+    async ({ dbName, record }) => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(dbName);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction('campaign', 'readwrite');
+        transaction.objectStore('campaign').put({
+          id: 'current',
+          rowFormatVersion: undefined,
+          value: record,
+        });
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+      const row = await new Promise<Record<string, unknown>>(
+        (resolve, reject) => {
+          const transaction = database.transaction('campaign', 'readonly');
+          const get = transaction.objectStore('campaign').get('current');
+          get.onsuccess = () => resolve(get.result as Record<string, unknown>);
+          get.onerror = () => reject(get.error);
+        },
+      );
+      database.close();
+      return Object.hasOwn(row, 'rowFormatVersion');
+    },
+    { dbName: DB_NAME, record: value },
+  );
+}
+/** A fully valid C03 persisted campaign value: the version-1 fixtures that must
+ *  NOT be promoted by the shared envelope guard carry fields that would pass the
+ *  complete legacy C03 validation (V02-DEC-035). */
+function c03LikeValidValue(): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    runStatus: 'active',
+    credits: 40,
+    aircraftId: 'german-fighter',
+    hullIntegrity: 55,
+    equippedWeapon: 'cannon',
+    unlockedMissionIds: ['interception-01'],
+    completedMissionIds: [],
+    missionInProgress: null,
+    nextMissionAttemptId: 5,
+    pilotId: 'pilot-shevchenko',
+  };
+}
+
+/** Reads the raw persisted Settings row through IndexedDB (V02-DEC-035 upgrade
+ *  fixtures assert Settings preservation without entering the game). */
+async function readStoredSettings(page: Page): Promise<{
+  readonly value?: { readonly mouseMovementEnabled?: unknown };
+}> {
+  return page.evaluate(
+    async ({ dbName }) => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(dbName);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const row = await new Promise<unknown>((resolve, reject) => {
+        const transaction = database.transaction('userSettings', 'readonly');
+        const get = transaction.objectStore('userSettings').get('current');
+        get.onsuccess = () => resolve(get.result);
+        get.onerror = () => reject(get.error);
+      });
+      database.close();
+      return row as {
+        readonly value?: { readonly mouseMovementEnabled?: unknown };
+      };
+    },
+    { dbName: DB_NAME },
+  );
+}
 
 test('a C03 campaign with the forbidden marker/counter equality stays a Save Data Error and is neither rewritten nor used to seed the allocator (V02-WI-02 C06)', async ({
   page,
@@ -776,6 +1032,439 @@ test('a version-1 row missing its required C03 counter stays a Save Data Error a
   await expect(
     page.getByRole('checkbox', { name: 'Mouse Movement Enabled' }),
   ).not.toBeChecked();
+});
+
+test('V02-WI-07 D02-B: a rejected legacy C03 migration keeps its original field-specific console diagnostic (invalid Credits), stays byte-for-structure untouched, and never seeds the allocator (Epic §14.2, V02-DEC-034, V02-AC-021)', async ({
+  page,
+}) => {
+  const diagnostics = captureSaveDataDiagnostics(page);
+  // A genuine version-1 database whose C03-shaped campaign has an invalid
+  // Credits field: the complete legacy validation rejects it, so the upgrade
+  // leaves the raw row untouched — obsolete counter intact, no marker.
+  await seedVersion1Database(page, {
+    schemaVersion: 1,
+    runStatus: 'active',
+    credits: -5,
+    aircraftId: 'german-fighter',
+    hullIntegrity: 100,
+    equippedWeapon: 'machine-gun',
+    unlockedMissionIds: ['interception-01'],
+    completedMissionIds: [],
+    missionInProgress: null,
+    nextMissionAttemptId: 5,
+    pilotId: 'pilot-shevchenko',
+  });
+
+  await page.goto('/');
+  await page.evaluate(
+    () => (window as { __v1Created?: Promise<void> }).__v1Created,
+  );
+
+  // The existing Save Data Error flow opens with the generic player copy only.
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect(
+    page.getByText('Saved game data could not be loaded.'),
+  ).toBeVisible();
+  // The development console reports the ORIGINAL failing field, not only the
+  // row-envelope path.
+  await expect.poll(() => diagnostics.length).toBeGreaterThan(0);
+  expect(diagnostics).toEqual([
+    { path: 'credits', message: 'credits must be a non-negative integer' },
+  ]);
+
+  // The unreadable row stays byte-for-structure untouched.
+  const stored = await readStoredCampaign(page);
+  expect(stored.rowFormatVersion).toBeUndefined();
+  expect(stored.value.nextMissionAttemptId).toBe(5);
+  expect(stored.value.credits).toBe(-5);
+  // A rejected legacy row never allocates a mission attempt id.
+  const allocatorState = await readAllocatorState(page);
+  expect(allocatorState.hasAllocator).toBe(true);
+  expect(allocatorState.allocatorCount).toBe(0);
+  expect(allocatorState.maxKey).toBe(-1);
+
+  // A reload reports the same original cause once more and changes nothing.
+  await page.reload();
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect.poll(() => diagnostics.length).toBeGreaterThanOrEqual(2);
+  expect(diagnostics[1]).toEqual(diagnostics[0]);
+  const afterReload = await readStoredCampaign(page);
+  expect(afterReload.rowFormatVersion).toBeUndefined();
+  expect(afterReload.value.nextMissionAttemptId).toBe(5);
+  expect(afterReload.value.credits).toBe(-5);
+});
+
+test('V02-WI-07 D02-B: a rejected legacy C03 migration reports the marker/counter ordering cause at missionInProgress, never only the row-envelope path (Epic §14.2, V02-AC-021)', async ({
+  page,
+}) => {
+  const diagnostics = captureSaveDataDiagnostics(page);
+  // C03-forbidden equality: the marker's attempt id equals the next counter
+  // value, so only the legacy ordering invariant rejects this row.
+  await seedVersion1Database(page, {
+    schemaVersion: 1,
+    runStatus: 'active',
+    credits: 12,
+    aircraftId: 'german-fighter',
+    hullIntegrity: 100,
+    equippedWeapon: 'machine-gun',
+    unlockedMissionIds: ['interception-01'],
+    completedMissionIds: [],
+    missionInProgress: { missionId: 'interception-01', attemptId: 2 },
+    nextMissionAttemptId: 2,
+    pilotId: 'pilot-shevchenko',
+  });
+
+  await page.goto('/');
+  await page.evaluate(
+    () => (window as { __v1Created?: Promise<void> }).__v1Created,
+  );
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect.poll(() => diagnostics.length).toBeGreaterThan(0);
+  expect(diagnostics).toEqual([
+    {
+      path: 'missionInProgress',
+      message:
+        'the mission attempt id is not strictly below the next mission attempt id',
+    },
+  ]);
+  expect(diagnostics.map((entry) => entry.path)).not.toContain(
+    'rowFormatVersion',
+  );
+
+  const stored = await readStoredCampaign(page);
+  expect(stored.rowFormatVersion).toBeUndefined();
+  expect(stored.value.nextMissionAttemptId).toBe(2);
+  expect(stored.value.missionInProgress?.attemptId).toBe(2);
+  const allocatorState = await readAllocatorState(page);
+  expect(allocatorState.allocatorCount).toBe(0);
+  expect(allocatorState.maxKey).toBe(-1);
+});
+
+test('V02-WI-07 D02-B: an unmarked row without established legacy provenance reports the truthful current-row rejection, never a fabricated migration cause, and is replaced only by confirmed Start New Game (Epic §14.2, V02-AC-021)', async ({
+  page,
+}) => {
+  const diagnostics = captureSaveDataDiagnostics(page);
+  // A C03-shaped campaign MISSING the obsolete counter: every value is valid,
+  // so the row's provenance cannot be established and no legacy cause may be
+  // claimed for it.
+  await seedVersion1Database(
+    page,
+    {
+      schemaVersion: 1,
+      runStatus: 'active',
+      credits: 12,
+      aircraftId: 'german-fighter',
+      hullIntegrity: 100,
+      equippedWeapon: 'machine-gun',
+      unlockedMissionIds: ['interception-01'],
+      completedMissionIds: [],
+      missionInProgress: null,
+      pilotId: 'pilot-shevchenko',
+    },
+    { mouseMovementEnabled: false },
+  );
+
+  await page.goto('/');
+  await page.evaluate(
+    () => (window as { __v1Created?: Promise<void> }).__v1Created,
+  );
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect.poll(() => diagnostics.length).toBeGreaterThan(0);
+  expect(diagnostics).toEqual([
+    {
+      path: 'rowFormatVersion',
+      message: 'stored campaign row is not in the current format',
+    },
+  ]);
+
+  // A plain reload never replaces or rewrites the unreadable row.
+  await page.reload();
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  const unchanged = await readStoredCampaign(page);
+  expect(unchanged.rowFormatVersion).toBeUndefined();
+  expect(unchanged.value.credits).toBe(12);
+
+  // Only the explicitly confirmed destructive action replaces it.
+  await page.getByRole('button', { name: 'Start New Game' }).click();
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  const replaced = await readStoredCampaign(page);
+  expect(replaced.rowFormatVersion).toBe(2);
+  expect(replaced.value.credits).toBe(12);
+});
+
+test('V02-WI-07 D02-B: a current-format row whose campaign value fails validation reports the failing field by path in the development console (Epic §14.2, V02-AC-021)', async ({
+  page,
+}) => {
+  const diagnostics = captureSaveDataDiagnostics(page);
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  // A marked current-format row whose VALUE fails campaign validation: the
+  // current-campaign validation cause must reach the development console too.
+  await writeCampaignRecord(page, {
+    schemaVersion: 1,
+    runStatus: 'active',
+    credits: 12,
+    aircraftId: 'german-fighter',
+    hullIntegrity: 500,
+    equippedWeapon: 'machine-gun',
+    unlockedMissionIds: ['interception-01'],
+    completedMissionIds: [],
+    missionInProgress: null,
+    pilotId: 'pilot-shevchenko',
+  });
+
+  await page.reload();
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect.poll(() => diagnostics.length).toBeGreaterThan(0);
+  expect(diagnostics).toEqual([
+    {
+      path: 'hullIntegrity',
+      message: 'hullIntegrity must be an integer in 0..100',
+    },
+  ]);
+
+  // The marked row survives the Save Data Error unchanged.
+  const stored = await readStoredCampaign(page);
+  expect(stored.rowFormatVersion).toBe(2);
+  expect(stored.value.hullIntegrity).toBe(500);
+});
+
+/** A C03-like persisted campaign value whose Credits field is invalid: the
+ *  complete legacy C03 validation rejects it, so it is the value probe used by
+ *  the wrong-marker regressions (V02-WI-07 D02-B-C01 F1). */
+function c03LikeInvalidCreditsValue(): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    runStatus: 'active',
+    credits: -5,
+    aircraftId: 'german-fighter',
+    hullIntegrity: 100,
+    equippedWeapon: 'machine-gun',
+    unlockedMissionIds: ['interception-01'],
+    completedMissionIds: [],
+    missionInProgress: null,
+    nextMissionAttemptId: 5,
+    pilotId: 'pilot-shevchenko',
+  };
+}
+
+test('V02-WI-07 D02-B-C01: an explicit wrong row-format marker over a C03-like invalid value stays a row-format rejection, untouched, with no allocator allocation (F1, V02-AC-021)', async ({
+  page,
+}) => {
+  const diagnostics = captureSaveDataDiagnostics(page);
+  // A version-1 database whose campaign row carries an EXPLICIT non-current
+  // marker (3) and a C03-like value with invalid Credits. The conflicting
+  // envelope makes the provenance ambiguous, so the development console must
+  // report the current-row format rejection instead of the value's field cause.
+  await seedVersion1CampaignRow(page, {
+    id: 'current',
+    rowFormatVersion: 3,
+    value: c03LikeInvalidCreditsValue(),
+  });
+
+  await page.goto('/');
+  await page.evaluate(
+    () => (window as { __v1Created?: Promise<void> }).__v1Created,
+  );
+
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect(
+    page.getByText('Saved game data could not be loaded.'),
+  ).toBeVisible();
+  await expect.poll(() => diagnostics.length).toBeGreaterThan(0);
+  expect(diagnostics).toEqual([
+    {
+      path: 'rowFormatVersion',
+      message: 'stored campaign row is not in the current format',
+    },
+  ]);
+
+  // The row stays unreadable and byte-for-structure unchanged: its explicit
+  // marker, obsolete counter, and invalid value are all preserved.
+  const stored = await readStoredCampaign(page);
+  expect(stored.rowFormatVersion).toBe(3);
+  expect(stored.value.nextMissionAttemptId).toBe(5);
+  expect(stored.value.credits).toBe(-5);
+  const allocatorState = await readAllocatorState(page);
+  expect(allocatorState.hasAllocator).toBe(true);
+  expect(allocatorState.allocatorCount).toBe(0);
+  expect(allocatorState.maxKey).toBe(-1);
+
+  // A reload reports the same rejection once more and changes nothing.
+  await page.reload();
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect.poll(() => diagnostics.length).toBeGreaterThanOrEqual(2);
+  expect(diagnostics[1]).toEqual(diagnostics[0]);
+  const afterReload = await readStoredCampaign(page);
+  expect(afterReload.rowFormatVersion).toBe(3);
+  expect(afterReload.value.nextMissionAttemptId).toBe(5);
+  expect(afterReload.value.credits).toBe(-5);
+});
+
+test('V02-WI-07 D02-B-C01: a present-undefined row-format marker is an explicit non-current claim and reports the row-format rejection (F1 boundary, V02-AC-021)', async ({
+  page,
+}) => {
+  const diagnostics = captureSaveDataDiagnostics(page);
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+
+  // Chromium IndexedDB preserves a present `undefined` property, so this is a
+  // real persisted row shape: the envelope claims a format it does not name.
+  expect(
+    await writePresentUndefinedMarkerRow(page, c03LikeInvalidCreditsValue()),
+  ).toBe(true);
+
+  await page.reload();
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect.poll(() => diagnostics.length).toBeGreaterThan(0);
+  expect(diagnostics).toEqual([
+    {
+      path: 'rowFormatVersion',
+      message: 'stored campaign row is not in the current format',
+    },
+  ]);
+  const stored = await readStoredCampaign(page);
+  expect(stored.rowFormatVersion).toBeUndefined();
+  expect(stored.value.credits).toBe(-5);
+  const allocatorState = await readAllocatorState(page);
+  expect(allocatorState.allocatorCount).toBe(0);
+  expect(allocatorState.maxKey).toBe(-1);
+});
+
+test('V02-WI-07 D02-B-C02: the version-1 → version-2 upgrade does not promote a valid C03 row with an explicit wrong row-format marker (V02-DEC-035, V02-AC-021)', async ({
+  page,
+}) => {
+  const diagnostics = captureSaveDataDiagnostics(page);
+  // Every campaign field passes the complete legacy C03 validation, so only the
+  // explicit conflicting marker can stop the upgrade from promoting this row.
+  await seedVersion1CampaignRow(
+    page,
+    { id: 'current', rowFormatVersion: 1, value: c03LikeValidValue() },
+    { mouseMovementEnabled: false },
+  );
+
+  await page.goto('/');
+  await page.evaluate(
+    () => (window as { __v1Created?: Promise<void> }).__v1Created,
+  );
+
+  // Not promoted: the existing Save Data Error flow opens with the generic
+  // player copy and the truthful development diagnostic.
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect(page.getByTestId('operations-screen')).toHaveCount(0);
+  await expect(
+    page.getByText('Saved game data could not be loaded.'),
+  ).toBeVisible();
+  await expect.poll(() => diagnostics.length).toBeGreaterThan(0);
+  expect(diagnostics).toEqual([
+    {
+      path: 'rowFormatVersion',
+      message: 'stored campaign row is not in the current format',
+    },
+  ]);
+
+  // Byte-for-structure untouched: the explicit marker, the obsolete counter,
+  // and every valid campaign field survive; no allocator identity is seeded.
+  const stored = await readStoredCampaign(page);
+  expect(stored.rowFormatVersion).toBe(1);
+  expect(stored.value.nextMissionAttemptId).toBe(5);
+  expect(stored.value.credits).toBe(40);
+  const allocatorState = await readAllocatorState(page);
+  expect(allocatorState.hasAllocator).toBe(true);
+  expect(allocatorState.allocatorCount).toBe(0);
+  expect(allocatorState.maxKey).toBe(-1);
+  // Settings survive the non-promotion unchanged.
+  expect((await readStoredSettings(page)).value).toEqual({
+    mouseMovementEnabled: false,
+  });
+
+  // A reload neither promotes nor rewrites the row.
+  await page.reload();
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  const afterReload = await readStoredCampaign(page);
+  expect(afterReload.rowFormatVersion).toBe(1);
+  expect(afterReload.value.nextMissionAttemptId).toBe(5);
+  expect(afterReload.value.credits).toBe(40);
+});
+
+test('V02-WI-07 D02-B-C02: an exact current marker in a version-1 database is never playable and keeps the existing obsolete-counter diagnostic (V02-DEC-035, V02-AC-021)', async ({
+  page,
+}) => {
+  const diagnostics = captureSaveDataDiagnostics(page);
+  // The marker value alone cannot prove current provenance in a version-1
+  // database: the row still carries its obsolete counter and stays unreadable.
+  await seedVersion1CampaignRow(page, {
+    id: 'current',
+    rowFormatVersion: 2,
+    value: c03LikeValidValue(),
+  });
+
+  await page.goto('/');
+  await page.evaluate(
+    () => (window as { __v1Created?: Promise<void> }).__v1Created,
+  );
+
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect(page.getByTestId('operations-screen')).toHaveCount(0);
+  await expect.poll(() => diagnostics.length).toBeGreaterThan(0);
+  // The row is not rewritten, so the existing current-campaign validation still
+  // rejects the obsolete counter by path.
+  expect(diagnostics).toEqual([
+    {
+      path: 'nextMissionAttemptId',
+      message:
+        'obsolete legacy counter must be removed by the campaign migration',
+    },
+  ]);
+  const stored = await readStoredCampaign(page);
+  expect(stored.rowFormatVersion).toBe(2);
+  expect(stored.value.nextMissionAttemptId).toBe(5);
+  expect(stored.value.credits).toBe(40);
+  const allocatorState = await readAllocatorState(page);
+  expect(allocatorState.allocatorCount).toBe(0);
+  expect(allocatorState.maxKey).toBe(-1);
+
+  await page.reload();
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+});
+
+test('V02-WI-07 D02-B-C02: a present-undefined row-format marker blocks the version-1 → version-2 promotion (V02-DEC-035, V02-AC-021)', async ({
+  page,
+}) => {
+  const diagnostics = captureSaveDataDiagnostics(page);
+  // A present `undefined` marker is an own property (not an absent one), so the
+  // shared guard must treat this valid C03 row as conflicting provenance. The
+  // marker is reconstructed inside the page because Playwright's argument
+  // serializer drops `undefined` property values.
+  await seedVersion1CampaignRow(
+    page,
+    { id: 'current', value: c03LikeValidValue() },
+    { mouseMovementEnabled: true },
+    true,
+  );
+
+  await page.goto('/');
+  await page.evaluate(
+    () => (window as { __v1Created?: Promise<void> }).__v1Created,
+  );
+
+  await expect(page.getByTestId('save-data-error-screen')).toBeVisible();
+  await expect(page.getByTestId('operations-screen')).toHaveCount(0);
+  await expect.poll(() => diagnostics.length).toBeGreaterThan(0);
+  expect(diagnostics).toEqual([
+    {
+      path: 'rowFormatVersion',
+      message: 'stored campaign row is not in the current format',
+    },
+  ]);
+  // The counter proves no migration ran; the row was not promoted.
+  const stored = await readStoredCampaign(page);
+  expect(stored.value.nextMissionAttemptId).toBe(5);
+  expect(stored.value.credits).toBe(40);
+  const allocatorState = await readAllocatorState(page);
+  expect(allocatorState.allocatorCount).toBe(0);
+  expect(allocatorState.maxKey).toBe(-1);
 });
 
 test('mission progression persists across reload: completed stays replayable, the unlocked next mission is available, and replay launches (Epic §6.2, V02-AC-001–002)', async ({

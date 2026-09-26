@@ -132,7 +132,7 @@ The authoritative source is `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION
 | Defeat, paid Repair, Game Over, and terminal-save recovery | §§12.4, 13.5–13.7 | V02-AC-016, V02-AC-020 | V02-WI-05 alternate-outcome consumption of the accepted persistence boundary | Covered |
 | New Game and Settings separation | §§13.6, 14.1 | V02-AC-017 | V02-WI-02 | Covered |
 | Active-mission recovery and hidden-tab pause | §§14.3–14.4 | V02-AC-018–019 | V02-WI-02 | Covered |
-| Atomic persistence and corrupted-save recovery | §§13.2, 14.1–14.2 | V02-AC-020–021 | V02-WI-02 | Covered |
+| Atomic persistence and corrupted-save recovery | §§13.2, 14.1–14.2, 17; V02-DEC-034–035 | V02-AC-020–021 | V02-WI-02 persistence foundation; V02-WI-07 D02-B diagnostics and upgrade-provenance guard | Covered; startup diagnostic and migration-guard ownership explicit |
 | Minimal Combat UI and terminal result UX | §15; Design System §8.26 | V02-AC-022–023 | V02-WI-04 Success; V02-WI-05 alternate outcomes and compatibility-seam removal | Covered; staged boundary explicit |
 | Enemy visual vocabulary and runtime asset contract | §16 | V02-AC-024–025 | V02-WI-01 asset layer; V02-WI-07 final three-mission traversal | Covered; staged evidence ownership explicit |
 | Debug authority | §17 | V02-AC-026 | V02-WI-07 | Covered |

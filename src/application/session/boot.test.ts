@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CONTENT_CATALOGUE } from '@content/index';
 import { beginMission, createNewGameCampaign } from '@domain/index';
 import { aircraftId } from '@domain/index';
@@ -9,12 +9,52 @@ import type {
 } from '../ports';
 import { createBootRunner } from './boot';
 import { createSessionStore } from './store';
+import { startMission } from '../mission';
+import { createDebugCampaignCommand } from '../persistence';
 import {
   InMemoryCampaignStore,
   InMemoryUserSettingsStore,
   campaignSchemaContext,
+  createInitializedTestApplication,
 } from '@test-support/persistence';
 import type { CampaignStateV1 } from '@domain/index';
+
+/**
+ * The D02-A command exactly as the Combat Screen owns it for one logical active
+ * mission: the Debug Overlay is authoritative-open, the command is bound to the
+ * active Mission Snapshot identity (F4), and browser navigation is injected so a
+ * test can prove whether it happened.
+ */
+function debugCommand(
+  app: ReturnType<typeof createInitializedTestApplication>,
+): {
+  readonly command: ReturnType<typeof createDebugCampaignCommand>;
+  readonly navigate: ReturnType<typeof vi.fn>;
+} {
+  const snapshot = app.store.getState()?.activeMission;
+  if (snapshot === undefined || snapshot === 'none') {
+    throw new Error('Expected an active mission for the Debug command.');
+  }
+  app.store.dispatch({
+    type: 'combat-lifecycle/open-debug',
+    missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+  });
+  const navigate = vi.fn();
+  return {
+    navigate,
+    command: createDebugCampaignCommand({
+      store: app.store,
+      campaignStore: app.campaignStore,
+      debugMode: true,
+      origin: {
+        missionId: snapshot.missionId,
+        attemptId: snapshot.missionAttemptId,
+        missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+      },
+      navigate,
+    }),
+  };
+}
 
 const READY_ASSETS: AssetPreloadResult = [
   {
@@ -216,6 +256,32 @@ describe('createBootRunner (WI-02 persistence hydration)', () => {
     expect(deps.store.getState()).toBeNull();
   });
 
+  it('opens the Save Data Error with the exact path-qualified read cause from a single campaign read (V02-WI-07 D02-B, V02-AC-021)', async () => {
+    const deps = emptyPersistence();
+    // The path-qualified cause comes from the persistence read — a rejected
+    // current campaign field OR a recognizable rejected legacy C03 migration
+    // (D02-B). Boot must forward that exact cause into its outcome and must not
+    // re-derive, replace, or drop it; the diagnostic share of the flow performs
+    // no second campaign read (`unreadableRowDiagnostics` runs on the row the
+    // read already returned).
+    const diagnostics = [
+      { path: 'credits', message: 'credits must be a non-negative integer' },
+    ];
+    const read = vi.fn(async () => ({ kind: 'invalid' as const, diagnostics }));
+    deps.campaignStore.read = read;
+
+    const outcome = await createBootRunner(bootDeps(deps)).run();
+
+    expect(outcome.kind).toBe('save-data-error');
+    expect(read).toHaveBeenCalledTimes(1);
+    if (outcome.kind === 'save-data-error') {
+      expect(outcome.diagnostics).toEqual(diagnostics);
+    }
+    // One Boot result/one diagnostic event: no session, no replacement.
+    expect(deps.store.getState()).toBeNull();
+    expect(deps.campaignStore.current).toBeNull();
+  });
+
   it('treats an unsupported schema version as a non-overwriting Save Data Error', async () => {
     const deps = emptyPersistence();
     deps.campaignStore.seed({
@@ -303,5 +369,73 @@ describe('createBootRunner (WI-02 persistence hydration)', () => {
     // Exactly one New Game campaign was persisted.
     expect(deps.campaignStore.current?.credits).toBe(12);
     expect(deps.store.getState()).not.toBeNull();
+  });
+
+  // V02-WI-07 D02-A: the development Credits command and the recovery reload are
+  // proven end to end. Boot is the ONLY recovery transition owner.
+  it('resolves a D02-A Set Credits: 7 marker once as Game Over on the recovery reload and stays inert afterwards (D02-A, V02-AC-018)', async () => {
+    const app = createInitializedTestApplication();
+    const start = await startMission(
+      { ...app, content: CONTENT_CATALOGUE },
+      'interception-01',
+    );
+    if (start.kind !== 'accepted') {
+      throw new Error('Expected the mission start to be accepted.');
+    }
+    const { command, navigate } = debugCommand(app);
+    expect(await command.setCredits(7)).toEqual({ kind: 'applied' });
+    expect(app.campaignStore.current?.credits).toBe(7);
+    expect(app.campaignStore.current?.missionInProgress).not.toBeNull();
+    // The recovery activation performs its own fresh authoritative read and
+    // verifies the exact identity before it navigates; the real Boot below is
+    // what performs the recovery transition (D02-A-C01 F3, V02-AC-018).
+    expect(await command.requestRecoveryReload()).toEqual({ kind: 'reloaded' });
+    expect(navigate).toHaveBeenCalledTimes(1);
+
+    // The recovery reload: a fresh Boot over the same durable record.
+    const reload = emptyPersistence();
+    reload.campaignStore.seed(app.campaignStore.current!);
+    const outcome = await createBootRunner(bootDeps(reload)).run();
+    expect(outcome.kind).toBe('ready');
+    // Defeat resolves once: 7 Credits retained (no partial deduction), Game
+    // Over, the exact marker cleared, and Combat never restored.
+    expect(reload.store.getState()?.runStatus).toBe('game-over');
+    expect(reload.store.getState()?.activeMission).toBe('none');
+    expect(reload.store.getState()?.credits).toBe(7);
+    expect(reload.campaignStore.current?.credits).toBe(7);
+    expect(reload.campaignStore.current?.runStatus).toBe('game-over');
+    expect(reload.campaignStore.current?.missionInProgress).toBeNull();
+
+    // A second reload is inert: the cleared marker is never re-resolved and no
+    // second cost is applied.
+    const second = emptyPersistence();
+    second.campaignStore.seed(reload.campaignStore.current!);
+    await createBootRunner(bootDeps(second)).run();
+    expect(second.campaignStore.current?.credits).toBe(7);
+    expect(second.campaignStore.current?.runStatus).toBe('game-over');
+    expect(second.campaignStore.current?.missionInProgress).toBeNull();
+  });
+
+  it('resolves a D02-A Set Credits: 8 marker through the paid full-Repair branch on the recovery reload (D02-A, V02-AC-018)', async () => {
+    const app = createInitializedTestApplication();
+    const start = await startMission(
+      { ...app, content: CONTENT_CATALOGUE },
+      'interception-01',
+    );
+    if (start.kind !== 'accepted') {
+      throw new Error('Expected the mission start to be accepted.');
+    }
+    const { command } = debugCommand(app);
+    expect(await command.setCredits(8)).toEqual({ kind: 'applied' });
+
+    const reload = emptyPersistence();
+    reload.campaignStore.seed(app.campaignStore.current!);
+    await createBootRunner(bootDeps(reload)).run();
+    expect(reload.campaignStore.current?.credits).toBe(0);
+    expect(reload.campaignStore.current?.hullIntegrity).toBe(100);
+    expect(reload.campaignStore.current?.runStatus).toBe('active');
+    expect(reload.campaignStore.current?.missionInProgress).toBeNull();
+    expect(reload.store.getState()?.runStatus).toBe('active');
+    expect(reload.store.getState()?.credits).toBe(0);
   });
 });

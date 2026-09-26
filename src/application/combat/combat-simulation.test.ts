@@ -446,6 +446,44 @@ describe('mode exclusivity (AC-006)', () => {
       runtime.advance(1);
       expect(runtime.getState()).toBe(moved);
     });
+
+    it('makes every post-dispose command inert and disposal idempotent (V02-WI-07 D03)', () => {
+      // V02-AC-027: a disposed Combat runtime must not be able to start an
+      // entity, schedule, terminal, or RNG consumption through ANY entry point,
+      // and it must tolerate repeated disposal. The assertions use the exact
+      // frozen state object, so one surviving step or entity fails them.
+      const runtime = createTestCombatRuntime({ mode: 'keyboard' });
+      runtime.advance(0.5);
+      const frozen = runtime.getState();
+      const enemiesBeforeDispose = frozen.enemies;
+      const projectilesBeforeDispose = frozen.projectiles;
+      const evacuationStepsBeforeDispose = frozen.evacuationStepsRemaining;
+      runtime.dispose();
+      runtime.dispose();
+      runtime.submit({ type: 'combat/keyboard', key: 'right', pressed: true });
+      runtime.submitDebug({
+        type: 'combat-debug/spawn-enemy',
+        enemyType: 'basic-drone',
+      });
+      runtime.submitDebug({
+        type: 'combat-debug/set-elite-phase',
+        phase: 'armoured',
+      });
+      runtime.submitDebug({ type: 'combat-debug/win-mission' });
+      runtime.beginEvacuation();
+      runtime.authorizeCommittedExit();
+      expect(runtime.advance(1)).toBe(frozen);
+      expect(runtime.getState()).toBe(frozen);
+      expect(frozen.terminalResult).toBeNull();
+      expect(frozen.exitAuthorized).toBe(false);
+      expect(frozen.evacuationStepsRemaining).toBe(
+        evacuationStepsBeforeDispose,
+      );
+      // The frozen collections are the SAME arrays: no command could append an
+      // entity or projectile after disposal.
+      expect(frozen.enemies).toBe(enemiesBeforeDispose);
+      expect(frozen.projectiles).toBe(projectilesBeforeDispose);
+    });
   });
 
   it('toggles the active mode exactly per F command', () => {

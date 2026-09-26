@@ -1,11 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
 import type {
   CombatDebugCommand,
   CombatObservability,
   CombatObservabilityElite,
 } from '@application/combat';
+import {
+  activeMissionIdentity,
+  debugCampaignMatchesActiveMission,
+  readDebugCampaign,
+} from '@application/persistence';
+import type {
+  DebugCampaignCommand,
+  DebugCampaignReadModel,
+  DebugCreditsValue,
+} from '@application/persistence';
 import type { EnemyType } from '@domain/index';
+import { useApplication } from '../application-context';
 import { FieldRow } from '../components';
 import { Button, Checkbox, Divider, Overlay, Text } from '../primitives';
 
@@ -25,6 +36,14 @@ export interface DebugOverlayProps {
    * authored id renders nothing instead of relaying a foreign identity.
    */
   readonly encounterIds: readonly string[];
+  /**
+   * V02-WI-07 D02-A-C01 F2: the development-only campaign Debug command owned by
+   * the Combat Screen for the lifetime of the logical active mission. Its
+   * single-flight latch and pending state therefore survive Debug close/reopen
+   * (an Overlay-owned latch would die with this component), and the command
+   * itself enforces the canonical Debug eligibility boundary.
+   */
+  readonly campaignCommand: DebugCampaignCommand;
 }
 
 /** The four approved enemy roles, in canonical vocabulary order. */
@@ -37,6 +56,21 @@ const ENEMY_ROLE_ACTIONS: readonly {
   { enemyType: 'hunter-drone', label: 'Spawn Hunter' },
   { enemyType: 'elite-drone', label: 'Spawn Elite' },
 ];
+
+/**
+ * V02-WI-07 D02-A derived campaign view: the freshly read persisted campaign
+ * (or `null` while loading/unavailable) plus the `Reload for Recovery`
+ * eligibility the same read proves.
+ */
+interface DebugCampaignView {
+  readonly campaign: DebugCampaignReadModel | null;
+  readonly reloadForRecoveryEnabled: boolean;
+}
+
+const EMPTY_CAMPAIGN_VIEW: DebugCampaignView = {
+  campaign: null,
+  reloadForRecoveryEnabled: false,
+};
 
 /**
  * Development-only Debug Overlay (Combat §11, Epic §17, DS §8.24): width
@@ -56,6 +90,23 @@ const ENEMY_ROLE_ACTIONS: readonly {
  * destructive, and content scrolls while Header and Close remain visible. This
  * component and its labels exist only in development builds (the CombatScreen
  * lazy-loads it behind `import.meta.env.DEV`).
+ *
+ * V02-WI-07 D02-A adds the persisted-campaign rows (`Credits`,
+ * `missionInProgress`, `runStatus`), the two bounded Repair-boundary Credit
+ * controls, and `Reload for Recovery`. The campaign facts come from
+ * `CampaignStorePort.read` through the application command module — never from
+ * Combat simulation state or a React mirror — and the Credit controls use the
+ * same atomic campaign transaction as every shipped campaign command, persisting
+ * first and reconciling the Session Store only for the still-active Mission
+ * Instance. `Reload for Recovery` re-verifies a fresh authoritative read and
+ * performs browser navigation only; Boot remains the sole recovery transition
+ * owner.
+ *
+ * V02-WI-07 D02-A-C01: the Credit/Recovery command is OWNED BY THE COMBAT SCREEN
+ * for the lifetime of the logical active mission and injected here as
+ * `campaignCommand`, so its single-flight latch and pending state survive Debug
+ * close/reopen; this component only relays activations and renders the pending
+ * state it observes through the external-store subscription.
  */
 export function DebugOverlay({
   open,
@@ -63,9 +114,27 @@ export function DebugOverlay({
   getObservability,
   submitDebugAction,
   encounterIds,
+  campaignCommand,
 }: DebugOverlayProps): ReactElement | null {
+  const { store, campaignStore } = useApplication();
   const [observability, setObservability] =
     useState<CombatObservability | null>(null);
+  const [campaignView, setCampaignView] =
+    useState<DebugCampaignView>(EMPTY_CAMPAIGN_VIEW);
+  // D02-A-C01 F2: the pending states are read from the mission-lifetime command
+  // (an external store), so they are still correct after Debug closes and
+  // reopens while a write is in flight — no Overlay-local latch.
+  const creditsPending = useSyncExternalStore(
+    campaignCommand.subscribe,
+    campaignCommand.isCreditsPending,
+  );
+  const recoveryReloadPending = useSyncExternalStore(
+    campaignCommand.subscribe,
+    campaignCommand.isRecoveryReloadPending,
+  );
+  // Monotonic read token: only the newest campaign read may publish, so an
+  // out-of-order completion can never show a stale marker or eligibility.
+  const readTokenRef = useRef(0);
 
   const refresh = (): void => {
     const value = getObservability();
@@ -74,12 +143,52 @@ export function DebugOverlay({
     }
   };
 
+  const refreshCampaign = (): void => {
+    const token = readTokenRef.current + 1;
+    readTokenRef.current = token;
+    void readDebugCampaign({ campaignStore }).then((outcome) => {
+      if (readTokenRef.current !== token) {
+        return;
+      }
+      if (outcome.kind !== 'loaded') {
+        setCampaignView(EMPTY_CAMPAIGN_VIEW);
+        return;
+      }
+      const identity = activeMissionIdentity(store);
+      setCampaignView({
+        campaign: outcome.campaign,
+        reloadForRecoveryEnabled:
+          identity !== null &&
+          debugCampaignMatchesActiveMission(outcome.campaign, identity),
+      });
+    });
+  };
+
+  const refreshAll = (): void => {
+    refresh();
+    refreshCampaign();
+  };
+
   useEffect(() => {
     if (open) {
-      refresh();
+      refreshAll();
     }
-    // Refresh only on open; every accepted action calls `refresh` explicitly.
+    // Refresh only on open; every accepted action calls `refreshAll` explicitly.
   }, [open]);
+
+  // D02-A-C01 F2: the logical Credit command outlives this component, so a write
+  // that settles while Debug is closed must still land in the read model when
+  // the Overlay is open again. Observing the external-store pending transition
+  // refreshes the authoritative campaign exactly once per settle, without a
+  // timer, polling, or an Overlay-local latch.
+  const creditsWerePendingRef = useRef(false);
+  useEffect(() => {
+    const wasPending = creditsWerePendingRef.current;
+    creditsWerePendingRef.current = creditsPending;
+    if (wasPending && !creditsPending) {
+      refreshAll();
+    }
+  }, [creditsPending]);
 
   if (!open) {
     return null;
@@ -90,8 +199,36 @@ export function DebugOverlay({
   const eliteActionsEnabled = currentElite !== null;
   const act = (command: CombatDebugCommand): void => {
     submitDebugAction(command);
-    refresh();
+    refreshAll();
   };
+  // V02-WI-07 D02-A: apply one bounded Credit value through the atomic campaign
+  // transaction, then re-read both surfaces. No success toast, alternate error
+  // UX, or local economy computation exists; the durable record is the
+  // authority and a rejected/stale/failed attempt simply changes nothing.
+  const setCredits = (value: DebugCreditsValue): void => {
+    void campaignCommand.setCredits(value).finally(() => {
+      refreshAll();
+    });
+  };
+  // V02-WI-07 D02-A-C01 F3: the command re-reads the persisted campaign at
+  // activation and verifies the exact current identity before navigating; a
+  // no-op outcome simply refreshes the displayed facts.
+  const requestRecoveryReload = (): void => {
+    void campaignCommand.requestRecoveryReload().finally(() => {
+      refreshAll();
+    });
+  };
+  const campaign = campaignView.campaign;
+  const creditsText = campaign === null ? '—' : String(campaign.credits);
+  const markerText =
+    campaign === null
+      ? '—'
+      : campaign.missionInProgress === null
+        ? 'None'
+        : `${campaign.missionInProgress.missionId} · attempt ${String(
+            campaign.missionInProgress.attemptId,
+          )}`;
+  const runStatusText = campaign === null ? '—' : campaign.runStatus;
 
   const activeText =
     observability === null
@@ -200,6 +337,11 @@ export function DebugOverlay({
               : String(observability.pendingEscapePenalties)
           }
         />
+        {/* V02-WI-07 D02-A persisted-campaign facts (Epic §17): read from
+            CampaignStorePort, never from the Combat simulation or a mirror. */}
+        <FieldRow label="Credits" value={creditsText} />
+        <FieldRow label="missionInProgress" value={markerText} />
+        <FieldRow label="runStatus" value={runStatusText} />
       </div>
       <Divider />
       <Checkbox
@@ -225,6 +367,26 @@ export function DebugOverlay({
           onClick={() => act({ type: 'combat-debug/set-hull', hull: 100 })}
         >
           Set Hull: 100
+        </Button>
+      </div>
+      {/* V02-WI-07 D02-A: the two exact Repair-boundary Credit values
+          (Epic §12.4). They belong to the authoritative player-resource
+          controls, so they extend this group; both are disabled while the
+          single-flight campaign command is pending. */}
+      <div className="ds-debug-overlay__row">
+        <Button
+          variant="secondary"
+          disabled={creditsPending}
+          onClick={() => setCredits(7)}
+        >
+          Set Credits: 7
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={creditsPending}
+          onClick={() => setCredits(8)}
+        >
+          Set Credits: 8
         </Button>
       </div>
       <Divider />
@@ -308,6 +470,22 @@ export function DebugOverlay({
           onClick={() => act({ type: 'combat-debug/evacuate-mission' })}
         >
           Evacuate Mission
+        </Button>
+      </div>
+      {/* V02-WI-07 D02-A recovery affordance: browser reload only, owned by the
+          Result/terminal control group because it resolves the persisted active
+          mission as Defeat. Boot remains the sole recovery transition owner. It
+          is enabled only while the latest campaign read proved an active run
+          whose marker exactly matches the current Mission Snapshot. */}
+      <div className="ds-debug-overlay__row">
+        <Button
+          variant="destructive"
+          disabled={
+            !campaignView.reloadForRecoveryEnabled || recoveryReloadPending
+          }
+          onClick={requestRecoveryReload}
+        >
+          Reload for Recovery
         </Button>
       </div>
     </Overlay>

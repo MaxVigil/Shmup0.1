@@ -11,23 +11,12 @@ import type { ShmupPersistenceDatabase } from './dexie-database';
 import {
   CURRENT_ROW_FORMAT_VERSION,
   isCurrentFormatRow,
+  unreadableRowDiagnostics,
 } from './campaign-row-format';
 
 export interface DexieCampaignStoreOptions {
   readonly validAircraftIds: ReadonlySet<string>;
   readonly validPilotIds: ReadonlySet<string>;
-}
-
-/** Row-envelope provenance failure (V02-WI-02 C07): the stored row does not
- *  carry the exact current-format marker, so it is not current progress and
- *  must never reach Domain validation or an allocator allocation. */
-function rowFormatDiagnostics() {
-  return [
-    {
-      path: 'rowFormatVersion',
-      message: 'stored campaign row is not in the current format',
-    },
-  ];
 }
 
 /** Signals a rejected mission start so the allocator row is rolled back. */
@@ -63,7 +52,10 @@ export function createDexieCampaignStore(
         return { kind: 'none' };
       }
       if (!isCurrentFormatRow(row)) {
-        return { kind: 'invalid', diagnostics: rowFormatDiagnostics() };
+        return {
+          kind: 'invalid',
+          diagnostics: unreadableRowDiagnostics(row, schemaContext),
+        };
       }
       return migrateCampaignRecord(row.value, schemaContext);
     },
@@ -77,7 +69,10 @@ export function createDexieCampaignStore(
           return { kind: 'missing' };
         }
         if (!isCurrentFormatRow(row)) {
-          return { kind: 'invalid', diagnostics: rowFormatDiagnostics() };
+          return {
+            kind: 'invalid',
+            diagnostics: unreadableRowDiagnostics(row, schemaContext),
+          };
         }
         const parsed = migrateCampaignRecord(row.value, schemaContext);
         if (parsed.kind === 'invalid') {
@@ -109,8 +104,14 @@ export function createDexieCampaignStore(
             if (!isCurrentFormatRow(row)) {
               // Reject BEFORE Domain validation and BEFORE any allocator
               // allocation: an unmarked row is not current progress and no
-              // attempt identity may be consumed for it.
-              return { kind: 'invalid', diagnostics: rowFormatDiagnostics() };
+              // attempt identity may be consumed for it. A recognizable
+              // rejected legacy C03 row keeps its original field-specific
+              // cause instead of being reduced to the envelope path
+              // (V02-WI-07 D02-B).
+              return {
+                kind: 'invalid',
+                diagnostics: unreadableRowDiagnostics(row, schemaContext),
+              };
             }
             const parsed = migrateCampaignRecord(row.value, schemaContext);
             if (parsed.kind === 'invalid') {

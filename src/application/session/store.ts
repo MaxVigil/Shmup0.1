@@ -45,6 +45,27 @@ export type SessionAction =
       readonly type: 'mission/result-consumed';
       readonly missionInstanceOrdinal: number;
     }
+  /**
+   * V02-WI-07 D02-A development-only Credits reconciliation (Epic §17,
+   * V02-AC-026). The durable campaign transaction has ALREADY committed the new
+   * Credits (persist-then-session ordering); this mirrors that pre-committed
+   * value into the single Session Store for the exact still-active Mission
+   * Instance it was committed against. It never computes economy and can never
+   * overwrite another mission's or a newer run's Credits.
+   *
+   * V02-WI-07 D02-A-C01 F1: the reconciliation carries the FULL originating
+   * identity — mission id, globally unique durable attempt id, and the
+   * session-local Mission Instance ordinal. A confirmed New Game resets the
+   * local ordinal while the durable attempt allocator never reuses ids, so a
+   * delayed completion from an older run must match all three or stay inert.
+   */
+  | {
+      readonly type: 'session/debug-set-credits';
+      readonly credits: number;
+      readonly missionId: MissionId;
+      readonly missionAttemptId: number;
+      readonly missionInstanceOrdinal: number;
+    }
   | CombatLifecycleAction;
 
 export interface SessionStore {
@@ -295,6 +316,28 @@ export function sessionReducer(
         return state;
       }
       return { ...state, missionResult: null };
+    case 'session/debug-set-credits':
+      // V02-WI-07 D02-A/D02-A-C01 F1: mirror the ALREADY-committed persisted
+      // Credits into the single Session Store. Accepted only when the current
+      // Active Mission Snapshot still matches the FULL originating identity —
+      // mission id, durable attempt id, and local Mission Instance ordinal —
+      // so a delayed completion after resolution, replacement, a confirmed New
+      // Game, or a newer mission is a strict no-op even when the local ordinal
+      // is reused by that newer run. Credits are never computed here: the
+      // durable campaign remains the authority.
+      if (
+        state === null ||
+        state.activeMission === 'none' ||
+        state.activeMission.missionId !== action.missionId ||
+        state.activeMission.missionAttemptId !== action.missionAttemptId ||
+        state.activeMission.missionInstanceOrdinal !==
+          action.missionInstanceOrdinal ||
+        !isCredits(action.credits) ||
+        state.credits === action.credits
+      ) {
+        return state;
+      }
+      return { ...state, credits: action.credits };
     case 'combat-lifecycle/open-pause':
     case 'combat-lifecycle/resume':
     case 'combat-lifecycle/open-settings':

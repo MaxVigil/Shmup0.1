@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { aircraftId, pilotId } from '@domain/index';
 import { CAMPAIGN_SCHEMA_VERSION, migrateCampaignRecord } from '@domain/index';
 import { migrateLegacyC03Campaign } from '@domain/index';
+import { isLegacyC03CampaignShape } from '@domain/index';
 import type { CampaignSchemaContext, CampaignStateV1 } from '@domain/index';
 
 const CONTEXT: CampaignSchemaContext = {
@@ -389,6 +390,43 @@ describe('migrateLegacyC03Campaign (V02-WI-02 correction C06)', () => {
     if (result.kind === 'valid') {
       expect(result.highWaterMark).toBe(-1);
     }
+  });
+});
+
+describe('legacy C03 provenance recognition (V02-WI-07 D02-B)', () => {
+  it('recognizes exactly the pre-C04/C03 shape: schema version 1 with the obsolete counter present', () => {
+    expect(isLegacyC03CampaignShape(legacyC03Record())).toBe(true);
+    // The counter VALUE is irrelevant to provenance: even an invalid value
+    // still proves the row was never migrated.
+    expect(
+      isLegacyC03CampaignShape(legacyC03Record({ nextMissionAttemptId: -1 })),
+    ).toBe(true);
+    expect(
+      isLegacyC03CampaignShape(
+        legacyC03Record({
+          missionInProgress: { missionId: 'interception-01', attemptId: 2 },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not attribute a record without the obsolete counter to the legacy migration', () => {
+    const { nextMissionAttemptId: _omitted, ...withoutCounter } =
+      legacyC03Record();
+    void _omitted;
+    expect(isLegacyC03CampaignShape(withoutCounter)).toBe(false);
+    // A current-format record is never legacy provenance.
+    expect(isLegacyC03CampaignShape(validRecord())).toBe(false);
+  });
+
+  it('does not attribute another schema version, a non-record, or an array to the legacy migration', () => {
+    expect(
+      isLegacyC03CampaignShape(legacyC03Record({ schemaVersion: 2 })),
+    ).toBe(false);
+    expect(isLegacyC03CampaignShape(null)).toBe(false);
+    expect(isLegacyC03CampaignShape(undefined)).toBe(false);
+    expect(isLegacyC03CampaignShape('campaign')).toBe(false);
+    expect(isLegacyC03CampaignShape([legacyC03Record()])).toBe(false);
   });
 });
 

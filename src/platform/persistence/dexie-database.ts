@@ -7,7 +7,10 @@ import {
   type MissionId,
   type UserSettingsV1,
 } from '@domain/index';
-import { CURRENT_ROW_FORMAT_VERSION } from './campaign-row-format';
+import {
+  CURRENT_ROW_FORMAT_VERSION,
+  hasRowFormatProperty,
+} from './campaign-row-format';
 
 /**
  * Versioned local persistence database (Epic §14.1, V02-DEC-004): Dexie as the
@@ -84,7 +87,10 @@ export class ShmupPersistenceDatabase extends Dexie {
     // existing non-overwriting Save Data Error path remains authoritative for
     // every invalid legacy row, including one that is missing its obsolete
     // counter (provenance is enforced at the row envelope, not only by the
-    // current campaign validator).
+    // current campaign validator). V02-DEC-035 adds the shared envelope guard:
+    // only a version-1 row with NO own `rowFormatVersion` property may be
+    // promoted, so a marker that conflicts with genuine version-1 provenance
+    // can never be rewritten into playable progress or seed the allocator.
     this.version(2)
       .stores({
         campaign: 'id',
@@ -98,6 +104,16 @@ export class ShmupPersistenceDatabase extends Dexie {
         const row = await campaignTable.get('current');
         if (row === undefined) {
           // No legacy campaign: nothing to migrate (Settings may already exist).
+          return;
+        }
+        if (hasRowFormatProperty(row)) {
+          // V02-DEC-035: a genuine version-1 row carries NO row-format marker
+          // (the version-1 schema wrote none), so ANY present marker is
+          // conflicting provenance even when the campaign fields would validate.
+          // Promote nothing: this row and its obsolete counter stay
+          // byte-for-structure untouched, no allocator id is seeded, and the
+          // existing read/Boot path decides the Save Data Error with a truthful
+          // path-qualified cause.
           return;
         }
         const migration = migrateLegacyC03Campaign(

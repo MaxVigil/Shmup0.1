@@ -403,6 +403,31 @@ export function migrateLegacyC03Campaign(
   return { kind: 'valid', campaign, highWaterMark };
 }
 
+/**
+ * True only when the record is exactly the immediate pre-C04/C03 persisted
+ * campaign shape (V02-WI-07 D02-B): campaign schema version 1 AND the obsolete
+ * `nextMissionAttemptId` counter still present.
+ *
+ * This is the ONLY persisted signal that attributes an unreadable stored row to
+ * a rejected legacy migration, because `migrateLegacyC03Campaign` runs exactly
+ * on this shape and leaves a rejected row untouched with its counter intact. A
+ * record without the obsolete counter — or with another schema version, or a
+ * non-record value — has no established legacy provenance: the absence of a
+ * field is certain, but a historical migration cause cannot be inferred from
+ * it, so no legacy cause may be claimed for such a row. The counter VALUE is
+ * irrelevant to provenance; an invalid value still proves the row was never
+ * migrated.
+ */
+export function isLegacyC03CampaignShape(
+  record: unknown,
+): record is Record<string, unknown> {
+  return (
+    isRecord(record) &&
+    record.schemaVersion === CAMPAIGN_SCHEMA_VERSION &&
+    record.nextMissionAttemptId !== undefined
+  );
+}
+
 /** The C03 counter is a safe non-negative integer (V02-WI-02 C06). */
 function parseLegacyNextAttemptId(
   value: unknown,

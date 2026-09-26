@@ -1,6 +1,36 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
+import { CONTENT_CATALOGUE } from '@test-support/content';
 import type { CombatObservability } from '@application/combat';
+import { startMission } from '@application/mission';
+import type {
+  CampaignReadResult,
+  CampaignStartOutcome,
+  CampaignStorePort,
+  CampaignUpdateOutcome,
+  DebugCampaignCommand,
+} from '@application/persistence';
+import { createDebugCampaignCommand } from '@application/persistence';
+import { createSessionStore } from '@application/session';
+import type { SessionStore } from '@application/session';
+import type {
+  CampaignStateV1,
+  CampaignTransitionResult,
+  MissionId,
+} from '@domain/index';
+import { createInitializedTestApplication } from '@test-support/persistence';
+import {
+  InMemoryCampaignStore,
+  campaignSchemaContext,
+} from '@test-support/persistence';
 import { WithApplication } from '@test-support/ui/application-provider';
 import { DebugOverlay } from './debug-overlay';
 
@@ -60,6 +90,35 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/** One development-only campaign Debug command bound to the harness context. */
+function testCommand(
+  store: SessionStore,
+  campaignStore: CampaignStorePort,
+  navigate: () => void = vi.fn(),
+): DebugCampaignCommand {
+  // Bound exactly as the Combat Screen binds it: the identity of the mission
+  // that is active when the command is constructed (F4).
+  const snapshot = store.getState()?.activeMission;
+  return createDebugCampaignCommand({
+    store,
+    campaignStore,
+    debugMode: true,
+    navigate,
+    origin:
+      snapshot === undefined || snapshot === 'none'
+        ? {
+            missionId: 'interception-01',
+            attemptId: 0,
+            missionInstanceOrdinal: 0,
+          }
+        : {
+            missionId: snapshot.missionId,
+            attemptId: snapshot.missionAttemptId,
+            missionInstanceOrdinal: snapshot.missionInstanceOrdinal,
+          },
+  });
+}
+
 function renderDebugOverlay(
   observability: CombatObservability | null = BASE_OBSERVABILITY,
   encounterIds: readonly string[] = [
@@ -69,6 +128,7 @@ function renderDebugOverlay(
     'interception-01-e4',
     'interception-01-e5',
   ],
+  options: { readonly open?: boolean } = {},
 ): {
   getObservability: ReturnType<typeof vi.fn>;
   submitDebugAction: ReturnType<typeof vi.fn>;
@@ -77,14 +137,19 @@ function renderDebugOverlay(
   const getObservability = vi.fn().mockReturnValue(observability);
   const submitDebugAction = vi.fn();
   const onClose = vi.fn();
+  const store = createSessionStore();
+  const campaignStore = new InMemoryCampaignStore(
+    campaignSchemaContext(CONTENT_CATALOGUE),
+  );
   render(
-    <WithApplication>
+    <WithApplication store={store} campaignStore={campaignStore}>
       <DebugOverlay
-        open
+        open={options.open ?? true}
         onClose={onClose}
         getObservability={getObservability}
         submitDebugAction={submitDebugAction}
         encounterIds={encounterIds}
+        campaignCommand={testCommand(store, campaignStore)}
       />
     </WithApplication>,
   );
@@ -229,19 +294,9 @@ describe('DebugOverlay (Combat §11, Epic §17, DS §8.24)', () => {
   });
 
   it('renders nothing when closed', () => {
-    const getObservability = vi.fn();
-    const submitDebugAction = vi.fn();
-    render(
-      <WithApplication>
-        <DebugOverlay
-          open={false}
-          onClose={vi.fn()}
-          getObservability={getObservability}
-          submitDebugAction={submitDebugAction}
-          encounterIds={['interception-01-e1']}
-        />
-      </WithApplication>,
-    );
+    renderDebugOverlay(BASE_OBSERVABILITY, ['interception-01-e1'], {
+      open: false,
+    });
     expect(screen.queryByRole('heading', { name: 'Debug' })).toBeNull();
   });
 
@@ -337,5 +392,312 @@ describe('DebugOverlay (Combat §11, Epic §17, DS §8.24)', () => {
       type: 'combat-debug/set-elite-phase',
       phase: 'vulnerable',
     });
+  });
+});
+
+/** Holds the durable update open so the pending/disabled state is observable. */
+class DeferredCampaignStore implements CampaignStorePort {
+  private startUpdate: (() => void) | null = null;
+
+  constructor(private readonly inner: CampaignStorePort) {}
+
+  read(): Promise<CampaignReadResult> {
+    return this.inner.read();
+  }
+
+  update(
+    transform: (current: CampaignStateV1) => CampaignTransitionResult,
+  ): Promise<CampaignUpdateOutcome> {
+    return new Promise<CampaignUpdateOutcome>((resolve) => {
+      this.startUpdate = () => {
+        void this.inner.update(transform).then(resolve);
+      };
+    });
+  }
+
+  startMission(missionId: MissionId): Promise<CampaignStartOutcome> {
+    return this.inner.startMission(missionId);
+  }
+
+  replace(next: CampaignStateV1): Promise<void> {
+    return this.inner.replace(next);
+  }
+
+  get pending(): boolean {
+    return this.startUpdate !== null;
+  }
+
+  flush(): void {
+    const start = this.startUpdate;
+    this.startUpdate = null;
+    start?.();
+  }
+}
+
+/**
+ * Mounts the Overlay exactly as the Combat Screen does for one logical active
+ * mission: the Debug lifecycle is authoritative-open, a real Debug campaign
+ * command is injected, and the Overlay can be unmounted/re-mounted like the
+ * `lifecycle.overlay === 'debug'` conditional render.
+ */
+function CampaignOverlayHarness({
+  app,
+  command,
+  open,
+  campaignStore,
+}: {
+  readonly app: ReturnType<typeof createInitializedTestApplication>;
+  readonly command: DebugCampaignCommand;
+  readonly open: boolean;
+  readonly campaignStore: CampaignStorePort;
+}): ReactElement {
+  return (
+    <WithApplication store={app.store} campaignStore={campaignStore}>
+      {open ? (
+        <DebugOverlay
+          open
+          onClose={vi.fn()}
+          getObservability={() => BASE_OBSERVABILITY}
+          submitDebugAction={vi.fn()}
+          encounterIds={['interception-01-e1']}
+          campaignCommand={command}
+        />
+      ) : null}
+    </WithApplication>
+  );
+}
+
+async function renderWithCampaign(
+  app: ReturnType<typeof createInitializedTestApplication>,
+  campaignStore: CampaignStorePort = app.campaignStore,
+): Promise<{
+  readonly command: DebugCampaignCommand;
+  readonly navigate: ReturnType<typeof vi.fn>;
+  readonly rerenderOpen: (open: boolean) => void;
+}> {
+  const start = await startMission(
+    { ...app, content: CONTENT_CATALOGUE },
+    'interception-01',
+  );
+  if (start.kind !== 'accepted') {
+    throw new Error('Expected the mission start to be accepted.');
+  }
+  // The Combat Screen renders this Overlay only while Debug is the
+  // authoritative lifecycle Overlay, so the harness establishes that exact
+  // state (the injected command enforces it at its own boundary).
+  app.store.dispatch({
+    type: 'combat-lifecycle/open-debug',
+    missionInstanceOrdinal: start.snapshot.missionInstanceOrdinal,
+  });
+  const navigate = vi.fn();
+  const command = testCommand(app.store, campaignStore, navigate);
+  const { rerender } = render(
+    <CampaignOverlayHarness
+      app={app}
+      command={command}
+      open
+      campaignStore={campaignStore}
+    />,
+  );
+  return {
+    command,
+    navigate,
+    rerenderOpen: (open: boolean) => {
+      rerender(
+        <CampaignOverlayHarness
+          app={app}
+          command={command}
+          open={open}
+          campaignStore={campaignStore}
+        />,
+      );
+    },
+  };
+}
+
+function fieldRow(label: string): HTMLElement {
+  const row = screen.getByText(label, { exact: true }).closest('.ds-field-row');
+  if (row === null) {
+    throw new Error(`Expected the ${label} Field Row.`);
+  }
+  return row as HTMLElement;
+}
+
+function button(name: string): HTMLButtonElement {
+  return screen.getByRole('button', { name }) as HTMLButtonElement;
+}
+
+describe('DebugOverlay D02-A campaign authority (Epic §17, V02-AC-026)', () => {
+  it('shows the persisted Credits, the exact marker identity, and runStatus', async () => {
+    const app = createInitializedTestApplication();
+    await renderWithCampaign(app);
+    const marker = app.campaignStore.current!.missionInProgress!;
+    await waitFor(() => {
+      expect(fieldRow('Credits').textContent).toContain('12');
+    });
+    expect(fieldRow('missionInProgress').textContent).toContain(
+      `${marker.missionId} · attempt ${marker.attemptId}`,
+    );
+    expect(fieldRow('runStatus').textContent).toContain('active');
+    // The started mission persisted an exact marker for the current snapshot, so
+    // the recovery affordance is eligible.
+    expect(button('Reload for Recovery').disabled).toBe(false);
+  });
+
+  it('renders the absent value while no campaign record is available', async () => {
+    // A brand-new context without a persisted record: loading/unavailable.
+    renderDebugOverlay(BASE_OBSERVABILITY, []);
+    await act(async () => {});
+    expect(fieldRow('Credits').textContent).toContain('—');
+    expect(fieldRow('missionInProgress').textContent).toContain('—');
+    expect(fieldRow('runStatus').textContent).toContain('—');
+    // The recovery affordance requires a proven marker match.
+    expect(button('Reload for Recovery').disabled).toBe(true);
+  });
+
+  it('applies Set Credits: 7 through the atomic campaign transaction and reconciles the session', async () => {
+    const app = createInitializedTestApplication();
+    await renderWithCampaign(app);
+    await waitFor(() => {
+      expect(fieldRow('Credits').textContent).toContain('12');
+    });
+    fireEvent.click(button('Set Credits: 7'));
+    await waitFor(() => {
+      expect(app.campaignStore.current?.credits).toBe(7);
+    });
+    expect(app.store.getState()?.credits).toBe(7);
+    expect(fieldRow('Credits').textContent).toContain('7');
+  });
+
+  it('disables both Credit controls while the single-flight command is pending', async () => {
+    const app = createInitializedTestApplication();
+    const deferred = new DeferredCampaignStore(app.campaignStore);
+    await renderWithCampaign(app, deferred);
+    await waitFor(() => {
+      expect(fieldRow('Credits').textContent).toContain('12');
+    });
+    expect(button('Set Credits: 7').disabled).toBe(false);
+    expect(button('Set Credits: 8').disabled).toBe(false);
+
+    fireEvent.click(button('Set Credits: 7'));
+    await waitFor(() => {
+      expect(deferred.pending).toBe(true);
+    });
+    // A repeated activation while pending is inert at the UI.
+    fireEvent.click(button('Set Credits: 8'));
+    expect(button('Set Credits: 7').disabled).toBe(true);
+    expect(button('Set Credits: 8').disabled).toBe(true);
+
+    await act(async () => {
+      deferred.flush();
+    });
+    await waitFor(() => {
+      expect(button('Set Credits: 7').disabled).toBe(false);
+    });
+    expect(button('Set Credits: 8').disabled).toBe(false);
+    // Only the first bounded value was applied, exactly once.
+    expect(app.campaignStore.current?.credits).toBe(7);
+    expect(fieldRow('Credits').textContent).toContain('7');
+  });
+
+  it('enables Reload for Recovery only for an exact active marker match', async () => {
+    const app = createInitializedTestApplication();
+    await renderWithCampaign(app);
+    await waitFor(() => {
+      expect(button('Reload for Recovery').disabled).toBe(false);
+    });
+
+    // A foreign attempt id invalidates the match on the next fresh read.
+    const marker = app.campaignStore.current!.missionInProgress!;
+    app.campaignStore.seed({
+      ...app.campaignStore.current!,
+      missionInProgress: { ...marker, attemptId: marker.attemptId + 5 },
+    });
+    fireEvent.click(button('Set Credits: 8'));
+    await waitFor(() => {
+      expect(button('Reload for Recovery').disabled).toBe(true);
+    });
+    // The stale-marker Credit attempt was a strict no-op.
+    expect(app.campaignStore.current?.credits).toBe(12);
+  });
+
+  it('keeps the Credit controls disabled and single-flight across a Debug close/reopen (D02-A-C01 F2)', async () => {
+    const app = createInitializedTestApplication();
+    const deferred = new DeferredCampaignStore(app.campaignStore);
+    const { rerenderOpen } = await renderWithCampaign(app, deferred);
+    await waitFor(() => {
+      expect(fieldRow('Credits').textContent).toContain('12');
+    });
+
+    fireEvent.click(button('Set Credits: 7'));
+    await waitFor(() => {
+      expect(deferred.pending).toBe(true);
+    });
+    expect(button('Set Credits: 7').disabled).toBe(true);
+
+    // The player closes Debug: the Overlay unmounts exactly as the Combat
+    // Screen's `lifecycle.overlay === 'debug'` conditional does.
+    rerenderOpen(false);
+    expect(screen.queryByRole('button', { name: 'Set Credits: 7' })).toBeNull();
+
+    // Reopening Debug must still observe the ONE in-flight command: both Credit
+    // controls stay disabled and a repeated activation joins the same
+    // transaction instead of creating a second one.
+    rerenderOpen(true);
+    await waitFor(() => {
+      expect(button('Set Credits: 7').disabled).toBe(true);
+    });
+    expect(button('Set Credits: 8').disabled).toBe(true);
+    fireEvent.click(button('Set Credits: 8'));
+
+    await act(async () => {
+      deferred.flush();
+    });
+    await waitFor(() => {
+      expect(button('Set Credits: 7').disabled).toBe(false);
+    });
+    // Exactly one durable write happened, with the first bounded value.
+    expect(app.campaignStore.current?.credits).toBe(7);
+    expect(app.store.getState()?.credits).toBe(7);
+    await waitFor(() => {
+      expect(fieldRow('Credits').textContent).toContain('7');
+    });
+  });
+
+  it('re-verifies the persisted campaign when Reload for Recovery is activated (D02-A-C01 F3)', async () => {
+    const app = createInitializedTestApplication();
+    const { navigate } = await renderWithCampaign(app);
+    await waitFor(() => {
+      expect(button('Reload for Recovery').disabled).toBe(false);
+    });
+
+    // Another tab replaces the marker while this Overlay stays open: the
+    // visible affordance is still enabled, but activation re-reads the
+    // authoritative record and must NOT navigate.
+    const marker = app.campaignStore.current!.missionInProgress!;
+    app.campaignStore.seed({
+      ...app.campaignStore.current!,
+      missionInProgress: { ...marker, attemptId: marker.attemptId + 3 },
+    });
+    fireEvent.click(button('Reload for Recovery'));
+    await act(async () => {});
+    expect(navigate).not.toHaveBeenCalled();
+    // The refresh after the inert activation removes the stale affordance.
+    await waitFor(() => {
+      expect(button('Reload for Recovery').disabled).toBe(true);
+    });
+
+    // Restoring the exact marker makes one activation navigate exactly once.
+    app.campaignStore.seed({
+      ...app.campaignStore.current!,
+      missionInProgress: marker,
+    });
+    fireEvent.click(button('Set Credits: 8'));
+    await waitFor(() => {
+      expect(button('Reload for Recovery').disabled).toBe(false);
+    });
+    fireEvent.click(button('Reload for Recovery'));
+    await act(async () => {});
+    expect(navigate).toHaveBeenCalledTimes(1);
   });
 });

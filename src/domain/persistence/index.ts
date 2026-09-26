@@ -25,6 +25,7 @@ export type {
   DefeatRecoveryResult,
 } from './campaign-transitions';
 export {
+  isLegacyC03CampaignShape,
   migrateCampaignRecord,
   migrateLegacyC03Campaign,
 } from './campaign-schema';
