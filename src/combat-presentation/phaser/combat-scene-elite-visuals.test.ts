@@ -51,6 +51,15 @@ function fake2dContext(): unknown {
   });
   const context: Record<string, unknown> = {
     canvas: { width: 1280, height: 600 },
+    drawImage: () => {
+      canvasOps.drawImage += 1;
+    },
+    fillRect: () => {
+      canvasOps.fillRect += 1;
+    },
+    clearRect: () => {
+      canvasOps.clearRect += 1;
+    },
     getImageData: (_x: number, _y: number, w: number, h: number) => ({
       width: w,
       height: h,
@@ -73,7 +82,15 @@ function fake2dContext(): unknown {
       }
       return () => undefined;
     },
-    set() {
+    set(_target, property, value) {
+      // Records the derived flash-silhouette paint so the regression can prove
+      // the approved flash colour and the alpha-preserving composite are used.
+      if (property === 'globalCompositeOperation') {
+        canvasOps.compositeOperations.push(String(value));
+      }
+      if (property === 'fillStyle') {
+        canvasOps.fillStyles.push(String(value));
+      }
       return true;
     },
   });
@@ -83,6 +100,20 @@ type PhaserModule = typeof import('phaser');
 type CombatSceneClass = typeof import('./combat-scene').CombatScene;
 
 const srcAssignments = new Map<string, number>();
+/** Recorded 2D canvas operations (V02-WI-07 D04-C02 derived flash silhouette). */
+const canvasOps: {
+  drawImage: number;
+  fillRect: number;
+  clearRect: number;
+  fillStyles: string[];
+  compositeOperations: string[];
+} = {
+  drawImage: 0,
+  fillRect: 0,
+  clearRect: 0,
+  fillStyles: [],
+  compositeOperations: [],
+};
 let Phaser: PhaserModule;
 let CombatScene: CombatSceneClass;
 
@@ -139,24 +170,32 @@ beforeAll(async () => {
   CombatScene = (await import('./combat-scene')).CombatScene;
 }, REAL_PHASER_BOOTSTRAP_TIMEOUT_MS);
 
-/** Prepared elite asset URLs (unique per state kind, never re-requested). */
-const ELITE_ARMOURED_URL =
+/**
+ * Prepared Elite bytes (one distinct inline source per state kind). The runtime
+ * URL is a plain catalogue path that would be a second manifest request if the
+ * renderer ever used it, so the test can prove the prepared bytes are reused.
+ */
+const ELITE_ARMOURED_PATH = '/enemies/elite-drone-armoured.png';
+const ELITE_VULNERABLE_PATH = '/enemies/elite-drone-vulnerable.png';
+const ELITE_ARMOURED_BYTES =
   'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==';
-const ELITE_VULNERABLE_URL =
+const ELITE_VULNERABLE_BYTES =
   'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOQ==';
 
 const PREPARED_ELITE_ARMOURED: PreparedRuntimeAsset = {
   id: 'enemy-elite-drone-armoured',
   kind: 'enemy-image',
   sourcePath: 'assets/runtime/enemies/elite-drone-armoured.png',
-  url: ELITE_ARMOURED_URL,
+  url: ELITE_ARMOURED_PATH,
+  imageDataUri: ELITE_ARMOURED_BYTES,
   status: 'ready',
 };
 const PREPARED_ELITE_VULNERABLE: PreparedRuntimeAsset = {
   id: 'enemy-elite-drone-vulnerable',
   kind: 'enemy-image',
   sourcePath: 'assets/runtime/enemies/elite-drone-vulnerable.png',
-  url: ELITE_VULNERABLE_URL,
+  url: ELITE_VULNERABLE_PATH,
+  imageDataUri: ELITE_VULNERABLE_BYTES,
   status: 'ready',
 };
 
@@ -274,6 +313,11 @@ afterEach(() => {
     activeCleanups.pop()!.dispose();
   }
   srcAssignments.clear();
+  canvasOps.drawImage = 0;
+  canvasOps.fillRect = 0;
+  canvasOps.clearRect = 0;
+  canvasOps.fillStyles.length = 0;
+  canvasOps.compositeOperations.length = 0;
 });
 
 /** Waits (deterministically) for one prepared enemy texture to register. */
@@ -359,9 +403,13 @@ describe('real CombatScene Elite presentation (V02-WI-06 E03)', () => {
     expect(scene.enemyVisuals.size).toBe(1);
     expect(armouredImage.active).toBe(false);
 
-    // Exactly one prepared request per elite state kind for the session.
-    expect(srcAssignments.get(ELITE_ARMOURED_URL)).toBe(1);
-    expect(srcAssignments.get(ELITE_VULNERABLE_URL)).toBe(1);
+    // Exactly one prepared decode per elite state kind for the session, from
+    // the prepared inline bytes: the catalogue path is never requested a second
+    // time by Combat (V02-AC-025, MASTER-AC-014).
+    expect(srcAssignments.get(ELITE_ARMOURED_BYTES)).toBe(1);
+    expect(srcAssignments.get(ELITE_VULNERABLE_BYTES)).toBe(1);
+    expect(srcAssignments.get(ELITE_ARMOURED_PATH)).toBeUndefined();
+    expect(srcAssignments.get(ELITE_VULNERABLE_PATH)).toBeUndefined();
 
     // Shutdown cleanup releases every Elite-owned visual map.
     harness.dispose();
@@ -745,5 +793,124 @@ describe('real CombatScene Elite presentation (V02-WI-06 E03)', () => {
       expect(scene.eliteDeflectionVisuals.has(elite.id)).toBe(false);
     }
     expect(scene.simState.exitPhase).toBe('fly-up');
+  });
+});
+
+/**
+ * V02-WI-07 D04-C02 regression for the shared prepared-image damaging-hit
+ * feedback. The Product Owner observed that the prepared artwork did not visibly
+ * flash while the procedural fallback did: Phaser 4's default tint mode is
+ * MULTIPLY and the approved flash colour is near white, so `setTint` alone left
+ * the artwork practically unchanged, and the Tint component is WebGL-only.
+ *
+ * These assertions describe what is actually submitted for rendering — the
+ * derived opaque flash-colour silhouette — which the old multiply-tint path can
+ * never satisfy, plus expiry, a repeated hit, size/alpha preservation and the
+ * untouched prepared artwork. The pixel-level proof of the same behaviour in the
+ * real production renderer lives in `e2e/production-smoke.spec.ts`.
+ */
+describe('prepared damaging-hit feedback (V02-WI-07 D04-C02)', () => {
+  const PREPARED_BASIC_DRONE: PreparedRuntimeAsset = {
+    id: 'enemy-basic-drone',
+    kind: 'enemy-image',
+    sourcePath: 'assets/runtime/enemies/basic-drone.png',
+    url: '/enemies/basic-drone.png',
+    imageDataUri:
+      'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==',
+    status: 'ready',
+  };
+
+  /** The real Mission 01 pipeline driven to the first visible Basic Drone. */
+  function stateWithVisibleBasicDrone(): CombatSimulationState {
+    let state = createTestCombatState({ missionId: 'interception-01' });
+    for (let step = 0; step < 2_000; step += 1) {
+      state = stepCombatSimulation(state, FIXED_STEP_SECONDS);
+      if (state.enemies.some((enemy) => enemy.kind === 'basic')) {
+        return state;
+      }
+    }
+    throw new Error('Fixture failed: no Basic Drone entered Mission 01.');
+  }
+
+  async function waitForBasicTexture(
+    harness: EliteSceneHarness,
+  ): Promise<void> {
+    for (let frames = 0; frames < 100; frames += 1) {
+      harness.scene.update(0, 16.7);
+      if (harness.scene.enemyTextureStates.get('basic-drone') === 'ready') {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('Prepared Basic Drone texture never registered.');
+  }
+
+  it('whitens the prepared silhouette for the authoritative 3 flash steps and restores the artwork', async () => {
+    const geometry = resolveCombatGeometry({ width: 1280, height: 600 });
+    const state = stateWithVisibleBasicDrone();
+    const basic = state.enemies.find((enemy) => enemy.kind === 'basic');
+    if (basic === undefined) {
+      throw new Error('Fixture failed: no Basic Drone in the observed state.');
+    }
+    // The simulation authors a 3-step damaging-hit feedback for a non-lethal hit;
+    // the scene reads exactly that authoritative state field.
+    const flashingState: CombatSimulationState = {
+      ...state,
+      activeEnemyFlashStepsRemaining: { [basic.id]: 3 },
+    };
+    const harness = await bootRealCombatScene(
+      [PREPARED_BASIC_DRONE],
+      flashingState,
+    );
+    activeCleanups.push(harness);
+    const { scene } = harness;
+    await waitForBasicTexture(harness);
+    scene.update(0, 16.7);
+
+    const visual = scene.enemyVisuals.get(basic.id) as Phaser.GameObjects.Image;
+    const preparedKey = 'enemy-visual-basic-drone';
+    const flashKey = 'enemy-visual-flash-basic-drone';
+    expect(visual).toBeInstanceOf(Phaser.GameObjects.Image);
+    const sourceBefore = scene.textures
+      .get(preparedKey)
+      .getSourceImage() as unknown;
+    // The rendered visual IS the flush whitened silhouette, not a tint flag...
+    expect(visual.texture.key).toBe(flashKey);
+    expect(scene.textures.exists(flashKey)).toBe(true);
+    expect(visual.isTinted).toBe(false);
+    // ...derived from the prepared artwork with the approved flash colour and an
+    // alpha-preserving composite.
+    expect(canvasOps.drawImage).toBeGreaterThan(0);
+    expect(canvasOps.fillRect).toBeGreaterThan(0);
+    expect(canvasOps.fillStyles).toContain(geometry.enemyFlashColor);
+    expect(canvasOps.compositeOperations).toContain('source-in');
+    // Size and alpha are unchanged by the feedback.
+    expect(visual.displayWidth).toBeCloseTo(basic.width, 6);
+    expect(visual.displayHeight).toBeCloseTo(basic.height, 6);
+    expect(visual.x).toBeCloseTo(basic.centerX, 6);
+    expect(visual.y).toBeCloseTo(basic.centerY, 6);
+
+    // Expiry restores the prepared artwork exactly (same visual, no tint).
+    harness.holder.state = {
+      ...flashingState,
+      activeEnemyFlashStepsRemaining: {},
+    };
+    scene.update(0, 16.7);
+    expect(visual.texture.key).toBe(preparedKey);
+    expect(visual.isTinted).toBe(false);
+    expect(visual.displayWidth).toBeCloseTo(basic.width, 6);
+    expect(scene.enemyVisuals.get(basic.id)).toBe(visual);
+
+    // A repeated damaging hit re-applies the same feedback.
+    harness.holder.state = flashingState;
+    scene.update(0, 16.7);
+    expect(visual.texture.key).toBe(flashKey);
+
+    // The prepared artwork itself is never mutated, and the feedback adds no
+    // second decode or network request (the prepared data URI is assigned once,
+    // and the silhouette comes from the already-registered texture).
+    expect(scene.textures.get(preparedKey).getSourceImage()).toBe(sourceBefore);
+    expect(srcAssignments.get(PREPARED_BASIC_DRONE.imageDataUri ?? '')).toBe(1);
+    expect(canvasOps.clearRect).toBeGreaterThan(0);
   });
 });

@@ -27,6 +27,11 @@ export const SESSION_KINDS = Object.freeze({
   PRODUCTION_MANUAL: 'v02-wi-06-e04-c01-m01-manual-mission03-session',
   FORCED_FALLBACK_CAPTURE:
     'v02-wi-06-e04-c01-m01-forced-fallback-capture-session',
+  // V02-WI-07 D04-C01: the two ordinary-production Elite capture sessions.
+  D04_ELITE_PREPARED_CAPTURE:
+    'v02-wi-07-d04-c01-elite-prepared-capture-session',
+  D04_ELITE_PRODUCTION_FALLBACK_CAPTURE:
+    'v02-wi-07-d04-c01-elite-production-fallback-capture-session',
 });
 
 export const TERMINAL_KINDS = Object.freeze(['success', 'defeat', 'evacuated']);
@@ -36,6 +41,33 @@ export const CAPTURE_STATES = Object.freeze(['armoured', 'vulnerable']);
 export const CAPTURE_SOURCES = Object.freeze([
   'production-manual-session',
   'development-forced-fallback',
+  // V02-WI-07 D04-C01 production capture sources (Epic §16.1/§16.5).
+  'production-d04-elite-prepared',
+  'production-d04-forced-fallback',
+]);
+
+/** V02-WI-07 D04-C01: the Elite production capture scope and evidence kind. */
+export const D04_SCOPE_ID = 'V02-WI-07-D04-C01';
+export const D04_CAPTURE_MANIFEST_KIND =
+  'v02-wi-07-d04-c01-elite-production-capture-manifest';
+
+/** The request-failure mode of one D04 production capture session. */
+export const D04_REQUEST_FAILURE_MODES = Object.freeze([
+  'none',
+  'elite-preload-abort',
+]);
+
+/**
+ * V02-WI-07 D04-C01 capture facts: both natural Elite states and the observable
+ * Armoured → Vulnerable transition are sufficient for this scope even when a
+ * natural Defeat follows, so the WI-06 Success-specific fact set is untouched.
+ */
+export const D04_CAPTURE_FACTS = Object.freeze([
+  'productionArtifact',
+  'zeroZeroSeen',
+  'eliteArmouredSeen',
+  'eliteVulnerableSeen',
+  'phaseTransitionObserved',
 ]);
 
 /**
@@ -165,7 +197,7 @@ export function createSessionRecord(input) {
   const record = {
     kind: input.kind ?? SESSION_KINDS.PRODUCTION_MANUAL,
     runId: input.runId,
-    scopeId: 'V02-WI-06-E04-C01-M01',
+    scopeId: input.scopeId ?? 'V02-WI-06-E04-C01-M01',
     baseRevision: input.baseRevision,
     sourceFingerprint: input.sourceFingerprint,
     status: input.status ?? SESSION_STATUS.INCOMPLETE,
@@ -187,12 +219,16 @@ export function createSessionRecord(input) {
       vulnerableFirstSeenAt: null,
       armouredFrames: 0,
       vulnerableFrames: 0,
+      sequence: [],
     },
+    lifecycleObservations: input.lifecycleObservations ?? [],
     acceptanceFacts: input.acceptanceFacts ?? {},
     acceptanceComplete: input.acceptanceComplete ?? false,
     missingAcceptanceFacts: input.missingAcceptanceFacts ?? [],
     postTerminalBaseObserved: input.postTerminalBaseObserved ?? false,
     fallbackEvidence: input.fallbackEvidence ?? null,
+    d04Capture: input.d04Capture ?? null,
+    d04CaptureFacts: input.d04CaptureFacts ?? null,
     persisted: input.persisted ?? null,
     replay: input.replay ?? null,
     cleanup: input.cleanup ?? null,
@@ -321,6 +357,47 @@ export function validateSessionRecord(record) {
   if (record.kind === SESSION_KINDS.FORCED_FALLBACK_CAPTURE) {
     validateFallbackEvidence(record.fallbackEvidence);
   }
+  if (
+    record.kind === SESSION_KINDS.D04_ELITE_PREPARED_CAPTURE ||
+    record.kind === SESSION_KINDS.D04_ELITE_PRODUCTION_FALLBACK_CAPTURE
+  ) {
+    if (record.scopeId !== D04_SCOPE_ID) {
+      throw new Error(
+        `a D04 production capture session must declare scope ${D04_SCOPE_ID}.`,
+      );
+    }
+    if (record.productionArtifact.buildDir !== 'dist') {
+      throw new Error(
+        'a D04 production capture session must be served from `dist`.',
+      );
+    }
+  }
+  if (record.kind === SESSION_KINDS.D04_ELITE_PRODUCTION_FALLBACK_CAPTURE) {
+    validateD04FallbackEvidence(record.d04Capture);
+  }
+  if (
+    record.kind === SESSION_KINDS.D04_ELITE_PREPARED_CAPTURE ||
+    record.kind === SESSION_KINDS.D04_ELITE_PRODUCTION_FALLBACK_CAPTURE
+  ) {
+    if (!isPlainObject(record.d04CaptureFacts)) {
+      throw new Error('a D04 capture session must record its capture facts.');
+    }
+    for (const fact of D04_CAPTURE_FACTS) {
+      if (typeof record.d04CaptureFacts[fact] !== 'boolean') {
+        throw new Error(`a D04 capture session must record ${fact}.`);
+      }
+    }
+    if (record.status === SESSION_STATUS.CAPTURE_COMPLETE) {
+      const missingD04 = D04_CAPTURE_FACTS.filter(
+        (fact) => record.d04CaptureFacts[fact] !== true,
+      );
+      if (missingD04.length > 0) {
+        throw new Error(
+          `a capture-complete D04 session is missing capture facts: ${missingD04.join(', ')}`,
+        );
+      }
+    }
+  }
   if (record.status === SESSION_STATUS.SUCCESS_VERIFIED) {
     if (record.productionArtifact.debugSurfaceExposed !== false) {
       throw new Error(
@@ -424,6 +501,372 @@ export function validateCaptureManifest(manifest) {
     }
   }
   return manifest;
+}
+
+/**
+ * V02-WI-07 D04-C02: a genuine phase transition is an *ordered pair* of visible
+ * observations of the SAME Elite inside ONE attempt — an Armoured observation
+ * followed strictly later by a Vulnerable observation. The previous first-seen
+ * comparison could never recover from an Elite that was first seen Vulnerable,
+ * and could stitch observations across a Defeat/Repair/replay.
+ *
+ * `observations` is the bounded ordered observation sequence recorded by the
+ * runner: `{ state: 'armoured' | 'vulnerable', at: ISO string, attempt: number }`.
+ * Duplicate timestamps for the same state are ignored; an out-of-order sequence
+ * inside one attempt is rejected instead of silently re-sorted.
+ */
+export function deriveElitePhasePair(observations = []) {
+  const entries = (Array.isArray(observations) ? observations : [])
+    .filter(
+      (entry) =>
+        CAPTURE_STATES.includes(entry?.state) &&
+        typeof entry?.at === 'string' &&
+        typeof entry?.attempt === 'number' &&
+        Number.isFinite(Date.parse(entry.at)),
+    )
+    .map((entry) => ({
+      state: entry.state,
+      at: entry.at,
+      attempt: entry.attempt,
+      ms: Date.parse(entry.at),
+    }));
+  if (entries.length === 0) {
+    return { observed: false, reason: 'no-elite-observations' };
+  }
+  const attempts = [...new Set(entries.map((entry) => entry.attempt))].sort(
+    (a, b) => a - b,
+  );
+  for (const attempt of attempts) {
+    const inAttempt = entries.filter((entry) => entry.attempt === attempt);
+    // Reject an out-of-order or duplicated sequence rather than re-sorting it.
+    for (let index = 1; index < inAttempt.length; index += 1) {
+      if (inAttempt[index].ms < inAttempt[index - 1].ms) {
+        return { observed: false, reason: 'out-of-order-observations' };
+      }
+      if (
+        inAttempt[index].ms === inAttempt[index - 1].ms &&
+        inAttempt[index].state === inAttempt[index - 1].state
+      ) {
+        return { observed: false, reason: 'duplicate-observation-timestamp' };
+      }
+    }
+    const armoured = inAttempt.filter((entry) => entry.state === 'armoured');
+    const vulnerable = inAttempt.filter(
+      (entry) => entry.state === 'vulnerable',
+    );
+    for (const armouredEntry of armoured) {
+      const later = vulnerable.find((entry) => entry.ms > armouredEntry.ms);
+      if (later !== undefined) {
+        return {
+          observed: true,
+          attempt,
+          armouredAt: armouredEntry.at,
+          vulnerableAt: later.at,
+        };
+      }
+    }
+  }
+  return { observed: false, reason: 'no-ordered-pair-in-one-attempt' };
+}
+
+/** V02-WI-07 D04-C01 capture facts derived from recorded visible observations. */
+export function deriveD04CaptureFacts(input = {}) {
+  const pair = deriveElitePhasePair(input.sequence);
+  const framedStates = new Set(
+    (Array.isArray(input.frameStates) ? input.frameStates : []).filter(
+      (state) => CAPTURE_STATES.includes(state),
+    ),
+  );
+  return {
+    productionArtifact: input.productionArtifact === true,
+    zeroZeroSeen: input.zeroZeroSeen === true,
+    eliteArmouredSeen:
+      (input.armouredFrames ?? 0) > 0 || framedStates.has('armoured'),
+    eliteVulnerableSeen:
+      (input.vulnerableFrames ?? 0) > 0 || framedStates.has('vulnerable'),
+    phaseTransitionObserved: pair.observed === true,
+  };
+}
+
+function requireSha256(value, field) {
+  requireString(value, field);
+  if (!/^[0-9a-f]{64}$/.test(value)) {
+    throw new Error(`${field} must be a lowercase SHA-256 hex digest.`);
+  }
+}
+
+function requireIsoTimestamp(value, field) {
+  requireString(value, field);
+  if (!Number.isFinite(Date.parse(value))) {
+    throw new Error(`${field} must be an ISO timestamp.`);
+  }
+}
+
+/**
+ * Required provenance for the V02-WI-07 D04-C01 ordinary-production forced
+ * fallback session. This is a separate production contract; the WI-06
+ * development fallback contract in `validateFallbackEvidence` is unchanged.
+ */
+export function validateD04FallbackEvidence(evidence) {
+  if (!isPlainObject(evidence)) {
+    throw new Error('D04 fallback session evidence must be an object.');
+  }
+  requireString(evidence.assetPath, 'd04Fallback.assetPath');
+  requireString(evidence.failureInjectedAt, 'd04Fallback.failureInjectedAt');
+  requireNumber(evidence.requestCount, 'd04Fallback.requestCount');
+  if (evidence.requestCount < 1) {
+    throw new Error('d04Fallback.requestCount must record the failed request.');
+  }
+  if (evidence.secondRequestObserved !== false) {
+    throw new Error('the D04 forced fallback must prove no second request.');
+  }
+  if (evidence.lateSwapObserved !== false) {
+    throw new Error(
+      'the D04 forced fallback must prove no late prepared swap.',
+    );
+  }
+  requireBoolean(evidence.debugAuthorityUsed, 'd04Fallback.debugAuthorityUsed');
+  requireBoolean(
+    evidence.servedFromDevelopment,
+    'd04Fallback.servedFromDevelopment',
+  );
+  if (evidence.servedFromDevelopment !== false) {
+    throw new Error(
+      'the D04 forced fallback session must be an ordinary production session.',
+    );
+  }
+  requireString(evidence.servedFrom, 'd04Fallback.servedFrom');
+  requireString(evidence.buildIdentity, 'd04Fallback.buildIdentity');
+  return evidence;
+}
+
+/** How long a clipped Elite state must be visible before its frame is accepted. */
+export const CLIPPED_ELITE_ACCEPT_AFTER_MS = 8000;
+
+/**
+ * V02-WI-07 D04-C01 bounded Elite capture gate.
+ *
+ * An Elite capture is offered only after the authored arrival has been seen: the
+ * Combat Countdown reaching `00:00` is the exact frame that creates the Mission
+ * 03 Elite (Epic §8.3.1), and before it no Elite exists, so a merged cluster of
+ * regular enemies or projectiles must never be selected as an Elite state.
+ *
+ * A frame whose Elite is clipped by a viewport edge is skipped while an
+ * unclipped frame of the same state is still expected; once that state has been
+ * visible only while clipped for `clippedAcceptAfterMs`, the clipped frame is
+ * accepted rather than losing the state.
+ */
+export function deriveEliteCaptureOffer(input = {}) {
+  const state = input.eliteState;
+  if (input.zeroZeroSeen !== true) {
+    return { offer: false, reason: 'before-authored-arrival', clipped: null };
+  }
+  if (input.eliteVisible !== true || !CAPTURE_STATES.includes(state)) {
+    return { offer: false, reason: 'no-elite-state', clipped: null };
+  }
+  const clipped = input.clipped === true;
+  if (!clipped) {
+    return { offer: true, reason: 'unclipped', clipped: false };
+  }
+  const firstSeenMs = Date.parse(input.firstSeenAt ?? '');
+  const waitedMs = Number.isFinite(firstSeenMs) ? input.nowMs - firstSeenMs : 0;
+  const acceptAfterMs =
+    input.clippedAcceptAfterMs ?? CLIPPED_ELITE_ACCEPT_AFTER_MS;
+  if (waitedMs >= acceptAfterMs) {
+    return {
+      offer: true,
+      reason: 'clipped-accepted-after-wait',
+      clipped: true,
+    };
+  }
+  return { offer: false, reason: 'clipped-awaiting-unclipped', clipped: true };
+}
+
+/**
+ * Validates one V02-WI-07 D04-C01 Elite production capture manifest. Every
+ * capture is bound to the same final candidate identity (full HEAD, canonical
+ * source fingerprint, D04 candidate digest, ordinary build identity, runId,
+ * viewport, request-failure mode), carries its own screenshot hash, and proves
+ * the request boundary when the approved Elite sprites failed at Boot.
+ */
+export function validateD04CaptureManifest(manifest) {
+  if (!isPlainObject(manifest)) {
+    throw new Error('D04 capture manifest must be an object.');
+  }
+  if (manifest.kind !== D04_CAPTURE_MANIFEST_KIND) {
+    throw new Error('D04 capture manifest kind is invalid.');
+  }
+  if (manifest.scopeId !== D04_SCOPE_ID) {
+    throw new Error(`D04 capture manifest scopeId must be ${D04_SCOPE_ID}.`);
+  }
+  requireString(manifest.runId, 'manifest.runId');
+  requireString(manifest.sessionRunId, 'manifest.sessionRunId');
+  if (manifest.runId !== manifest.sessionRunId) {
+    throw new Error('manifest.runId must match its sessionRunId.');
+  }
+  requireString(manifest.baseRevision, 'manifest.baseRevision');
+  if (!/^[0-9a-f]{40}$/.test(manifest.baseRevision)) {
+    throw new Error('manifest.baseRevision must be a full Git revision.');
+  }
+  requireString(manifest.sourceFingerprint, 'manifest.sourceFingerprint');
+  requireString(manifest.candidateDigest, 'manifest.candidateDigest');
+  requireString(
+    manifest.candidateDigestMethod,
+    'manifest.candidateDigestMethod',
+  );
+  requireString(manifest.buildIdentity, 'manifest.buildIdentity');
+  requireString(manifest.buildDir, 'manifest.buildDir');
+  if (manifest.buildDir !== 'dist') {
+    throw new Error('a D04 capture manifest must be served from `dist`.');
+  }
+  requireString(manifest.servedFrom, 'manifest.servedFrom');
+  requireString(manifest.capturePolicy, 'manifest.capturePolicy');
+  if (!D04_REQUEST_FAILURE_MODES.includes(manifest.requestFailureMode)) {
+    throw new Error('manifest.requestFailureMode is invalid.');
+  }
+  requireBoolean(manifest.debugSurfaceExposed, 'manifest.debugSurfaceExposed');
+  if (manifest.debugSurfaceExposed !== false) {
+    throw new Error('a D04 capture manifest must prove no Debug surface.');
+  }
+  if (!isPlainObject(manifest.viewport)) {
+    throw new Error('manifest.viewport must be an object.');
+  }
+  requireNumber(manifest.viewport.width, 'manifest.viewport.width');
+  requireNumber(manifest.viewport.height, 'manifest.viewport.height');
+  requireArray(manifest.requests, 'manifest.requests');
+  for (const [index, request] of manifest.requests.entries()) {
+    const label = `manifest.requests[${index}]`;
+    requireString(request?.url, `${label}.url`);
+    requireNumber(request?.generation, `${label}.generation`);
+    requireIsoTimestamp(request?.at, `${label}.at`);
+  }
+  const failedMode = manifest.requestFailureMode === 'elite-preload-abort';
+  requireNumber(manifest.assetRequestCount, 'manifest.assetRequestCount');
+  if (failedMode) {
+    if (manifest.assetRequestCount < 2) {
+      throw new Error(
+        'an aborted-preload manifest must record both approved Elite requests.',
+      );
+    }
+    if (deriveSecondRequestObserved(manifest.requests) !== false) {
+      throw new Error(
+        'an aborted-preload manifest must prove no second request.',
+      );
+    }
+    if (manifest.lateSwapObserved !== false) {
+      throw new Error('an aborted-preload manifest must prove no late swap.');
+    }
+  }
+  validateD04ManifestCaptures(manifest, failedMode);
+  if (!isPlainObject(manifest.phaseTransition)) {
+    throw new Error('manifest.phaseTransition must be an object.');
+  }
+  if (manifest.phaseTransition.observed !== true) {
+    throw new Error('manifest.phaseTransition must be observed.');
+  }
+  requireIsoTimestamp(
+    manifest.phaseTransition.armouredCapturedAt,
+    'manifest.phaseTransition.armouredCapturedAt',
+  );
+  requireIsoTimestamp(
+    manifest.phaseTransition.vulnerableCapturedAt,
+    'manifest.phaseTransition.vulnerableCapturedAt',
+  );
+  if (
+    Date.parse(manifest.phaseTransition.armouredCapturedAt) >=
+    Date.parse(manifest.phaseTransition.vulnerableCapturedAt)
+  ) {
+    throw new Error(
+      'manifest.phaseTransition must show Armoured before Vulnerable.',
+    );
+  }
+  return manifest;
+}
+
+/** Per-capture provenance rules shared by both D04 request-failure modes. */
+function validateD04ManifestCaptures(manifest, failedMode) {
+  requireArray(manifest.captures, 'manifest.captures');
+  if (manifest.captures.length === 0) {
+    throw new Error('manifest.captures must not be empty.');
+  }
+  const seenStates = new Set();
+  for (const [index, capture] of manifest.captures.entries()) {
+    const label = `manifest.captures[${index}]`;
+    if (!CAPTURE_STATES.includes(capture?.state)) {
+      throw new Error(`${label}.state is invalid.`);
+    }
+    if (!CAPTURE_SOURCES.includes(capture?.source)) {
+      throw new Error(`${label}.source is invalid.`);
+    }
+    requireString(capture.path, `${label}.path`);
+    requireSha256(capture.sha256, `${label}.sha256`);
+    requireIsoTimestamp(capture.capturedAt, `${label}.capturedAt`);
+    if (capture.sessionRunId !== manifest.sessionRunId) {
+      throw new Error(`${label}.sessionRunId must match its session.`);
+    }
+    if (capture.selectedFromRenderedEvidence !== true) {
+      throw new Error(
+        `${label} must be selected from rendered evidence, never hidden state.`,
+      );
+    }
+    if (!isPlainObject(capture.visibleFacts)) {
+      throw new Error(`${label}.visibleFacts must be an object.`);
+    }
+    if (failedMode) {
+      requireString(capture.failureInjectedAt, `${label}.failureInjectedAt`);
+      requireNumber(capture.requestCount, `${label}.requestCount`);
+      if (capture.requestCount < 1) {
+        throw new Error(`${label}.requestCount must record the failure.`);
+      }
+      if (capture.secondRequestObserved !== false) {
+        throw new Error(`${label} must prove no second request.`);
+      }
+      if (capture.lateSwapObserved !== false) {
+        throw new Error(`${label} must prove no late prepared-asset swap.`);
+      }
+    }
+    seenStates.add(capture.state);
+  }
+  for (const state of CAPTURE_STATES) {
+    if (!seenStates.has(state)) {
+      throw new Error(`manifest.captures must include the ${state} state.`);
+    }
+  }
+}
+
+/** Builds and validates one D04 Elite production capture manifest. */
+export function buildD04CaptureManifest(input) {
+  const manifest = {
+    kind: D04_CAPTURE_MANIFEST_KIND,
+    scopeId: D04_SCOPE_ID,
+    runId: input.runId,
+    sessionRunId: input.sessionRunId ?? input.runId,
+    baseRevision: input.baseRevision,
+    sourceFingerprint: input.sourceFingerprint,
+    candidateDigest: input.candidateDigest,
+    candidateDigestMethod: input.candidateDigestMethod,
+    buildIdentity: input.buildIdentity,
+    buildDir: input.buildDir,
+    servedFrom: input.servedFrom,
+    requestFailureMode: input.requestFailureMode,
+    debugSurfaceExposed: input.debugSurfaceExposed,
+    capturePolicy: input.capturePolicy ?? null,
+    viewport: input.viewport,
+    requests: input.requests ?? [],
+    assetRequestCount: input.assetRequestCount ?? (input.requests ?? []).length,
+    secondRequestObserved: input.secondRequestObserved ?? false,
+    lateSwapObserved: input.lateSwapObserved ?? false,
+    captures: input.captures ?? [],
+    phaseTransition: input.phaseTransition ?? {
+      observed: false,
+      armouredCapturedAt: null,
+      vulnerableCapturedAt: null,
+    },
+    eliteObservations: input.eliteObservations ?? null,
+    attempts: input.attempts ?? [],
+    notes: input.notes ?? [],
+  };
+  return validateD04CaptureManifest(manifest);
 }
 
 /**

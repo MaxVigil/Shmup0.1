@@ -403,6 +403,13 @@ export type EnemyVisualResolution =
       readonly kind: EnemyVisualKind;
       readonly status: 'ready';
       readonly url: string;
+      /**
+       * The prepared bytes as an inline `data:image/png;base64` source when the
+       * central Boot preload produced them (V02-AC-025, Epic §16.1). Combat
+       * decodes this instead of re-requesting `url`, so each approved enemy
+       * sprite is requested at most once per page load (MASTER-AC-014).
+       */
+      readonly imageDataUri?: string;
       readonly widthPx: number;
       readonly heightPx: number;
     }
@@ -417,10 +424,11 @@ export type EnemyVisualResolution =
 /**
  * Resolves the prepared-or-fallback result for one enemy visual through the
  * existing application boundary (`AssetPreloadResult`, Master §5.6): a ready
- * prepared asset yields its runtime URL; an absent, failed, or timed-out entry
+ * prepared asset yields its runtime URL plus the prepared inline bytes when the
+ * central Boot preload produced them; an absent, failed, or timed-out entry
  * yields the stable procedural fallback for the complete page-load session.
  * Combat consumes this prepared result and never issues a second request,
- * loading state, or late fallback swap (V02-AC-025 asset layer).
+ * loading state, or late fallback swap (V02-AC-025 asset layer, Epic §16.1).
  */
 export function resolveEnemyVisual(
   kind: EnemyVisualKind,
@@ -431,10 +439,16 @@ export function resolveEnemyVisual(
   const bounds = resolveEnemyRenderedBounds(mapping, shortSidePx);
   const prepared = preparedAssets.find((asset) => asset.id === mapping.assetId);
   if (prepared?.status === 'ready' && prepared.url.length > 0) {
+    const imageDataUri = prepared.imageDataUri;
     return {
       kind,
       status: 'ready',
       url: prepared.url,
+      // The prepared bytes are carried through unchanged so the renderer
+      // decodes them instead of issuing a second manifest request.
+      ...(imageDataUri !== undefined && imageDataUri.length > 0
+        ? { imageDataUri }
+        : {}),
       widthPx: bounds.widthPx,
       heightPx: bounds.heightPx,
     };

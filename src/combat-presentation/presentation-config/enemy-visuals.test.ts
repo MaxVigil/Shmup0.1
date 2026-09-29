@@ -261,12 +261,14 @@ describe('resolveEnemyVisual (V02-WI-01)', () => {
     id: string,
     status: 'ready' | 'fallback',
     url = `/enemies/${id.replace('enemy-', '')}.png`,
+    imageDataUri?: string,
   ): PreparedRuntimeAsset {
     return {
       id,
       kind: 'enemy-image',
       sourcePath: `assets/runtime/enemies/${id.replace('enemy-', '')}.png`,
       url: status === 'ready' ? url : '/unused',
+      ...(imageDataUri === undefined ? {} : { imageDataUri }),
       status,
     };
   }
@@ -295,6 +297,89 @@ describe('resolveEnemyVisual (V02-WI-01)', () => {
     );
     expect(result.widthPx).toBeCloseTo(bounds.widthPx, 9);
     expect(result.heightPx).toBeCloseTo(bounds.heightPx, 9);
+  });
+
+  it('carries the prepared inline bytes so Combat can avoid a second manifest request (V02-AC-025)', () => {
+    const preparedBytes = 'data:image/png;base64,AAECAwQFBgc=';
+    const withBytes = resolveEnemyVisual(
+      'ranged-drone',
+      [
+        preparedEnemy(
+          'enemy-ranged-drone',
+          'ready',
+          '/enemies/ranged-drone.png',
+          preparedBytes,
+        ),
+      ],
+      MINIMUM_VIEWPORT_SHORT_SIDE,
+    );
+    expect(withBytes.status).toBe('ready');
+    if (withBytes.status !== 'ready') {
+      return;
+    }
+    // The renderer decodes the prepared bytes first and keeps the URL only as a
+    // fixture source; the catalogue path is never needed a second time.
+    expect(withBytes.imageDataUri).toBe(preparedBytes);
+    expect(withBytes.url).toBe('/enemies/ranged-drone.png');
+
+    // A ready fixture without prepared bytes stays valid and omits the field,
+    // so the renderer keeps its documented URL fallback.
+    const withoutBytes = resolveEnemyVisual(
+      'ranged-drone',
+      [preparedEnemy('enemy-ranged-drone', 'ready')],
+      MINIMUM_VIEWPORT_SHORT_SIDE,
+    );
+    expect(withoutBytes.status).toBe('ready');
+    if (withoutBytes.status !== 'ready') {
+      return;
+    }
+    expect(withoutBytes.imageDataUri).toBeUndefined();
+
+    // A fallback entry carries no prepared bytes at all.
+    const fallback = resolveEnemyVisual(
+      'ranged-drone',
+      [preparedEnemy('enemy-ranged-drone', 'fallback')],
+      MINIMUM_VIEWPORT_SHORT_SIDE,
+    );
+    expect(fallback.status).toBe('fallback');
+    if (fallback.status !== 'fallback') {
+      return;
+    }
+    expect('imageDataUri' in fallback).toBe(false);
+  });
+
+  it('carries the prepared inline bytes for all five approved kinds so Combat never re-requests a manifest asset (V02-AC-025)', () => {
+    // Every approved kind maps to its own central-catalogue enemy asset, and a
+    // ready prepared result carries that asset's inline bytes unchanged.
+    for (const kind of ENEMY_VISUAL_KINDS) {
+      const mapping = enemyVisualMappingFor(kind);
+      const preparedBytes = `data:image/png;base64,${kind}`;
+      const result = resolveEnemyVisual(
+        kind,
+        [
+          preparedEnemy(
+            mapping.assetId,
+            'ready',
+            `/enemies/${kind}.png`,
+            preparedBytes,
+          ),
+        ],
+        MINIMUM_VIEWPORT_SHORT_SIDE,
+      );
+      expect(result.status).toBe('ready');
+      if (result.status !== 'ready') {
+        return;
+      }
+      expect(result.kind).toBe(kind);
+      expect(result.imageDataUri).toBe(preparedBytes);
+      expect(result.url).toBe(`/enemies/${kind}.png`);
+      const bounds = resolveEnemyRenderedBounds(
+        mapping,
+        MINIMUM_VIEWPORT_SHORT_SIDE,
+      );
+      expect(result.widthPx).toBeCloseTo(bounds.widthPx, 9);
+      expect(result.heightPx).toBeCloseTo(bounds.heightPx, 9);
+    }
   });
 
   it('resolves to the stable procedural fallback when the prepared entry is fallback', () => {

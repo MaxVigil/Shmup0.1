@@ -179,6 +179,8 @@ export interface VisibleShape {
   readonly bottom: number;
   readonly width: number;
   readonly height: number;
+  /** Rendered pixels in the cluster (used for the Elite Core evidence rule). */
+  readonly pixels: number;
 }
 
 /** Everything the pilot is allowed to observe: rendered shapes + visible HUD. */
@@ -200,6 +202,20 @@ const CELL = 4;
 
 type PixelClass = 'grey' | 'danger' | 'accent' | 'none';
 
+/**
+ * V02-WI-07 D04-C02: an accent/Core pixel must be genuinely bright pale cyan.
+ * Measured on the accepted frames: the rendered Elite Core is around
+ * `(56,158,163)`..`(148,243,247)` and the Design System accent token is
+ * `#65a9d6` (101,169,214), while the Elite procedural body token
+ * `--color-border-strong` `#526471` (82,100,113) and every dim bluish body
+ * highlight stay well below this. The previous loose rule
+ * (`b > 105 && b > r + 25 && g >= r && b >= g`) classified the whole fallback
+ * body as accent, which made the exposed-Core label meaningless.
+ */
+function isAccentPixel(r: number, g: number, b: number): boolean {
+  return g >= 120 && b >= 120 && b - r >= 60 && g - r >= 45;
+}
+
 function classifyPixel(r: number, g: number, b: number): PixelClass {
   const maximum = Math.max(r, g, b);
   const minimum = Math.min(r, g, b);
@@ -211,7 +227,7 @@ function classifyPixel(r: number, g: number, b: number): PixelClass {
   if (r > 110 && r > g + 40 && r > b + 40) {
     return 'danger';
   }
-  if (b > 105 && b > r + 25 && g >= r && b >= g) {
+  if (isAccentPixel(r, g, b)) {
     return 'accent';
   }
   // Craft sprites use a restrained dark metallic palette, so the grey test is
@@ -233,6 +249,7 @@ interface Cluster {
 function clusterClass(
   raster: Raster,
   pixelClass: PixelClass,
+  minPixels = 12,
 ): readonly VisibleShape[] {
   const columns = Math.ceil(raster.width / CELL);
   const rows = Math.ceil(raster.height / CELL);
@@ -301,7 +318,7 @@ function clusterClass(
         }
       }
     }
-    if (cluster.pixels < 12) {
+    if (cluster.pixels < minPixels) {
       continue;
     }
     const top = cluster.minRow * CELL;
@@ -315,9 +332,46 @@ function clusterClass(
       bottom,
       width: right - left,
       height: bottom - top,
+      pixels: cluster.pixels,
     });
   }
   return shapes;
+}
+
+const MIN_ELITE_CANDIDATE_WIDTH = 20;
+/**
+ * V02-WI-07 D04-C02: the general cluster minimum (12 px) is larger than the
+ * approved Elite Core measures at the minimum viewport, so the Core evidence pass
+ * uses its own small minimum while every other consumer keeps the 12 px floor.
+ */
+const MIN_ELITE_CORE_PIXELS = 4;
+/** A Core can never span most of the craft: broad blue regions are not a Core. */
+const MAX_ELITE_CORE_SIZE_RATIO = 0.35;
+/** The Core opening is centred: a projectile passing beside it cannot qualify. */
+const ELITE_CORE_CENTRE_TOLERANCE = 0.12;
+
+function isEliteCoreEvidence(
+  candidate: VisibleShape,
+  accentShape: VisibleShape,
+): boolean {
+  if (accentShape.pixels < MIN_ELITE_CORE_PIXELS) {
+    return false;
+  }
+  if (
+    accentShape.width > candidate.width * MAX_ELITE_CORE_SIZE_RATIO ||
+    accentShape.height > candidate.height * MAX_ELITE_CORE_SIZE_RATIO
+  ) {
+    return false;
+  }
+  if (
+    Math.abs(accentShape.centerX - candidate.centerX) >
+      candidate.width * ELITE_CORE_CENTRE_TOLERANCE ||
+    Math.abs(accentShape.centerY - candidate.centerY) >
+      candidate.height * ELITE_CORE_CENTRE_TOLERANCE
+  ) {
+    return false;
+  }
+  return insideShape(candidate, accentShape);
 }
 
 /**
@@ -326,6 +380,12 @@ function clusterClass(
  * craft strictly above it — never claimed without a visible Aircraft, which is
  * how an entering mid-screen Aircraft used to be misread as the Elite; regular
  * enemies are the remaining craft above the Aircraft.
+ *
+ * V02-WI-07 D04-C02: the Elite candidate must be a plausible craft body (a
+ * projectile column is not) and its Vulnerable state requires geometrically
+ * relevant rendered Core evidence: a small, centred, bright pale-cyan cluster
+ * inside that body. A body-coloured or broadly blue region can never be read as
+ * an exposed Core.
  */
 export function classifyFrame(raster: Raster): FrameObservation {
   const grey = clusterClass(raster, 'grey');
@@ -344,18 +404,23 @@ export function classifyFrame(raster: Raster): FrameObservation {
         (shape) =>
           shape !== aircraft &&
           shape.height >= 30 &&
+          shape.width >= MIN_ELITE_CANDIDATE_WIDTH &&
           shape.top < raster.height * 0.45 &&
           aboveAircraft(shape),
       )
       .sort((a, b) => b.width * b.height - a.width * a.height)[0] ?? null;
+  const eliteCore =
+    eliteCandidate === null
+      ? null
+      : (clusterClass(raster, 'accent', MIN_ELITE_CORE_PIXELS)
+          .filter((shape) => isEliteCoreEvidence(eliteCandidate, shape))
+          .sort((a, b) => b.pixels - a.pixels)[0] ?? null);
   const elite =
     eliteCandidate === null
       ? null
       : {
           ...eliteCandidate,
-          vulnerable: accent.some((shape) =>
-            insideShape(eliteCandidate, shape),
-          ),
+          vulnerable: eliteCore !== null,
         };
   const enemies = byArea
     .filter(

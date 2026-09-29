@@ -12,17 +12,24 @@ import { describe, expect, it } from 'vitest';
 import {
   ACCEPTANCE_FACTS,
   CAPTURE_SOURCES,
+  CLIPPED_ELITE_ACCEPT_AFTER_MS,
+  D04_CAPTURE_FACTS,
+  D04_SCOPE_ID,
   FORBIDDEN_RUNNER_PATTERNS,
   ROLE_DESTRUCTION_REWARDS,
   SESSION_KINDS,
   SESSION_STATUS,
   assertManualReviewBoundary,
   buildArtifacts,
+  buildD04CaptureManifest,
   createAttemptTracker,
   createCaptureSelector,
   createSessionRecord,
   deriveAcceptanceFacts,
+  deriveD04CaptureFacts,
+  deriveEliteCaptureOffer,
   deriveEliteDestructionCrossCheck,
+  deriveElitePhasePair,
   derivePostTerminalBaseObserved,
   deriveSecondRequestObserved,
   evaluateCombatResidue,
@@ -30,8 +37,15 @@ import {
   scanManualReviewSource,
   sessionDirectoryFor,
   validateCaptureManifest,
+  validateD04CaptureManifest,
+  validateD04FallbackEvidence,
   validateSessionRecord,
 } from './mission03-manual-session.mjs';
+import {
+  D04_CANDIDATE_DIGEST_METHOD,
+  computeCandidateDigest,
+  parsePorcelainPaths,
+} from './evidence-d04-candidate.mjs';
 import {
   BASIC_DRONE,
   ELITE_DRONE,
@@ -665,5 +679,494 @@ describe('manual runner boundary and artifact hygiene (V02-WI-06 E04-C01-M01)', 
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('V02-WI-07 D04-C01 Elite production capture contract', () => {
+  const HEAD = 'a'.repeat(40);
+  const SHA_ARMOURED = 'b'.repeat(64);
+  const SHA_VULNERABLE = 'c'.repeat(64);
+  const RUN_ID = 'v02-wi-07-d04-c01-elite-prepared-abc1234-20260926120000';
+  const FALLBACK_RUN_ID =
+    'v02-wi-07-d04-c01-elite-fallback-abc1234-20260926130000';
+
+  function captureFor(runId, state, sha256, capturedAt, source, extra = {}) {
+    return {
+      state,
+      source,
+      path: `manual-m03-d04/${runId}/captures/${state}-1.png`,
+      sha256,
+      capturedAt,
+      sessionRunId: runId,
+      selectedFromRenderedEvidence: true,
+      visibleFacts: { eliteCenterX: 640, eliteTop: 120 },
+      ...extra,
+    };
+  }
+
+  function d04Input(runId = RUN_ID, overrides = {}) {
+    return {
+      runId,
+      baseRevision: HEAD,
+      sourceFingerprint: 'deadbeef',
+      candidateDigest: 'cafebabe',
+      candidateDigestMethod: D04_CANDIDATE_DIGEST_METHOD,
+      buildIdentity: '[shmup] build shmup@0.1.0 (abc1234-dirty)',
+      buildDir: 'dist',
+      servedFrom: 'http://127.0.0.1:4180',
+      requestFailureMode: 'none',
+      debugSurfaceExposed: false,
+      capturePolicy:
+        'Elite captures are offered only after the authored 05:20 arrival has been observed.',
+      viewport: { width: 1280, height: 600 },
+      requests: [],
+      captures: [
+        captureFor(
+          runId,
+          'armoured',
+          SHA_ARMOURED,
+          '2026-09-26T12:00:00.000Z',
+          'production-d04-elite-prepared',
+        ),
+        captureFor(
+          runId,
+          'vulnerable',
+          SHA_VULNERABLE,
+          '2026-09-26T12:00:20.000Z',
+          'production-d04-elite-prepared',
+        ),
+      ],
+      phaseTransition: {
+        observed: true,
+        armouredCapturedAt: '2026-09-26T12:00:00.000Z',
+        vulnerableCapturedAt: '2026-09-26T12:00:20.000Z',
+      },
+      ...overrides,
+    };
+  }
+
+  function fallbackInput(runId = FALLBACK_RUN_ID) {
+    const requests = [
+      {
+        url: 'http://127.0.0.1:4180/enemies/elite-drone-armoured.png',
+        generation: 2,
+        at: '2026-09-26T13:00:00.000Z',
+      },
+      {
+        url: 'http://127.0.0.1:4180/enemies/elite-drone-vulnerable.png',
+        generation: 2,
+        at: '2026-09-26T13:00:00.000Z',
+      },
+    ];
+    const failure = {
+      failureInjectedAt: 'pre-Boot navigation (route installed before goto)',
+      requestCount: 2,
+      secondRequestObserved: false,
+      lateSwapObserved: false,
+    };
+    return d04Input(runId, {
+      requestFailureMode: 'elite-preload-abort',
+      requests,
+      assetRequestCount: requests.length,
+      secondRequestObserved: false,
+      lateSwapObserved: false,
+      captures: [
+        captureFor(
+          runId,
+          'armoured',
+          SHA_ARMOURED,
+          '2026-09-26T13:01:00.000Z',
+          'production-d04-forced-fallback',
+          failure,
+        ),
+        captureFor(
+          runId,
+          'vulnerable',
+          SHA_VULNERABLE,
+          '2026-09-26T13:01:20.000Z',
+          'production-d04-forced-fallback',
+          failure,
+        ),
+      ],
+    });
+  }
+
+  it('accepts a prepared-sprite manifest and a production forced-fallback manifest', () => {
+    expect(buildD04CaptureManifest(d04Input()).scopeId).toBe(D04_SCOPE_ID);
+    const fallback = buildD04CaptureManifest(fallbackInput());
+    expect(fallback.requestFailureMode).toBe('elite-preload-abort');
+    expect(fallback.assetRequestCount).toBe(2);
+    expect(deriveSecondRequestObserved(fallback.requests)).toBe(false);
+  });
+
+  it('rejects a D04 manifest that is not a production session with both states and a real transition', () => {
+    for (const broken of [
+      { buildDir: 'development server' },
+      { debugSurfaceExposed: true },
+      { requestFailureMode: 'bogus' },
+      { candidateDigestMethod: '' },
+      {
+        captures: [
+          captureFor(
+            RUN_ID,
+            'armoured',
+            SHA_ARMOURED,
+            '2026-09-26T12:00:00.000Z',
+            'production-d04-elite-prepared',
+          ),
+        ],
+      },
+      {
+        phaseTransition: {
+          observed: true,
+          armouredCapturedAt: '2026-09-26T12:00:30.000Z',
+          vulnerableCapturedAt: '2026-09-26T12:00:20.000Z',
+        },
+      },
+      { phaseTransition: { observed: false } },
+    ]) {
+      expect(() => buildD04CaptureManifest(d04Input(RUN_ID, broken))).toThrow();
+    }
+    const shortHash = d04Input(RUN_ID);
+    shortHash.captures = shortHash.captures.map((capture) => ({
+      ...capture,
+      sha256: 'not-a-hash',
+    }));
+    expect(() => buildD04CaptureManifest(shortHash)).toThrow(/SHA-256/);
+    const mismatched = d04Input(RUN_ID, { sessionRunId: 'other-run' });
+    expect(() => buildD04CaptureManifest(mismatched)).toThrow(/sessionRunId/);
+    expect(() =>
+      validateD04CaptureManifest({
+        ...buildD04CaptureManifest(d04Input()),
+        scopeId: 'V02-WI-06-E04-C01-M01',
+      }),
+    ).toThrow(/V02-WI-07-D04-C01/);
+  });
+
+  it('requires the aborted-preload mode to prove its request boundary', () => {
+    expect(
+      validateD04CaptureManifest(buildD04CaptureManifest(fallbackInput())),
+    ).toBeTruthy();
+    const repeated = fallbackInput();
+    repeated.requests = [...repeated.requests, { ...repeated.requests[0] }];
+    expect(() => buildD04CaptureManifest(repeated)).toThrow(
+      /no second request/,
+    );
+    const oneRequest = fallbackInput();
+    oneRequest.requests = [oneRequest.requests[0]];
+    oneRequest.assetRequestCount = 1;
+    expect(() => buildD04CaptureManifest(oneRequest)).toThrow(/both approved/);
+    const lateSwap = fallbackInput();
+    lateSwap.captures = lateSwap.captures.map((capture) => ({
+      ...capture,
+      lateSwapObserved: true,
+    }));
+    expect(() => buildD04CaptureManifest(lateSwap)).toThrow(
+      /late prepared-asset swap/,
+    );
+    const noFailureEvidence = fallbackInput();
+    noFailureEvidence.captures = noFailureEvidence.captures.map((capture) => {
+      const clone = { ...capture };
+      delete clone.failureInjectedAt;
+      return clone;
+    });
+    expect(() => buildD04CaptureManifest(noFailureEvidence)).toThrow(
+      /failureInjectedAt/,
+    );
+  });
+
+  it('gates every Elite capture on the authored arrival and prefers unclipped frames', () => {
+    // Before the Countdown reaches 00:00 no Elite exists: a merged cluster of
+    // regular enemies or projectiles must never be offered as an Elite state.
+    expect(
+      deriveEliteCaptureOffer({
+        zeroZeroSeen: false,
+        eliteVisible: true,
+        eliteState: 'armoured',
+        clipped: false,
+      }).offer,
+    ).toBe(false);
+    expect(
+      deriveEliteCaptureOffer({
+        zeroZeroSeen: true,
+        eliteVisible: true,
+        eliteState: 'vulnerable',
+        clipped: false,
+      }),
+    ).toEqual({ offer: true, reason: 'unclipped', clipped: false });
+    expect(
+      deriveEliteCaptureOffer({
+        zeroZeroSeen: true,
+        eliteVisible: true,
+        eliteState: 'vulnerable',
+        clipped: true,
+        firstSeenAt: '2026-09-26T12:00:00.000Z',
+        nowMs: Date.parse('2026-09-26T12:00:04.000Z'),
+      }),
+    ).toEqual({
+      offer: false,
+      reason: 'clipped-awaiting-unclipped',
+      clipped: true,
+    });
+    expect(
+      deriveEliteCaptureOffer({
+        zeroZeroSeen: true,
+        eliteVisible: true,
+        eliteState: 'vulnerable',
+        clipped: true,
+        firstSeenAt: '2026-09-26T12:00:00.000Z',
+        nowMs: Date.parse('2026-09-26T12:00:09.000Z'),
+      }).offer,
+    ).toBe(true);
+    expect(
+      deriveEliteCaptureOffer({
+        zeroZeroSeen: true,
+        eliteVisible: false,
+        eliteState: null,
+      }).reason,
+    ).toBe('no-elite-state');
+    expect(CLIPPED_ELITE_ACCEPT_AFTER_MS).toBe(8000);
+  });
+
+  it('derives the D04 capture facts from the visible state sequence', () => {
+    // V02-WI-07 D04-C02: a genuine transition is an ordered Armoured→Vulnerable
+    // pair inside one attempt — even when the Elite was first seen Vulnerable.
+    expect(
+      deriveElitePhasePair([
+        { state: 'armoured', at: '2026-09-26T12:00:00.000Z', attempt: 1 },
+        { state: 'vulnerable', at: '2026-09-26T12:00:12.000Z', attempt: 1 },
+      ]),
+    ).toMatchObject({
+      observed: true,
+      attempt: 1,
+      armouredAt: '2026-09-26T12:00:00.000Z',
+      vulnerableAt: '2026-09-26T12:00:12.000Z',
+    });
+    // First seen Vulnerable, then Armoured, then a real Vulnerable: the genuine
+    // pair is the later Armoured→Vulnerable step, not the first observations.
+    expect(
+      deriveElitePhasePair([
+        { state: 'vulnerable', at: '2026-09-26T12:00:00.000Z', attempt: 1 },
+        { state: 'armoured', at: '2026-09-26T12:00:12.000Z', attempt: 1 },
+        { state: 'vulnerable', at: '2026-09-26T12:00:24.000Z', attempt: 1 },
+      ]),
+    ).toMatchObject({
+      observed: true,
+      armouredAt: '2026-09-26T12:00:12.000Z',
+      vulnerableAt: '2026-09-26T12:00:24.000Z',
+    });
+    // Vulnerable-only and Armoured-only sequences are not a transition.
+    expect(
+      deriveElitePhasePair([
+        { state: 'vulnerable', at: '2026-09-26T12:00:00.000Z', attempt: 1 },
+      ]).observed,
+    ).toBe(false);
+    expect(deriveElitePhasePair([]).observed).toBe(false);
+    // Cross-attempt stitching is rejected: Armoured in attempt 1 and Vulnerable
+    // in attempt 2 (after a Defeat/Repair/replay) are not one transition.
+    expect(
+      deriveElitePhasePair([
+        { state: 'armoured', at: '2026-09-26T12:00:00.000Z', attempt: 1 },
+        { state: 'vulnerable', at: '2026-09-26T12:05:00.000Z', attempt: 2 },
+      ]),
+    ).toMatchObject({
+      observed: false,
+      reason: 'no-ordered-pair-in-one-attempt',
+    });
+    // Duplicate and out-of-order timestamps are rejected, not re-sorted.
+    expect(
+      deriveElitePhasePair([
+        { state: 'armoured', at: '2026-09-26T12:00:12.000Z', attempt: 1 },
+        { state: 'vulnerable', at: '2026-09-26T12:00:00.000Z', attempt: 1 },
+      ]),
+    ).toMatchObject({ observed: false, reason: 'out-of-order-observations' });
+    expect(
+      deriveElitePhasePair([
+        { state: 'armoured', at: '2026-09-26T12:00:00.000Z', attempt: 1 },
+        { state: 'armoured', at: '2026-09-26T12:00:00.000Z', attempt: 1 },
+      ]),
+    ).toMatchObject({
+      observed: false,
+      reason: 'duplicate-observation-timestamp',
+    });
+
+    const facts = deriveD04CaptureFacts({
+      productionArtifact: true,
+      zeroZeroSeen: true,
+      armouredFrames: 3,
+      vulnerableFrames: 1,
+      sequence: [
+        { state: 'armoured', at: '2026-09-26T12:00:00.000Z', attempt: 1 },
+        { state: 'vulnerable', at: '2026-09-26T12:00:12.000Z', attempt: 1 },
+      ],
+    });
+    expect(D04_CAPTURE_FACTS.every((fact) => facts[fact] === true)).toBe(true);
+    const incomplete = deriveD04CaptureFacts({
+      productionArtifact: true,
+      zeroZeroSeen: true,
+      armouredFrames: 2,
+      vulnerableFrames: 0,
+      sequence: [
+        { state: 'armoured', at: '2026-09-26T12:00:00.000Z', attempt: 1 },
+        { state: 'armoured', at: '2026-09-26T12:00:12.000Z', attempt: 1 },
+      ],
+    });
+    expect(incomplete.eliteVulnerableSeen).toBe(false);
+    expect(incomplete.phaseTransitionObserved).toBe(false);
+  });
+
+  describe('V02-WI-07 D04-C01 capture session record and candidate identity', () => {
+    const HEAD = 'a'.repeat(40);
+    const RUN_ID = 'v02-wi-07-d04-c01-elite-prepared-abc1234-20260926120000';
+
+    function d04Facts(overrides = {}) {
+      return {
+        productionArtifact: true,
+        zeroZeroSeen: true,
+        eliteArmouredSeen: true,
+        eliteVulnerableSeen: true,
+        phaseTransitionObserved: true,
+        ...overrides,
+      };
+    }
+
+    function d04RecordInput(overrides = {}) {
+      return {
+        ...validInput(),
+        runId: RUN_ID,
+        scopeId: D04_SCOPE_ID,
+        buildDir: 'dist',
+        kind: SESSION_KINDS.D04_ELITE_PREPARED_CAPTURE,
+        status: SESSION_STATUS.CAPTURE_COMPLETE,
+        d04CaptureFacts: d04Facts(),
+        ...overrides,
+      };
+    }
+
+    function d04FallbackCapture() {
+      return {
+        assetPath: 'assets/runtime/enemies/elite-drone-*.png',
+        failureInjectedAt: 'pre-Boot navigation (route installed before goto)',
+        requestCount: 2,
+        secondRequestObserved: false,
+        lateSwapObserved: false,
+        debugAuthorityUsed: false,
+        servedFromDevelopment: false,
+        servedFrom: 'http://127.0.0.1:4180',
+        buildIdentity: '[shmup] build shmup@0.1.0 (abc1234-dirty)',
+      };
+    }
+
+    it('accepts a capture-complete D04 prepared session and rejects an incomplete one', () => {
+      expect(createSessionRecord(d04RecordInput()).scopeId).toBe(D04_SCOPE_ID);
+      expect(() =>
+        createSessionRecord(
+          d04RecordInput({
+            d04CaptureFacts: d04Facts({ phaseTransitionObserved: false }),
+          }),
+        ),
+      ).toThrow(/phaseTransitionObserved/);
+      expect(() =>
+        createSessionRecord({ ...d04RecordInput(), scopeId: 'unknown-scope' }),
+      ).toThrow(/V02-WI-07-D04-C01/);
+      expect(() =>
+        createSessionRecord({
+          ...d04RecordInput(),
+          buildDir: 'development server',
+        }),
+      ).toThrow(/dist/);
+      expect(() =>
+        createSessionRecord({ ...d04RecordInput(), d04CaptureFacts: null }),
+      ).toThrow(/capture facts/);
+    });
+
+    it('requires the D04 production forced-fallback session to prove its request boundary', () => {
+      const fallbackInput = {
+        ...d04RecordInput(),
+        kind: SESSION_KINDS.D04_ELITE_PRODUCTION_FALLBACK_CAPTURE,
+        d04Capture: d04FallbackCapture(),
+      };
+      expect(createSessionRecord(fallbackInput).kind).toBe(
+        SESSION_KINDS.D04_ELITE_PRODUCTION_FALLBACK_CAPTURE,
+      );
+      for (const broken of [
+        { servedFromDevelopment: true },
+        { secondRequestObserved: true },
+        { lateSwapObserved: true },
+        { requestCount: 0 },
+        { buildIdentity: '' },
+      ]) {
+        expect(() =>
+          createSessionRecord({
+            ...fallbackInput,
+            d04Capture: { ...fallbackInput.d04Capture, ...broken },
+          }),
+        ).toThrow();
+      }
+      expect(() =>
+        createSessionRecord({ ...fallbackInput, d04Capture: null }),
+      ).toThrow(/D04 fallback session evidence/);
+      expect(() =>
+        validateD04FallbackEvidence(d04FallbackCapture()),
+      ).toBeTruthy();
+    });
+
+    it('keeps the WI-06 development fallback contract unchanged', () => {
+      const devRecord = createSessionRecord({
+        ...validInput(),
+        kind: SESSION_KINDS.FORCED_FALLBACK_CAPTURE,
+        status: SESSION_STATUS.CAPTURE_COMPLETE,
+        fallbackEvidence: {
+          assetPath: 'assets/runtime/enemies/elite-drone-*.png',
+          failureInjectedAt: 'pre-Boot navigation',
+          requestCount: 1,
+          secondRequestObserved: false,
+          lateSwapObserved: false,
+          debugAuthorityUsed: false,
+          servedFromDevelopment: true,
+        },
+      });
+      expect(devRecord.kind).toBe(SESSION_KINDS.FORCED_FALLBACK_CAPTURE);
+      expect(devRecord.d04Capture).toBeNull();
+    });
+
+    it('documents both D04 production capture modes in the runner vocabulary', () => {
+      const source = readFileSync(RUNNER_SOURCE_PATH, 'utf8');
+      expect(source).toContain('--d04-elite-capture');
+      expect(source).toContain('--production-fallback');
+      expect(source).toContain('production-d04-forced-fallback');
+      expect(source).toContain('d04-elite-capture-manifest.json');
+      expect(CAPTURE_SOURCES).toContain('production-d04-elite-prepared');
+      expect(CAPTURE_SOURCES).toContain('production-d04-forced-fallback');
+    });
+
+    it('computes a deterministic candidate digest over the working-tree entries', () => {
+      expect(parsePorcelainPaths(' M e2e/a.ts\0')).toEqual(['e2e/a.ts']);
+      expect(parsePorcelainPaths('?? scripts/x.mjs\0')).toEqual([
+        'scripts/x.mjs',
+      ]);
+      // A rename record carries the original path as the following chunk.
+      expect(parsePorcelainPaths('R  new.ts\0old.ts\0')).toEqual(['new.ts']);
+      expect(parsePorcelainPaths('')).toEqual([]);
+      const files = [
+        { path: 'a.ts', content: 'one' },
+        { path: 'b.ts', content: 'two' },
+      ];
+      const first = computeCandidateDigest({ head: HEAD, files });
+      expect(
+        computeCandidateDigest({ head: HEAD, files: [...files].reverse() }),
+      ).toBe(first);
+      expect(
+        computeCandidateDigest({
+          head: HEAD,
+          files: [{ path: 'a.ts', content: 'changed' }, files[1]],
+        }),
+      ).not.toBe(first);
+      expect(computeCandidateDigest({ head: 'b'.repeat(40), files })).not.toBe(
+        first,
+      );
+      expect(D04_CANDIDATE_DIGEST_METHOD).toMatch(/fnv1a32/);
+      expect(() => computeCandidateDigest({ head: '', files })).toThrow(/HEAD/);
+    });
   });
 });

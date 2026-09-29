@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -13,6 +14,13 @@ import { expect, test } from '@playwright/test';
 import type { BrowserContext, Page } from '@playwright/test';
 
 import { readEvidenceOwnership } from './evidence-ownership';
+import {
+  classifyFrame,
+  decodePng,
+  maskRegions,
+} from '../src/test-support/visual-evidence/raster';
+import { computeSourceFingerprint } from '../scripts/evidence-source-fingerprint.mjs';
+import { computeD04CandidateIdentity } from '../scripts/evidence-d04-candidate.mjs';
 
 /** V02-WI-04 C03: 32-bit FNV-1a over the UTF-8 bytes of an input string — the
  *  exact canonical RNG-input derivation (Technical Foundation §8) used to
@@ -964,6 +972,12 @@ test('the production artifact is locally servable and hygienic with a distinct l
     'activeCannonLeft',
     'activeCannonRight',
     'activeHomingCores',
+    // V02-WI-07 D04-C03: the isolated real-renderer rendering fixture, its
+    // fixture-only snapshot injection API and the DOM stage marker must never
+    // reach the ordinary production artifact.
+    'wi07-render-stage',
+    '__wi07Fixture',
+    'rendering-fixture',
   ]) {
     expect(jsContents.includes(symbol)).toBe(false);
   }
@@ -1724,4 +1738,1063 @@ test('records the uninstrumented Mission 01 regular-workload performance record 
   expect(cleanup.canvasCount).toBe(0);
   expect(cleanup.combatHudCount).toBe(0);
   expect(cleanup.dialogOverlayCount).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// V02-WI-07 D04 — three-mission production asset traversal (V02-AC-025)
+//
+// The final ordinary production artifact is served unchanged and traversed
+// through the real Operations → Mission Details → Start Mission flow. Only
+// player-visible facts are read: the Combat Countdown text, the Hull Bar, the
+// blocking Overlays, the raw local HTTP request ledger, and the rendered Combat
+// canvas pixels (the same pure classifier the accepted Mission 03 review runner
+// uses). No Debug, development observability, evidence-only scenario build,
+// shortened clock, hidden state write, or production-only hook is used.
+// ---------------------------------------------------------------------------
+
+/** The minimum supported CSS viewport (with the file-wide beforeEach). */
+const D04_VIEWPORT = { width: 1280, height: 600 };
+
+/**
+ * Fixed session seed for the bounded D04 production routes (disclosed). The
+ * canonical fixed-seed path is the accepted way to make an authored route
+ * reproducible; it changes only explicitly random variants such as Hunter
+ * left/right entry (Epic §8).
+ */
+const D04_SESSION_SEED = 19023;
+
+/**
+ * Aircraft observation point used by every D04 route (disclosed): a fixed
+ * bottom-left position chosen so the authored centre-lane arrivals are not
+ * destroyed by the aircraft's own auto-fire before they can be observed.
+ */
+const D04_AIRCRAFT_POINT = { x: 96, y: 540 };
+
+/** The approved seventeen-entry Boot manifest (Master §5.6, Epic §16.1). */
+const D04_MANIFEST_PATHS = [
+  '/backgrounds/operations-background.webp',
+  '/backgrounds/hangar-background.webp',
+  '/aircraft/german-fighter.png',
+  '/enemies/basic-drone.png',
+  '/enemies/ranged-drone.png',
+  '/enemies/hunter-drone.png',
+  '/enemies/elite-drone-armoured.png',
+  '/enemies/elite-drone-vulnerable.png',
+  '/fonts/ibm-plex-mono-regular.woff2',
+  '/fonts/ibm-plex-mono-medium.woff2',
+  '/fonts/ibm-plex-mono-semibold.woff2',
+  '/icons/gear.svg',
+  '/icons/pause.svg',
+  '/icons/crosshair.svg',
+  '/icons/map-trifold.svg',
+  '/icons/warehouse.svg',
+  '/icons/check.svg',
+] as const;
+
+/** The five approved prepared enemy runtime paths (Epic §16.1). */
+const D04_ENEMY_PATHS = [
+  '/enemies/basic-drone.png',
+  '/enemies/ranged-drone.png',
+  '/enemies/hunter-drone.png',
+  '/enemies/elite-drone-armoured.png',
+  '/enemies/elite-drone-vulnerable.png',
+] as const;
+
+/** The approved §16.4 prepared dimensions (width × height) per file name. */
+const D04_ENEMY_DIMENSIONS: Record<string, readonly [number, number]> = {
+  'basic-drone.png': [192, 101],
+  'ranged-drone.png': [224, 163],
+  'hunter-drone.png': [114, 192],
+  'elite-drone-armoured.png': [214, 320],
+  'elite-drone-vulnerable.png': [281, 320],
+};
+
+/** The approved five-file pack and complete-manifest byte budgets (§16.1). */
+const D04_ENEMY_PACK_BUDGET_BYTES = 450_000;
+const D04_MANIFEST_BUDGET_BYTES = 2 * 1024 * 1024;
+/** The previously recorded §16.4 facts, used only to report the difference. */
+const D04_HISTORIC_ENEMY_PACK_BYTES = 221_772;
+const D04_HISTORIC_MANIFEST_BYTES = 1_800_725;
+
+interface D04RequestEntry {
+  readonly url: string;
+  readonly resourceType: string;
+}
+
+/** One enemy observed in the rendered Combat canvas plus its pixel metrics. */
+interface D04RenderedEnemy {
+  readonly width: number;
+  readonly height: number;
+  readonly centerX: number;
+  readonly centerY: number;
+  readonly top: number;
+  readonly bottom: number;
+  /** Exact craft-pixel bounding box around the detected shape (px). */
+  readonly refinedWidth: number;
+  readonly refinedHeight: number;
+  /** Distinct non-background RGB colours inside the observed bounds. */
+  readonly distinctColours: number;
+  /** Non-background pixels inside the observed bounds. */
+  readonly sampledPixels: number;
+}
+
+/** Forces the disclosed fixed session seed before the measured page load. */
+async function forceD04SessionSeed(page: Page): Promise<void> {
+  await page.addInitScript((value) => {
+    const original = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+    globalThis.crypto.getRandomValues = (array) => {
+      if (array instanceof Uint32Array) {
+        array.fill(value >>> 0);
+        return array;
+      }
+      return original(array);
+    };
+  }, D04_SESSION_SEED);
+}
+
+/** Counts local HTTP requests whose pathname equals `pathname`. */
+function countPathRequests(
+  ledger: readonly D04RequestEntry[],
+  pathname: string,
+): number {
+  return ledger.filter(
+    (entry) =>
+      entry.url.startsWith('http') && new URL(entry.url).pathname === pathname,
+  ).length;
+}
+
+/** Starts one mission through the real Operations → Mission Details flow. */
+async function enterMission(page: Page, missionName: string): Promise<void> {
+  await page.getByRole('button', { name: missionName }).click();
+  const details = page.getByRole('dialog');
+  await expect(
+    details.getByRole('heading', { name: missionName }),
+  ).toBeVisible();
+  await details.getByRole('button', { name: 'Start Mission' }).click();
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
+  // Hold the disclosed observation point.
+  await page.mouse.move(D04_AIRCRAFT_POINT.x, D04_AIRCRAFT_POINT.y);
+}
+
+/**
+ * Resolves one mission through the supported player-facing terminal path
+ * (`Evacuate` → confirmation → the real 5 s commitment) and returns the actual
+ * committed result heading. Combat continues during the commitment, so a
+ * natural Defeat can legitimately win the race; either outcome is a real
+ * terminal, and `Continue` returns to Operations in both cases.
+ */
+async function resolveMissionToOperations(page: Page): Promise<string> {
+  await page
+    .getByTestId('combat-utility')
+    .getByRole('button', { name: 'Evacuate' })
+    .click();
+  const confirmation = page.getByRole('dialog');
+  await expect(
+    confirmation.getByRole('heading', { name: 'Evacuate?' }),
+  ).toBeVisible();
+  await confirmation
+    .getByRole('button', { name: 'Confirm Evacuation' })
+    .click();
+  const result = page.getByRole('dialog');
+  const committed = result.getByRole('heading').first();
+  await expect(result).toBeVisible({ timeout: 40000 });
+  const heading = (await committed.textContent()) ?? '';
+  expect(['EVACUATED', 'MISSION FAILED', 'MISSION COMPLETE']).toContain(
+    heading,
+  );
+  await result.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  return heading;
+}
+
+/** Waits until the Combat Countdown shows one exact authored `MM:SS` value. */
+async function waitForCountdown(
+  page: Page,
+  text: string,
+  timeoutMs = 180000,
+): Promise<void> {
+  await expect(page.locator('.ds-combat-countdown')).toHaveText(text, {
+    timeout: timeoutMs,
+  });
+}
+
+/** A wide, short silhouette: the approved Basic Drone role signature. */
+function isD04BasicSignature(enemy: D04RenderedEnemy): boolean {
+  return enemy.width >= 24 && enemy.height <= 18;
+}
+
+/** A wide, taller silhouette: the approved Ranged Drone role signature. */
+function isD04RangedSignature(enemy: D04RenderedEnemy): boolean {
+  return enemy.width >= 24 && enemy.height >= 20;
+}
+
+/** A narrow, tall silhouette: the approved Hunter Drone role signature. */
+function isD04HunterSignature(enemy: D04RenderedEnemy): boolean {
+  return enemy.width <= 20 && enemy.height >= 22;
+}
+
+/**
+ * A prepared enemy PNG renders as a shaded prepared image (many distinct
+ * colours); the approved procedural fallback is drawn from a few flat Design
+ * System token fills. Measured on the accepted production artifact: prepared
+ * images ≥ 137 distinct colours, approved fallback = 4.
+ */
+function isD04PreparedImage(enemy: D04RenderedEnemy): boolean {
+  return enemy.distinctColours >= 20;
+}
+
+function isD04ProceduralFallback(enemy: D04RenderedEnemy): boolean {
+  return enemy.distinctColours <= 8 && enemy.sampledPixels >= 40;
+}
+
+/** Writes one D04 production evidence record. */
+function writeD04Evidence(name: string, value: unknown): void {
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
+  writeFileSync(
+    join(EVIDENCE_DIR, name),
+    `${JSON.stringify(value, null, 2)}\n`,
+  );
+}
+
+/**
+ * V02-WI-07 D04-C01 correction delta 4: every D04 production evidence record is
+ * bound to the same exact final candidate. HEAD plus a dirty flag cannot
+ * identify the uncommitted D04 repair, so each record carries the full HEAD, the
+ * canonical source fingerprint, the D04 working-tree candidate digest, the
+ * ordinary build identity read from the served artifact, one stable runId, and
+ * the evidence viewport.
+ */
+function d04CandidateIdentity(): Record<string, unknown> {
+  const source = computeSourceFingerprint(process.cwd());
+  const candidate = computeD04CandidateIdentity(process.cwd());
+  return {
+    runId: `v02-wi-07-d04-c01-${source.head.slice(0, 7)}-${candidate.digest}`,
+    baseRevision: source.head,
+    sourceFingerprint: source.digest,
+    candidateDigest: candidate.digest,
+    candidateDigestMethod: candidate.method,
+    candidateWorkingTreePaths: candidate.workingTreePaths,
+    viewport: { width: D04_VIEWPORT.width, height: D04_VIEWPORT.height },
+  };
+}
+
+/** Captures the ordinary build identifier emitted by the served artifact. */
+function installD04BuildIdentityCapture(page: Page): () => string {
+  let value = 'unknown';
+  page.on('console', (message) => {
+    const text = message.text();
+    if (value === 'unknown' && text.startsWith('[shmup] build ')) {
+      value = text;
+    }
+  });
+  return () => value;
+}
+
+/** The persisted campaign fixture used before every measured D04 page load. */
+function d04UnlockedCampaign(): Readonly<Record<string, unknown>> {
+  return {
+    schemaVersion: 1,
+    runStatus: 'active',
+    credits: 42,
+    aircraftId: 'german-fighter',
+    hullIntegrity: 100,
+    equippedWeapon: 'machine-gun',
+    unlockedMissionIds: [
+      'interception-01',
+      'interception-02',
+      'interception-03',
+    ],
+    completedMissionIds: ['interception-01', 'interception-02'],
+    missionInProgress: null,
+    pilotId: 'pilot-shevchenko',
+  };
+}
+
+/**
+ * Prepares one measured D04 page load: seeds the schema-valid persisted unlock
+ * fixture through the application's own campaign store, then reloads so the
+ * measured load starts from that durable progression (disclosed fixture, never
+ * Debug or a hidden state write). The ledger, when supplied, is cleared so the
+ * measured load's requests are counted alone.
+ */
+async function prepareD04MeasuredLoad(
+  target: Page,
+  ledger?: D04RequestEntry[],
+): Promise<void> {
+  await target.goto('/');
+  await expect(target.getByTestId('operations-screen')).toBeVisible();
+  await target.waitForLoadState('networkidle');
+  await seedPersistedCampaign(target, d04UnlockedCampaign());
+  if (ledger !== undefined) {
+    ledger.length = 0;
+  }
+  await target.reload();
+  await expect(target.getByTestId('operations-screen')).toBeVisible();
+  await target.waitForLoadState('networkidle');
+}
+
+/**
+ * Captures the rendered Combat canvas and classifies only what a player sees.
+ * The HUD boxes and the fixed top HUD band are masked exactly like the accepted
+ * Mission 03 review runner; the per-enemy colour metric distinguishes a prepared
+ * image (many shaded colours) from the approved procedural fallback (a few flat
+ * Design System token fills).
+ */
+async function observeD04CombatFrame(page: Page): Promise<{
+  readonly enemies: readonly D04RenderedEnemy[];
+  readonly shot: Buffer;
+}> {
+  const hudBoxes = await page.evaluate(() => {
+    const box = (
+      selector: string,
+    ): {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null => {
+      const element = document.querySelector(selector);
+      if (element === null) {
+        return null;
+      }
+      const rect = element.getBoundingClientRect();
+      return {
+        x: rect.x - 4,
+        y: rect.y - 4,
+        width: rect.width + 8,
+        height: rect.height + 8,
+      };
+    };
+    return [
+      box('.ds-combat-hud__bar'),
+      box('.ds-combat-hud__system'),
+      box('.ds-combat-utility'),
+    ].filter((value) => value !== null);
+  });
+  const shot = await page.screenshot();
+  const raster = decodePng(shot);
+  maskRegions(raster, [
+    ...hudBoxes,
+    { x: 0, y: 0, width: D04_VIEWPORT.width, height: 80 },
+  ]);
+  const observation = classifyFrame(raster);
+  const enemies = observation.enemies.map((shape): D04RenderedEnemy => {
+    const left = Math.max(0, Math.floor(shape.centerX - shape.width / 2));
+    const right = Math.min(
+      raster.width,
+      Math.ceil(shape.centerX + shape.width / 2),
+    );
+    const top = Math.max(0, Math.floor(shape.top));
+    const bottom = Math.min(raster.height, Math.ceil(shape.bottom));
+    const colours = new Set<string>();
+    let sampledPixels = 0;
+    for (let y = top; y < bottom; y += 1) {
+      for (let x = left; x < right; x += 1) {
+        const base = (y * raster.width + x) * 4;
+        const r = raster.data[base] ?? 0;
+        const g = raster.data[base + 1] ?? 0;
+        const b = raster.data[base + 2] ?? 0;
+        if (Math.max(r, g, b) < 26) {
+          continue;
+        }
+        sampledPixels += 1;
+        colours.add(`${r},${g},${b}`);
+      }
+    }
+    // Exact craft-pixel box inside a bounded window around the detected shape:
+    // the window is wider than any enemy footprint but narrow enough that the
+    // authored lanes do not overlap, and danger/accent projectile pixels are
+    // excluded so a projectile can never inflate the measured bounds.
+    const windowLeft = Math.max(0, Math.floor(shape.centerX - 40));
+    const windowRight = Math.min(raster.width, Math.ceil(shape.centerX + 40));
+    const windowTop = Math.max(0, Math.floor(shape.centerY - 24));
+    const windowBottom = Math.min(raster.height, Math.ceil(shape.centerY + 24));
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (let y = windowTop; y < windowBottom; y += 1) {
+      for (let x = windowLeft; x < windowRight; x += 1) {
+        const base = (y * raster.width + x) * 4;
+        const r = raster.data[base] ?? 0;
+        const g = raster.data[base + 1] ?? 0;
+        const b = raster.data[base + 2] ?? 0;
+        const maximum = Math.max(r, g, b);
+        const minimum = Math.min(r, g, b);
+        if (maximum < 40) {
+          continue;
+        }
+        const danger = r > 110 && r > g + 40 && r > b + 40;
+        const accent = b > 105 && b > r + 25;
+        if (danger || accent) {
+          continue;
+        }
+        if (maximum - minimum > 90) {
+          continue;
+        }
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+    }
+    const refinedWidth = Number.isFinite(minX) ? maxX - minX + 1 : 0;
+    const refinedHeight = Number.isFinite(minY) ? maxY - minY + 1 : 0;
+    return {
+      width: shape.width,
+      height: shape.height,
+      centerX: shape.centerX,
+      centerY: shape.centerY,
+      top: shape.top,
+      bottom: shape.bottom,
+      refinedWidth,
+      refinedHeight,
+      distinctColours: colours.size,
+      sampledPixels,
+    };
+  });
+  return { enemies, shot };
+}
+
+/*
+ * V02-WI-07 D04-C03: the C02 long-running production flash sampler that used to
+ * live here is WITHDRAWN from mandatory production acceptance. It sampled 303-396
+ * sparse driver screenshots, observed no near-white blob of any kind (including
+ * the unconditional destroyed-enemy control square) and therefore could neither
+ * accept nor reject the repaired hit feedback; its failed record is preserved at
+ * `.agent-handoff/evidence/v02-wi-07-d04-c02-flash-rendering.json`. The flash
+ * presentation is now proven by real-renderer pixels in
+ * `e2e/wi07-d04-rendering.spec.ts`, the authoritative 3-step hit state by the
+ * accepted simulation/collision tests, and normal-application wiring by the
+ * checks below. See `.agent-handoff/evidence/wi07-d04-c03-coverage-map.md`.
+ */
+
+test('V02-WI-07 D04 the ordinary production build enters Interception 01–03 through the real flow, renders each authored encounter from the prepared sprites, and requests every approved asset at most once per page load (V02-AC-024/025)', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  const readBuildIdentity = installD04BuildIdentityCapture(page);
+  const ledger: D04RequestEntry[] = [];
+  page.on('request', (request) =>
+    ledger.push({ url: request.url(), resourceType: request.resourceType() }),
+  );
+  await forceD04SessionSeed(page);
+  // Disclosed setup: the schema-valid persisted unlock fixture is written
+  // through the application's own campaign store before the measured page load,
+  // then the measured load starts from that durable progression.
+  await prepareD04MeasuredLoad(page, ledger);
+
+  // --- Boot: the approved seventeen-entry manifest, once per page load ------
+  for (const path of D04_MANIFEST_PATHS) {
+    expect(
+      countPathRequests(ledger, path),
+      `Boot manifest request count for ${path}`,
+    ).toBe(1);
+  }
+  expect(
+    D04_ENEMY_PATHS.reduce(
+      (total, path) => total + countPathRequests(ledger, path),
+      0,
+    ),
+  ).toBe(5);
+
+  const observations: Record<string, unknown> = {};
+
+  // --- Interception 01 — Contact: Basic (`00:10`) ---------------------------
+  await enterMission(page, 'Interception 01');
+  await waitForCountdown(page, '03:10');
+  await waitForCountdown(page, '02:58');
+  const m01BasicFrames = [
+    await observeD04CombatFrame(page),
+    await waitForCountdown(page, '02:56').then(() =>
+      observeD04CombatFrame(page),
+    ),
+    await waitForCountdown(page, '02:54').then(() =>
+      observeD04CombatFrame(page),
+    ),
+  ];
+  const m01BasicWindow = m01BasicFrames
+    .flatMap((frame) => frame.enemies)
+    .filter(isD04PreparedImage);
+  // The authored e1 arrival creates four wide, short Basic silhouettes; every
+  // observed prepared image in this window is a Basic Drone and none is a
+  // Ranged or Hunter signature.
+  expect(m01BasicWindow.length).toBeGreaterThanOrEqual(2);
+  for (const enemy of m01BasicWindow) {
+    expect(enemy.height).toBeLessThanOrEqual(18);
+  }
+  expect(m01BasicWindow.filter(isD04RangedSignature)).toEqual([]);
+  expect(m01BasicWindow.filter(isD04HunterSignature)).toEqual([]);
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
+  writeFileSync(
+    join(EVIDENCE_DIR, 'v02-wi-07-d04-m01-basic.png'),
+    m01BasicFrames[1]!.shot,
+  );
+  observations['interception-01-e1-basic'] = m01BasicWindow;
+
+  // --- Interception 01 — the Ranged Drone enters `+2 s` at `00:57` ----------
+  await waitForCountdown(page, '02:12');
+  const m01RangedFrames = [await observeD04CombatFrame(page)];
+  for (const expected of ['02:10', '02:08', '02:06', '02:04']) {
+    await waitForCountdown(page, expected);
+    m01RangedFrames.push(await observeD04CombatFrame(page));
+  }
+  const m01RangedWindow = m01RangedFrames
+    .flatMap((frame) => frame.enemies)
+    .filter(isD04PreparedImage);
+  expect(m01RangedWindow.some(isD04RangedSignature)).toBe(true);
+  writeFileSync(
+    join(EVIDENCE_DIR, 'v02-wi-07-d04-m01-ranged.png'),
+    m01RangedFrames[m01RangedFrames.length - 1]!.shot,
+  );
+  observations['interception-01-e2-ranged'] = m01RangedWindow;
+
+  // --- Interception 01 — the Hunter Drone enters at `01:40` ----------------
+  await waitForCountdown(page, '01:28');
+  const m01HunterFrames = [await observeD04CombatFrame(page)];
+  for (const expected of ['01:26', '01:24', '01:22', '01:20', '01:18']) {
+    await waitForCountdown(page, expected);
+    m01HunterFrames.push(await observeD04CombatFrame(page));
+  }
+  const m01HunterWindow = m01HunterFrames
+    .flatMap((frame) => frame.enemies)
+    .filter(isD04PreparedImage);
+  expect(m01HunterWindow.some(isD04HunterSignature)).toBe(true);
+  writeFileSync(
+    join(EVIDENCE_DIR, 'v02-wi-07-d04-m01-hunter.png'),
+    m01HunterFrames[m01HunterFrames.length - 1]!.shot,
+  );
+  observations['interception-01-e3-hunter'] = m01HunterWindow;
+  observations['interception-01-terminal'] =
+    await resolveMissionToOperations(page);
+
+  // --- Interception 02 — Pressure: the authored `00:10` Basic formation ----
+  await enterMission(page, 'Interception 02');
+  await waitForCountdown(page, '04:20');
+  await waitForCountdown(page, '04:06');
+  const m02Frame = await observeD04CombatFrame(page);
+  const m02Window = m02Frame.enemies.filter(isD04PreparedImage);
+  expect(m02Window.some(isD04BasicSignature)).toBe(true);
+  writeFileSync(
+    join(EVIDENCE_DIR, 'v02-wi-07-d04-m02-basic.png'),
+    m02Frame.shot,
+  );
+  observations['interception-02-e1-basic'] = m02Window;
+  observations['interception-02-terminal'] =
+    await resolveMissionToOperations(page);
+
+  // --- Interception 03 — Breakthrough: Basic (`00:10`) and Ranged (`+2 s`) --
+  await enterMission(page, 'Interception 03');
+  await waitForCountdown(page, '05:20');
+  await waitForCountdown(page, '05:08');
+  const m03BasicFrame = await observeD04CombatFrame(page);
+  const m03BasicWindow = m03BasicFrame.enemies.filter(isD04PreparedImage);
+  expect(m03BasicWindow.some(isD04BasicSignature)).toBe(true);
+  writeFileSync(
+    join(EVIDENCE_DIR, 'v02-wi-07-d04-m03-basic.png'),
+    m03BasicFrame.shot,
+  );
+  await waitForCountdown(page, '05:04');
+  const m03RangedFrame = await observeD04CombatFrame(page);
+  const m03RangedWindow = m03RangedFrame.enemies.filter(isD04PreparedImage);
+  expect(m03RangedWindow.some(isD04RangedSignature)).toBe(true);
+  writeFileSync(
+    join(EVIDENCE_DIR, 'v02-wi-07-d04-m03-ranged.png'),
+    m03RangedFrame.shot,
+  );
+  observations['interception-03-e1-basic-ranged'] = m03RangedWindow;
+  observations['interception-03-terminal'] =
+    await resolveMissionToOperations(page);
+
+  // --- One measured page-load session: exactly one request per asset --------
+  for (const path of D04_ENEMY_PATHS) {
+    expect(
+      countPathRequests(ledger, path),
+      `enemy sprite request count for ${path}`,
+    ).toBe(1);
+  }
+  const origin = new URL(page.url()).origin;
+  for (const entry of ledger.filter((item) => item.url.startsWith('http'))) {
+    expect(new URL(entry.url).origin).toBe(origin);
+  }
+  expect(ledger.some((entry) => /\/assets\/source\//.test(entry.url))).toBe(
+    false,
+  );
+  expect(ledger.some((entry) => /\.jpe?g($|\?)/i.test(entry.url))).toBe(false);
+
+  writeD04Evidence('v02-wi-07-d04-traversal.json', {
+    scopeId: 'V02-WI-07-D04',
+    ...d04CandidateIdentity(),
+    buildIdentity: readBuildIdentity(),
+    recordedAt: new Date().toISOString(),
+    build: 'the ordinary locally served `dist/` production artifact',
+    sessionSeed: D04_SESSION_SEED,
+    route:
+      'persisted schema-valid unlock fixture before the measured load; real Operations → Mission Details → Start Mission for Interception 01, 02, and 03; supported Evacuate → Continue terminal between missions',
+    observations,
+    requestingLedger: {
+      total: ledger.length,
+      nonLocal: ledger.filter((entry) => new URL(entry.url).origin !== origin)
+        .length,
+      manifestPathCounts: Object.fromEntries(
+        D04_MANIFEST_PATHS.map((path) => [
+          path,
+          countPathRequests(ledger, path),
+        ]),
+      ),
+    },
+    pageErrors,
+  });
+
+  expect(pageErrors).toEqual([]);
+});
+
+test('V02-WI-07 D04 a controlled Basic Drone asset failure selects the approved procedural fallback for the page-load session and keeps it across mission entry and re-entry with no retry (V02-AC-025)', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(240_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  const readBuildIdentity = installD04BuildIdentityCapture(page);
+
+  // --- Reference load: the same authored encounter with the sprite ready ----
+  const referencePage = await context.newPage();
+  await referencePage.setViewportSize(MINIMUM_VIEWPORT);
+  await forceD04SessionSeed(referencePage);
+  await prepareD04MeasuredLoad(referencePage);
+  await enterMission(referencePage, 'Interception 01');
+  await waitForCountdown(referencePage, '03:10');
+  await waitForCountdown(referencePage, '02:58');
+  const referenceFrames = [await observeD04CombatFrame(referencePage)];
+  for (const expected of ['02:56', '02:54']) {
+    await waitForCountdown(referencePage, expected);
+    referenceFrames.push(await observeD04CombatFrame(referencePage));
+  }
+  const referenceBasic = referenceFrames
+    .flatMap((frame) => frame.enemies)
+    .filter(isD04PreparedImage)
+    .filter(isD04BasicSignature);
+  expect(referenceBasic.length).toBeGreaterThanOrEqual(2);
+  const referenceWidth = Math.max(
+    ...referenceBasic.map((enemy) => enemy.refinedWidth),
+  );
+  const referenceHeight = Math.max(
+    ...referenceBasic.map((enemy) => enemy.refinedHeight),
+  );
+  await referencePage.close();
+
+  // --- Measured load: the approved prepared request fails before Boot settles
+  await page.route('**/enemies/basic-drone.png', (route) => route.abort());
+  const ledger: D04RequestEntry[] = [];
+  page.on('request', (request) =>
+    ledger.push({ url: request.url(), resourceType: request.resourceType() }),
+  );
+  await forceD04SessionSeed(page);
+  await prepareD04MeasuredLoad(page, ledger);
+
+  // The failed sprite was requested exactly once (aborted at Boot) and every
+  // other approved manifest asset was requested exactly once.
+  expect(countPathRequests(ledger, '/enemies/basic-drone.png')).toBe(1);
+  for (const path of D04_MANIFEST_PATHS) {
+    if (path === '/enemies/basic-drone.png') {
+      continue;
+    }
+    expect(
+      countPathRequests(ledger, path),
+      `manifest request count for ${path}`,
+    ).toBe(1);
+  }
+
+  await enterMission(page, 'Interception 01');
+  await waitForCountdown(page, '03:10');
+  await waitForCountdown(page, '02:58');
+  const fallbackFrames = [await observeD04CombatFrame(page)];
+  for (const expected of ['02:56', '02:54']) {
+    await waitForCountdown(page, expected);
+    fallbackFrames.push(await observeD04CombatFrame(page));
+  }
+  const fallbackEnemies = fallbackFrames.flatMap((frame) => frame.enemies);
+  const fallbackBasics = fallbackEnemies.filter(isD04ProceduralFallback);
+  expect(fallbackBasics.length).toBeGreaterThanOrEqual(2);
+  // The failed kind never renders as a prepared image in this session.
+  expect(
+    fallbackEnemies.filter(
+      (enemy) => isD04PreparedImage(enemy) && isD04BasicSignature(enemy),
+    ),
+  ).toEqual([]);
+  // The approved fallback preserves the role's gameplay-scale complete rendered
+  // bounds: measured against the ready render of the same authored encounter on
+  // the same viewport and session seed.
+  for (const enemy of fallbackBasics) {
+    expect(Math.abs(enemy.refinedWidth - referenceWidth)).toBeLessThanOrEqual(
+      6,
+    );
+    expect(Math.abs(enemy.refinedHeight - referenceHeight)).toBeLessThanOrEqual(
+      6,
+    );
+  }
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
+  writeFileSync(
+    join(EVIDENCE_DIR, 'v02-wi-07-d04-m01-basic-fallback.png'),
+    fallbackFrames[1]!.shot,
+  );
+
+  // --- Re-entry keeps the same fixed session fallback and sends no request --
+  const firstTerminal = await resolveMissionToOperations(page);
+  await enterMission(page, 'Interception 01');
+  await waitForCountdown(page, '03:10');
+  await waitForCountdown(page, '02:58');
+  const reEntryFrames = [await observeD04CombatFrame(page)];
+  for (const expected of ['02:56', '02:54']) {
+    await waitForCountdown(page, expected);
+    reEntryFrames.push(await observeD04CombatFrame(page));
+  }
+  const reEntryEnemies = reEntryFrames.flatMap((frame) => frame.enemies);
+  const reEntryBasics = reEntryEnemies.filter(isD04ProceduralFallback);
+  writeD04Evidence('v02-wi-07-d04-asset-failure.json', {
+    scopeId: 'V02-WI-07-D04',
+    ...d04CandidateIdentity(),
+    buildIdentity: readBuildIdentity(),
+    recordedAt: new Date().toISOString(),
+    failedRequestPath: '/enemies/basic-drone.png',
+    referenceBasicBounds: {
+      widestWidth: referenceWidth,
+      tallestHeight: referenceHeight,
+      preparedDistinctColours: referenceBasic.map(
+        (enemy) => enemy.distinctColours,
+      ),
+    },
+    fallbackBasicBounds: fallbackBasics,
+    reEntryFallbackBounds: reEntryBasics,
+    requestCounts: {
+      failedPath: countPathRequests(ledger, '/enemies/basic-drone.png'),
+      approvedManifestPaths: Object.fromEntries(
+        D04_MANIFEST_PATHS.map((path) => [
+          path,
+          countPathRequests(ledger, path),
+        ]),
+      ),
+    },
+    firstTerminal,
+    pageErrors,
+  });
+  expect(reEntryBasics.length).toBeGreaterThanOrEqual(2);
+  for (const enemy of reEntryBasics) {
+    expect(Math.abs(enemy.refinedWidth - referenceWidth)).toBeLessThanOrEqual(
+      6,
+    );
+    expect(Math.abs(enemy.refinedHeight - referenceHeight)).toBeLessThanOrEqual(
+      6,
+    );
+  }
+  expect(countPathRequests(ledger, '/enemies/basic-drone.png')).toBe(1);
+  writeFileSync(
+    join(EVIDENCE_DIR, 'v02-wi-07-d04-m01-basic-fallback-reentry.png'),
+    reEntryFrames[reEntryFrames.length - 1]!.shot,
+  );
+
+  expect(pageErrors).toEqual([]);
+});
+
+test('V02-WI-07 D04 a Basic Drone response that completes after the bounded Boot deadline stays inert: the approved fallback renders before and after the late completion with no second request and no late swap (V02-AC-025, MASTER-AC-013)', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  const readBuildIdentity = installD04BuildIdentityCapture(page);
+  await forceD04SessionSeed(page);
+
+  // Setup load without the delayed response so the fixture write settles.
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await page.waitForLoadState('networkidle');
+  await seedPersistedCampaign(page, d04UnlockedCampaign());
+
+  // Measured load: the approved sprite response completes 40 s after its
+  // request, far past the bounded 5 s Boot deadline, and is therefore inert.
+  await page.route('**/enemies/basic-drone.png', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 40_000));
+    await route.continue();
+  });
+  const ledger: D04RequestEntry[] = [];
+  page.on('request', (request) =>
+    ledger.push({ url: request.url(), resourceType: request.resourceType() }),
+  );
+  ledger.length = 0;
+  await page.reload();
+  await expect(page.getByTestId('operations-screen')).toBeVisible({
+    timeout: 30000,
+  });
+
+  await enterMission(page, 'Interception 01');
+  await waitForCountdown(page, '03:10');
+  await waitForCountdown(page, '02:58');
+  const earlyFrames = [await observeD04CombatFrame(page)];
+  for (const expected of ['02:56', '02:54']) {
+    await waitForCountdown(page, expected);
+    earlyFrames.push(await observeD04CombatFrame(page));
+  }
+  const earlyEnemies = earlyFrames.flatMap((frame) => frame.enemies);
+  const earlyFallback = earlyEnemies.filter(isD04ProceduralFallback);
+  expect(earlyFallback.length).toBeGreaterThanOrEqual(2);
+  // The failed kind never renders as a prepared image before the late arrival.
+  expect(
+    earlyEnemies.filter(
+      (enemy) => isD04PreparedImage(enemy) && isD04BasicSignature(enemy),
+    ),
+  ).toEqual([]);
+
+  // The authored `00:55` group is rendered after the late response arrived: the
+  // session result is still the approved procedural fallback, because the Boot
+  // deadline already fixed it and a late completion cannot replace it.
+  await waitForCountdown(page, '02:12');
+  const lateFrames = [await observeD04CombatFrame(page)];
+  for (const expected of ['02:10', '02:08']) {
+    await waitForCountdown(page, expected);
+    lateFrames.push(await observeD04CombatFrame(page));
+  }
+  const lateEnemies = lateFrames.flatMap((frame) => frame.enemies);
+  const lateFallback = lateEnemies.filter(isD04ProceduralFallback);
+  expect(lateFallback.length).toBeGreaterThanOrEqual(1);
+  expect(
+    lateEnemies.filter(
+      (enemy) => isD04PreparedImage(enemy) && isD04BasicSignature(enemy),
+    ),
+  ).toEqual([]);
+  // No retry and no second request after the late completion.
+  expect(countPathRequests(ledger, '/enemies/basic-drone.png')).toBe(1);
+
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
+  writeFileSync(
+    join(EVIDENCE_DIR, 'v02-wi-07-d04-m01-basic-late-completion.png'),
+    lateFrames[lateFrames.length - 1]!.shot,
+  );
+  writeD04Evidence('v02-wi-07-d04-late-completion.json', {
+    scopeId: 'V02-WI-07-D04',
+    ...d04CandidateIdentity(),
+    buildIdentity: readBuildIdentity(),
+    recordedAt: new Date().toISOString(),
+    delayedResponseMs: 40_000,
+    bootDeadlineMs: 5_000,
+    earlyFallback,
+    lateFallback,
+    requestCounts: {
+      failedPath: countPathRequests(ledger, '/enemies/basic-drone.png'),
+      approvedManifestPaths: Object.fromEntries(
+        D04_MANIFEST_PATHS.map((path) => [
+          path,
+          countPathRequests(ledger, path),
+        ]),
+      ),
+    },
+    pageErrors,
+  });
+
+  expect(pageErrors).toEqual([]);
+});
+
+test('V02-WI-07 D04 controlled Elite sprite failures keep each Elite asset to one Boot request with no late retry and leave the ordinary production artifact playable (V02-AC-025)', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  const readBuildIdentity = installD04BuildIdentityCapture(page);
+  const elitePaths = [
+    '/enemies/elite-drone-armoured.png',
+    '/enemies/elite-drone-vulnerable.png',
+  ];
+  await page.route('**/enemies/elite-drone-*.png', (route) => route.abort());
+  const ledger: D04RequestEntry[] = [];
+  page.on('request', (request) =>
+    ledger.push({ url: request.url(), resourceType: request.resourceType() }),
+  );
+  await forceD04SessionSeed(page);
+  await prepareD04MeasuredLoad(page, ledger);
+
+  // Both Elite state sprites failed at Boot; the complete five-sprite pack is
+  // still exactly five requests for the page load.
+  for (const path of elitePaths) {
+    expect(countPathRequests(ledger, path)).toBe(1);
+  }
+  expect(
+    D04_ENEMY_PATHS.reduce(
+      (total, path) => total + countPathRequests(ledger, path),
+      0,
+    ),
+  ).toBe(5);
+
+  // The ordinary artifact stays playable: Mission 03 starts through the real
+  // flow and renders its authored first encounter from the prepared sprites.
+  await enterMission(page, 'Interception 03');
+  await waitForCountdown(page, '05:20');
+  await waitForCountdown(page, '05:08');
+  const frame = await observeD04CombatFrame(page);
+  expect(
+    frame.enemies.filter(isD04PreparedImage).some(isD04BasicSignature),
+  ).toBe(true);
+  // Combat entry and rendering issued no late Elite retry.
+  for (const path of elitePaths) {
+    expect(countPathRequests(ledger, path)).toBe(1);
+  }
+
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
+  // Correction delta 1: this frame is the authored PRE-Elite Mission 03 first
+  // encounter rendered while both approved Elite sprite requests failed at Boot.
+  // It is deliberately NOT named or recorded as an Elite fallback frame and must
+  // never be read as Elite production proof; the natural Elite fallback frames
+  // are captured by the D04-C01 player-controlled production session.
+  const preEliteFramePath = join(
+    EVIDENCE_DIR,
+    'v02-wi-07-d04-m03-pre-elite-basic-encounter-under-elite-asset-failure.png',
+  );
+  writeFileSync(preEliteFramePath, frame.shot);
+  writeD04Evidence('v02-wi-07-d04-elite-asset-failure.json', {
+    scopeId: 'V02-WI-07-D04',
+    ...d04CandidateIdentity(),
+    buildIdentity: readBuildIdentity(),
+    recordedAt: new Date().toISOString(),
+    failedRequestPaths: elitePaths,
+    screenshot: {
+      path: '.agent-handoff/evidence/v02-wi-07-d04-m03-pre-elite-basic-encounter-under-elite-asset-failure.png',
+      semantics:
+        'the authored pre-Elite Mission 03 first encounter (Basic Drones) rendered by the ordinary production artifact while both approved Elite sprite requests failed at Boot; it is not an Elite fallback frame and provides no Elite rendering evidence',
+    },
+    eliteRenderingEvidence:
+      'captured by the D04-C01 player-controlled production sessions (prepared and forced-fallback) recorded under .agent-handoff/evidence/manual-m03-d04*/',
+    requestCounts: Object.fromEntries(
+      elitePaths.map((path) => [path, countPathRequests(ledger, path)]),
+    ),
+    pageErrors,
+  });
+
+  expect(pageErrors).toEqual([]);
+});
+
+test('V02-WI-07 D04 the final ordinary dist artifact ships exactly the five approved prepared enemy PNGs, no source original, within the pack and manifest byte budgets (V02-AC-025, Epic §16.1/§16.4)', () => {
+  const dist = join(process.cwd(), 'dist');
+  expect(existsSync(join(dist, 'index.html'))).toBe(true);
+
+  const distEnemyDirectory = join(dist, 'enemies');
+  const enemyFiles = readdirSync(distEnemyDirectory)
+    .filter((file) => file.endsWith('.png'))
+    .sort();
+  expect(enemyFiles).toEqual(Object.keys(D04_ENEMY_DIMENSIONS).sort());
+
+  const perFile: Record<string, unknown> = {};
+  let enemyPackBytes = 0;
+  for (const file of enemyFiles) {
+    const distPath = join(distEnemyDirectory, file);
+    const sourcePath = join(
+      process.cwd(),
+      'assets',
+      'runtime',
+      'enemies',
+      file,
+    );
+    const distBytes = readFileSync(distPath);
+    // The artifact ships exactly the approved prepared file, byte for byte.
+    expect(distBytes.equals(readFileSync(sourcePath))).toBe(true);
+    // Format and real alpha: 8-bit RGBA PNG with genuinely transparent pixels.
+    expect(distBytes.readUInt8(24)).toBe(8);
+    expect(distBytes.readUInt8(25)).toBe(6);
+    const raster = decodePng(distBytes);
+    const [expectedWidth, expectedHeight] = D04_ENEMY_DIMENSIONS[file] ?? [
+      0, 0,
+    ];
+    expect(raster.width).toBe(expectedWidth);
+    expect(raster.height).toBe(expectedHeight);
+    let transparentPixels = 0;
+    for (let index = 3; index < raster.data.length; index += 4) {
+      if ((raster.data[index] ?? 255) < 255) {
+        transparentPixels += 1;
+      }
+    }
+    expect(transparentPixels).toBeGreaterThan(0);
+    const bytes = statSync(distPath).size;
+    enemyPackBytes += bytes;
+    perFile[file] = {
+      bytes,
+      width: raster.width,
+      height: raster.height,
+      transparentPixels,
+    };
+  }
+  expect(enemyPackBytes).toBeLessThanOrEqual(D04_ENEMY_PACK_BUDGET_BYTES);
+
+  const listFiles = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      return entry.isDirectory() ? listFiles(path) : [path];
+    });
+  const allFiles = listFiles(dist);
+  // No source originals, no JPEG source material, no source maps.
+  expect(
+    allFiles.some(
+      (path) =>
+        path.includes(join('assets', 'source')) ||
+        /\.jpe?g$/i.test(path) ||
+        /\.map$/i.test(path),
+    ),
+  ).toBe(false);
+
+  // The complete runtime asset manifest as served (everything except the entry
+  // document and the emitted JS/CSS).
+  const runtimeAssetBytes = allFiles
+    .filter((path) => {
+      if (path.endsWith('index.html')) {
+        return false;
+      }
+      if (
+        path.includes(`${join('assets', '')}`) &&
+        /\.[cm]?[jt]s$/.test(path)
+      ) {
+        return false;
+      }
+      return !path.endsWith('.css');
+    })
+    .reduce((total, path) => total + statSync(path).size, 0);
+  expect(runtimeAssetBytes).toBeGreaterThan(0);
+  expect(runtimeAssetBytes).toBeLessThanOrEqual(D04_MANIFEST_BUDGET_BYTES);
+
+  const revision = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+  const workingTree = execSync('git status --porcelain', {
+    encoding: 'utf8',
+  }).trim();
+  const identity = d04CandidateIdentity();
+  // The audit's own revision read must agree with the bound candidate identity.
+  expect(identity.baseRevision).toBe(revision);
+  writeD04Evidence('v02-wi-07-d04-artifact-audit.json', {
+    scopeId: 'V02-WI-07-D04',
+    ...identity,
+    revision,
+    dirty: workingTree.length > 0,
+    workingTreeEntries: workingTree.split('\n').filter((line) => line !== ''),
+    enemyFiles: perFile,
+    enemyPackBytes,
+    enemyPackBudgetBytes: D04_ENEMY_PACK_BUDGET_BYTES,
+    enemyPackHistoricBytes: D04_HISTORIC_ENEMY_PACK_BYTES,
+    enemyPackDeltaVsHistoric: enemyPackBytes - D04_HISTORIC_ENEMY_PACK_BYTES,
+    runtimeAssetBytes,
+    runtimeAssetBudgetBytes: D04_MANIFEST_BUDGET_BYTES,
+    manifestHistoricBytes: D04_HISTORIC_MANIFEST_BYTES,
+    manifestDeltaVsHistoric: runtimeAssetBytes - D04_HISTORIC_MANIFEST_BYTES,
+  });
+  console.log(
+    'V02-WI07-D04-ARTIFACT',
+    JSON.stringify({
+      revision,
+      enemyPackBytes,
+      runtimeAssetBytes,
+      enemyPackDelta: enemyPackBytes - D04_HISTORIC_ENEMY_PACK_BYTES,
+      manifestDelta: runtimeAssetBytes - D04_HISTORIC_MANIFEST_BYTES,
+    }),
+  );
 });

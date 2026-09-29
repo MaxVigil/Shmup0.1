@@ -544,7 +544,11 @@ export class CombatScene extends Phaser.Scene {
       settle(registered ? 'ready' : 'fallback');
     };
     image.onerror = () => settle('fallback');
-    image.src = resolution.url;
+    // V02-AC-025: the prepared inline bytes are decoded directly, so Combat
+    // never re-requests the manifest asset it was handed (MASTER-AC-014). The
+    // runtime URL stays as the source only for a ready result that carries no
+    // prepared bytes (for example a hand-built fixture).
+    image.src = resolution.imageDataUri ?? resolution.url;
   }
 
   /**
@@ -571,17 +575,23 @@ export class CombatScene extends Phaser.Scene {
     opacity: number,
   ): void {
     const key = enemyTextureKey(kind);
+    const flashKey = enemyFlashTextureKey(kind);
     const existing = this.enemyVisuals.get(enemy.id);
+    // V02-WI-07 D04-C02: the derived flash silhouette is the same kind's artwork,
+    // so entering or leaving the damaging-hit feedback never recreates the visual
+    // (no per-hit visual churn on the shared presentation owner).
+    const existingKey =
+      existing instanceof Phaser.GameObjects.Image
+        ? existing.texture.key
+        : null;
+    const existingMatchesKind = existingKey === key || existingKey === flashKey;
     if (
       existing !== undefined &&
       !(existing instanceof Phaser.GameObjects.Image)
     ) {
       existing.destroy();
       this.enemyVisuals.delete(enemy.id);
-    } else if (
-      existing instanceof Phaser.GameObjects.Image &&
-      existing.texture.key !== key
-    ) {
+    } else if (existing !== undefined && !existingMatchesKind) {
       // The authoritative phase changed: the previous state's image is
       // released and the matching state texture is created instead. Texture
       // readiness never delays this swap — it reflects the simulation state of
@@ -600,9 +610,78 @@ export class CombatScene extends Phaser.Scene {
     visual.setDisplaySize(enemy.width, enemy.height);
     visual.setAlpha(opacity);
     if (flashing) {
-      visual.setTint(hexToNumber(this.geometry.enemyFlashColor));
+      // V02-WI-07 D04-C02: a damaging-hit flash must be *visible*. Phaser 4's
+      // default tint mode is MULTIPLY and the approved flash colour is near
+      // white, so `setTint` alone leaves the artwork practically unchanged; the
+      // Tint component is also WebGL-only, so it cannot serve the Canvas
+      // renderer that Phaser.AUTO may select. The shared owner therefore swaps in
+      // a derived opaque flash-colour silhouette that preserves the prepared
+      // artwork's alpha: no extra network request, no mutation of the prepared
+      // asset, and no simulation or timing change (the 3 fixed steps stay).
+      const flashKey = this.preparedFlashTextureKey(kind, key);
+      if (flashKey === null) {
+        // No usable canvas pipeline (for example a headless unit environment
+        // without a real 2D context): keep the documented WebGL FILL tint so the
+        // feedback is never silently dropped.
+        visual.setTintMode(Phaser.TintModes.FILL);
+        visual.setTint(hexToNumber(this.geometry.enemyFlashColor));
+      } else {
+        visual.setTexture(flashKey);
+        visual.setDisplaySize(enemy.width, enemy.height);
+      }
     } else {
+      if (visual.texture.key !== key) {
+        visual.setTexture(key);
+        visual.setDisplaySize(enemy.width, enemy.height);
+      }
+      visual.setTintMode(Phaser.TintModes.MULTIPLY);
       visual.clearTint();
+    }
+  }
+
+  /**
+   * Lazily derives the opaque flash-colour silhouette of one prepared enemy
+   * artwork, preserving its alpha, and returns its texture key. The derived
+   * texture is renderer-agnostic (CanvasTexture) and is created at most once per
+   * kind; failures return `null` so the caller can fall back.
+   */
+  private preparedFlashTextureKey(
+    kind: EnemyVisualKind,
+    preparedKey: string,
+  ): string | null {
+    const flashKey = enemyFlashTextureKey(kind);
+    if (this.textures.exists(flashKey)) {
+      return flashKey;
+    }
+    try {
+      const source = this.textures
+        .get(preparedKey)
+        .getSourceImage() as CanvasImageSource & {
+        width?: number;
+        height?: number;
+      };
+      const width = source?.width ?? 0;
+      const height = source?.height ?? 0;
+      if (width <= 0 || height <= 0) {
+        return null;
+      }
+      const flashTexture = this.textures.createCanvas(flashKey, width, height);
+      if (flashTexture === null) {
+        return null;
+      }
+      const context = flashTexture.getContext();
+      context.clearRect(0, 0, width, height);
+      context.drawImage(source, 0, 0);
+      // `source-in` keeps the artwork's alpha but replaces every rendered colour
+      // with the approved flash colour.
+      context.globalCompositeOperation = 'source-in';
+      context.fillStyle = this.geometry.enemyFlashColor;
+      context.fillRect(0, 0, width, height);
+      context.globalCompositeOperation = 'source-over';
+      flashTexture.refresh();
+      return flashKey;
+    } catch {
+      return null;
     }
   }
 
@@ -1058,6 +1137,15 @@ export class CombatScene extends Phaser.Scene {
 
 function enemyTextureKey(kind: EnemyVisualKind): string {
   return `enemy-visual-${kind}`;
+}
+
+/**
+ * Derived opaque flash-colour silhouette of one prepared enemy artwork
+ * (V02-WI-07 D04-C02). Derived at runtime from the already prepared texture; it
+ * is never a shipped asset and never triggers a second network request.
+ */
+function enemyFlashTextureKey(kind: EnemyVisualKind): string {
+  return `enemy-visual-flash-${kind}`;
 }
 
 /** Reads the approved fallback shape set for one kind (mapping owner). */

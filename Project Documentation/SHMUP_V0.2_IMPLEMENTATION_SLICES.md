@@ -281,6 +281,16 @@ Acceptance evidence:
 - complete source-qualified AC checklist with no orphan requirement;
 - independent final Epic review and explicit Product Owner acceptance.
 
+**WI-07 checkpoint status (2026-09-29):** D04 three-mission production asset
+traversal, including C01–C03 rendering/evidence corrections, is independently
+accepted on implementation candidate HEAD
+`92b0473e2eb1b93ceac856f37039bc7df778fe00`, source fingerprint `31c90de6`,
+dirty-candidate digest `7e7aecc2`, under the Product Owner's bounded
+`V02-DEC-036` verification exception. This is not acceptance of WI-07 or v0.2.
+D05 integrated workloads/delivery audit and D06 documentation/traceability/final
+acceptance package remain outstanding. No implementation handoff, commit,
+push or deployment is authorized by this status record.
+
 ## 9. Handoff readiness
 
 `V02-WI-01` through `V02-WI-05` have accepted implementation revisions;

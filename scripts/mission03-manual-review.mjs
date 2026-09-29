@@ -18,6 +18,7 @@
  * capture and cleanup fact is written to a machine-readable session record.
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -30,14 +31,21 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 import { computeSourceFingerprint } from './evidence-source-fingerprint.mjs';
+import { computeD04CandidateIdentity } from './evidence-d04-candidate.mjs';
 import {
+  D04_CAPTURE_FACTS,
+  D04_SCOPE_ID,
   SESSION_KINDS,
   SESSION_STATUS,
   buildArtifacts,
+  buildD04CaptureManifest,
   createAttemptTracker,
   createCaptureSelector,
   createSessionRecord,
   deriveAcceptanceFacts,
+  deriveD04CaptureFacts,
+  deriveEliteCaptureOffer,
+  deriveElitePhasePair,
   deriveSecondRequestObserved,
   evaluateCombatResidue,
   prepareSessionDirectory,
@@ -54,6 +62,8 @@ const VIEWPORT = { width: 1280, height: 600 };
 const SESSION_SEED = 19023;
 const POLL_MS = 2500;
 const BASE_POLL_MS = 5000;
+/** How long a frozen Combat Countdown is tolerated before the pause note. */
+const PAUSE_HINT_AFTER_MS = 20000;
 const EVIDENCE_ROOT = join(ROOT, '.agent-handoff', 'evidence');
 const DB_NAME = 'shmup-v0.2';
 const TERMINAL_HEADINGS = new Map([
@@ -91,6 +101,8 @@ function parseArgs(argv) {
     skipBuild: false,
     port: 4180,
     developmentFallback: false,
+    d04EliteCapture: false,
+    productionFallback: false,
   };
   for (const argument of argv) {
     if (argument === '--skip-build') {
@@ -101,6 +113,16 @@ function parseArgs(argv) {
       // through its stable procedural fallback. No Debug authority is used and
       // the artifact is never the production build.
       options.developmentFallback = true;
+    } else if (argument === '--d04-elite-capture') {
+      // V02-WI-07 D04-C01: ordinary-production Elite capture session. It stops
+      // as soon as both natural Elite states and their observable transition
+      // have been captured, so a later natural Defeat does not invalidate it.
+      options.d04EliteCapture = true;
+    } else if (argument === '--production-fallback') {
+      // V02-WI-07 D04-C01: the separately labelled production forced-fallback
+      // mode. It aborts only the approved Elite PNG requests before Boot
+      // settles while still serving the ordinary production artifact.
+      options.productionFallback = true;
     } else if (argument.startsWith('--port=')) {
       options.port = Number.parseInt(argument.slice('--port='.length), 10);
     }
@@ -484,6 +506,58 @@ function printFallbackBriefing() {
   log('');
 }
 
+/** SHA-256 of one captured screenshot, bound into the D04 manifest. */
+function screenshotSha256(buffer) {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
+function printD04PreparedBriefing() {
+  log('');
+  log('=========================================================');
+  log(' V02-WI-07 D04-C01 — ELITE PREPARED-SPRITE CAPTURE');
+  log('=========================================================');
+  log(' Ordinary production build (dist) at 1280x600. Nothing is');
+  log(' modified: the approved Elite PNGs load normally.');
+  log('');
+  log(' Your job: fly Interception 03 and survive to the 05:20');
+  log(' Elite arrival, then stay alive through its Armoured phase');
+  log(' and into its Vulnerable phase (about 12 s Armoured, then');
+  log(' Vulnerable, repeating). The runner captures both rendered');
+  log(' states passively and closes the session by itself.');
+  log('');
+  log(' Controls: move with the mouse, or A/D and W/S (arrows).');
+  log(' The Machine Gun fires automatically.');
+  log('');
+  log(' Completing the mission is not required. If you are');
+  log(' destroyed, Repair and try again inside this same session.');
+  log(' To stop early, press Ctrl+C in this terminal.');
+  log('=========================================================');
+  log('');
+}
+
+function printD04FallbackBriefing() {
+  log('');
+  log('=========================================================');
+  log(' V02-WI-07 D04-C01 — ELITE FORCED-FALLBACK CAPTURE');
+  log('=========================================================');
+  log(' Ordinary production build (dist) at 1280x600. The two');
+  log(' approved Elite PNG requests are aborted before Boot');
+  log(' settles, so the Elite renders its approved procedural');
+  log(' fallback. No Debug, no clock change, no gameplay change.');
+  log('');
+  log(' Your job: the same as the prepared run — reach the 05:20');
+  log(' Elite and stay alive through Armoured into Vulnerable.');
+  log(' The runner captures both fallback states and closes the');
+  log(' session by itself.');
+  log('');
+  log(' Controls: move with the mouse, or A/D and W/S (arrows).');
+  log(' The Machine Gun fires automatically.');
+  log('');
+  log(' To stop early, press Ctrl+C in this terminal.');
+  log('=========================================================');
+  log('');
+}
+
 function printOperatorBriefing() {
   log('');
   log('=========================================================');
@@ -584,6 +658,21 @@ async function readVisibleTerminalLog(page) {
   return page.evaluate(() => globalThis.__m03VisibleTerminals ?? []);
 }
 
+/**
+ * V02-WI-07 D04-C02: visible browser lifecycle facts. Pause diagnostics must not
+ * infer a pause from a Countdown that is legitimately fixed at `00:00` after the
+ * authored Elite arrival, so they use the page's own visibility and focus state
+ * instead. This reads browser lifecycle only — never gameplay state.
+ */
+async function readLifecycleFacts(page) {
+  return page.evaluate(() => ({
+    visibilityState: document.visibilityState,
+    hasFocus:
+      typeof document.hasFocus === 'function' ? document.hasFocus() : null,
+    sampledAt: new Date().toISOString(),
+  }));
+}
+
 const MANIFEST_PATH = join(EVIDENCE_ROOT, 'wi06-m03-capture-manifest.json');
 
 /** Resources cleaned up on any exit path so no server or window is leaked. */
@@ -670,29 +759,64 @@ function relativeToRoot(absolutePath) {
     ? absolutePath.slice(ROOT.length + 1)
     : absolutePath;
 }
-
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const fallback = options.developmentFallback;
+  const d04 = options.d04EliteCapture;
+  const productionFallback = d04 && options.productionFallback;
+  if (options.productionFallback && !d04) {
+    throw new Error(
+      '--production-fallback requires --d04-elite-capture: it is the D04 production capture mode, not a development session.',
+    );
+  }
+  if (fallback && d04) {
+    throw new Error(
+      '--development-fallback and --d04-elite-capture are separate modes; the D04 capture must be an ordinary production session.',
+    );
+  }
+  // The request-failure route applies to the development fallback run and to
+  // the D04 production fallback run; the D04 prepared run aborts nothing.
+  const assetFailure = fallback || productionFallback;
   const sourceFingerprintInput = computeSourceFingerprint(ROOT);
   const baseRevision = sourceFingerprintInput.head;
   const sourceFingerprint = sourceFingerprintInput.digest;
+  const candidate = computeD04CandidateIdentity(ROOT);
   const startedAt = new Date().toISOString();
-  const runId = `${fallback ? 'v02-wi-06-e04-c01-m01-fallback' : 'v02-wi-06-e04-c01-m01'}-${baseRevision.slice(0, 7)}-${startedAt.replace(/\D/g, '').slice(0, 14)}`;
+  const stamp = startedAt.replace(/\D/g, '').slice(0, 14);
+  const runPrefix = d04
+    ? productionFallback
+      ? 'v02-wi-07-d04-c01-elite-fallback'
+      : 'v02-wi-07-d04-c01-elite-prepared'
+    : fallback
+      ? 'v02-wi-06-e04-c01-m01-fallback'
+      : 'v02-wi-06-e04-c01-m01';
+  const runId = `${runPrefix}-${baseRevision.slice(0, 7)}-${stamp}`;
+  const sessionGroup = d04
+    ? productionFallback
+      ? 'manual-m03-d04-fallback'
+      : 'manual-m03-d04'
+    : fallback
+      ? 'manual-m03-fallback'
+      : 'manual-m03';
   const sessionDir = prepareSessionDirectory(
     EVIDENCE_ROOT,
     runId,
     { mkdirSync, rmSync },
-    fallback ? 'manual-m03-fallback' : 'manual-m03',
+    sessionGroup,
   );
   const capturesDirectory = join(sessionDir, 'captures');
   const recordPath = join(sessionDir, 'session-record.json');
+  const d04ManifestPath = join(sessionDir, 'd04-elite-capture-manifest.json');
+  const d04CombinedManifestPath = join(
+    EVIDENCE_ROOT,
+    'wi07-d04-elite-capture-manifest.json',
+  );
   const artifacts = buildArtifacts(sessionDir, {
-    manifest: relativeToRoot(MANIFEST_PATH),
+    manifest: relativeToRoot(d04 ? d04ManifestPath : MANIFEST_PATH),
   });
 
   log(
-    `Run ${runId} (HEAD ${baseRevision.slice(0, 7)}, fingerprint ${sourceFingerprint})`,
+    `Run ${runId} (HEAD ${baseRevision.slice(0, 7)}, fingerprint ${sourceFingerprint}, candidate ${candidate.digest})`,
   );
   log(`Evidence directory: ${relativeToRoot(sessionDir)}`);
 
@@ -707,7 +831,10 @@ async function main() {
     vulnerableFirstSeenAt: null,
     armouredFrames: 0,
     vulnerableFrames: 0,
+    /** Bounded ordered observation sequence (V02-WI-07 D04-C02 pairing). */
+    sequence: [],
   };
+  const lifecycleObservations = [];
   const flags = {
     arrivalAt0520: false,
     zeroZeroSeen: false,
@@ -731,7 +858,10 @@ async function main() {
   let debugSurfaceExposed = false;
   let lastBaseReadMs = 0;
   let lastHeartbeatMs = 0;
+  let lastCountdownText = null;
+  let lastCountdownChangeMs = Date.now();
   let video = null;
+  let buildIdentity = null;
 
   const buildRecord = (status) => {
     const acceptanceFacts = deriveAcceptanceFacts({
@@ -751,10 +881,19 @@ async function main() {
       .filter(([, value]) => value !== true)
       .map(([fact]) => fact);
     const complete = missing.length === 0;
+    const d04Facts = deriveD04CaptureFacts({
+      productionArtifact: debugSurfaceExposed === false,
+      zeroZeroSeen: flags.zeroZeroSeen,
+      armouredFrames: eliteObservations.armouredFrames,
+      vulnerableFrames: eliteObservations.vulnerableFrames,
+      sequence: eliteObservations.sequence,
+      frameStates: captures.map((capture) => capture.state),
+    });
     return createSessionRecord({
       runId,
       baseRevision,
       sourceFingerprint,
+      scopeId: d04 ? D04_SCOPE_ID : undefined,
       status: complete ? SESSION_STATUS.SUCCESS_VERIFIED : status,
       startedAt,
       endedAt:
@@ -765,9 +904,13 @@ async function main() {
       seed: SESSION_SEED,
       served: `http://127.0.0.1:${options.port}`,
       buildDir: fallback ? 'development server' : 'dist',
-      kind: fallback
-        ? SESSION_KINDS.FORCED_FALLBACK_CAPTURE
-        : SESSION_KINDS.PRODUCTION_MANUAL,
+      kind: d04
+        ? productionFallback
+          ? SESSION_KINDS.D04_ELITE_PRODUCTION_FALLBACK_CAPTURE
+          : SESSION_KINDS.D04_ELITE_PREPARED_CAPTURE
+        : fallback
+          ? SESSION_KINDS.FORCED_FALLBACK_CAPTURE
+          : SESSION_KINDS.PRODUCTION_MANUAL,
       fallbackEvidence: fallback
         ? {
             assetPath: 'assets/runtime/enemies/elite-drone-*.png',
@@ -783,6 +926,23 @@ async function main() {
             servedFromDevelopment: true,
           }
         : null,
+      d04Capture: productionFallback
+        ? {
+            assetPath: 'assets/runtime/enemies/elite-drone-*.png',
+            failureInjectedAt: fallbackFacts.failureInjectedAt,
+            requestCount: bootGenerationRequests(fallbackFacts).length,
+            requests: fallbackFacts.requests,
+            bootRequests: bootGenerationRequests(fallbackFacts),
+            secondRequestObserved: deriveSecondRequestObserved(
+              bootGenerationRequests(fallbackFacts),
+            ),
+            lateSwapObserved: false,
+            debugAuthorityUsed: debugSurfaceExposed,
+            servedFromDevelopment: false,
+            servedFrom: `http://127.0.0.1:${options.port}`,
+            buildIdentity: buildIdentity ?? 'unknown',
+          }
+        : null,
       debugSurfaceExposed,
       controls: 'Product Owner pointer/keyboard through the ordinary page',
       attempts: tracker.attempts(),
@@ -791,10 +951,14 @@ async function main() {
         state: capture.state,
         path: capture.relativePath,
         capturedAt: capture.capturedAt,
+        attempt: capture.attempt ?? null,
+        sha256: capture.sha256,
         visibleFacts: capture.visibleFacts,
       })),
       eliteObservations,
+      lifecycleObservations,
       acceptanceFacts,
+      d04CaptureFacts: d04 ? d04Facts : null,
       acceptanceComplete: complete,
       missingAcceptanceFacts: complete ? [] : missing,
       persisted: observed.persisted,
@@ -811,6 +975,126 @@ async function main() {
     const record = buildRecord(status);
     writeFileSync(recordPath, `${JSON.stringify(record, null, 2)}\n`);
     return record;
+  };
+
+  /** Measured Armoured → Vulnerable capture pair for the D04 manifest. */
+  const d04PhaseTransition = () => {
+    const pair = deriveElitePhasePair(
+      captures.map((capture) => ({
+        state: capture.state,
+        at: capture.capturedAt,
+        attempt: capture.attempt ?? null,
+      })),
+    );
+    return {
+      observed: pair.observed === true,
+      source: 'ordered-visible-pair-in-one-attempt',
+      attempt: pair.observed ? pair.attempt : null,
+      armouredCapturedAt: pair.observed ? pair.armouredAt : null,
+      vulnerableCapturedAt: pair.observed ? pair.vulnerableAt : null,
+      reason: pair.observed
+        ? 'ordered-pair-in-one-attempt'
+        : (pair.reason ?? 'unknown'),
+      armouredCaptures: captures.filter(
+        (capture) => capture.state === 'armoured',
+      ).length,
+      vulnerableCaptures: captures.filter(
+        (capture) => capture.state === 'vulnerable',
+      ).length,
+    };
+  };
+
+  /**
+   * V02-WI-07 D04-C01: writes the per-session Elite capture manifest and merges
+   * it into the combined D04 manifest. Every D04 capture is bound to the same
+   * candidate identity (full HEAD, canonical source fingerprint, D04 candidate
+   * digest, ordinary build identity) and carries its own screenshot hash.
+   */
+  const writeD04Manifest = () => {
+    const transition = d04PhaseTransition();
+    const bootRequests = productionFallback
+      ? bootGenerationRequests(fallbackFacts)
+      : [];
+    const secondRequestObserved = deriveSecondRequestObserved(bootRequests);
+    const manifest = buildD04CaptureManifest({
+      runId,
+      baseRevision,
+      sourceFingerprint,
+      candidateDigest: candidate.digest,
+      candidateDigestMethod: candidate.method,
+      buildIdentity: buildIdentity ?? 'unknown',
+      buildDir: 'dist',
+      servedFrom: `http://127.0.0.1:${options.port}`,
+      requestFailureMode: productionFallback ? 'elite-preload-abort' : 'none',
+      capturePolicy:
+        'Elite captures are offered only after the authored 05:20 arrival has been observed (Combat Countdown 00:00, the frame that creates the Mission 03 Elite); a viewport-clipped Elite frame is skipped while an unclipped frame of the same state is still expected, and is accepted only after 8 s of that state being visible while clipped.',
+      debugSurfaceExposed,
+      viewport: { width: VIEWPORT.width, height: VIEWPORT.height },
+      requests: bootRequests,
+      assetRequestCount: bootRequests.length,
+      secondRequestObserved,
+      lateSwapObserved: false,
+      captures: captures.map((capture) => ({
+        state: capture.state,
+        source: productionFallback
+          ? 'production-d04-forced-fallback'
+          : 'production-d04-elite-prepared',
+        path: capture.relativePath,
+        sha256: capture.sha256,
+        capturedAt: capture.capturedAt,
+        sessionRunId: runId,
+        selectedFromRenderedEvidence: true,
+        visibleFacts: capture.visibleFacts,
+        ...(productionFallback
+          ? {
+              failureInjectedAt: fallbackFacts.failureInjectedAt,
+              requestCount: bootRequests.length,
+              secondRequestObserved,
+              lateSwapObserved: false,
+            }
+          : {}),
+      })),
+      phaseTransition: {
+        observed: transition.observed,
+        armouredCapturedAt: transition.armouredCapturedAt,
+        vulnerableCapturedAt: transition.vulnerableCapturedAt,
+      },
+      eliteObservations: { ...eliteObservations, ...transition },
+      attempts: tracker.attempts().map((attempt) => ({
+        ordinal: attempt.ordinal,
+        terminal: attempt.terminal,
+        openedAt: attempt.openedAt,
+        closedAt: attempt.closedAt,
+      })),
+      notes,
+    });
+    writeFileSync(d04ManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    let combined = {
+      kind: 'v02-wi-07-d04-c01-elite-production-capture-index',
+      scopeId: D04_SCOPE_ID,
+      sessions: [],
+    };
+    if (existsSync(d04CombinedManifestPath)) {
+      try {
+        const parsed = JSON.parse(
+          readFileSync(d04CombinedManifestPath, 'utf8'),
+        );
+        if (Array.isArray(parsed?.sessions)) {
+          combined = parsed;
+        }
+      } catch {
+        // A corrupt index is replaced by the validated session manifest.
+      }
+    }
+    combined.sessions = [
+      ...combined.sessions.filter((entry) => entry.runId !== runId),
+      manifest,
+    ];
+    writeFileSync(
+      d04CombinedManifestPath,
+      `${JSON.stringify(combined, null, 2)}\n`,
+    );
+    return manifest;
   };
 
   /**
@@ -845,7 +1129,22 @@ async function main() {
     }
     await releaseResources();
     log(`Session record: ${relativeToRoot(recordPath)}`);
-    if (captures.length > 0) {
+    if (d04) {
+      if (captures.length > 0) {
+        try {
+          writeD04Manifest();
+          log(`D04 capture manifest: ${relativeToRoot(d04ManifestPath)}`);
+          log(
+            `D04 combined manifest: ${relativeToRoot(d04CombinedManifestPath)}`,
+          );
+        } catch (error) {
+          errors.runnerErrors.push(
+            `D04 manifest write failed: ${error.message}`,
+          );
+          log(`WARNING: D04 manifest write failed (${error.message}).`);
+        }
+      }
+    } else if (captures.length > 0) {
       try {
         writeCaptureManifest({
           runId,
@@ -873,6 +1172,23 @@ async function main() {
     }
     stopped = true;
     log('Stopping: your recorded evidence is written before exit …');
+    // Persist immediately: a session that is being stopped must not lose the
+    // captures it already recorded, even if the process is terminated next.
+    try {
+      writeRecord(SESSION_STATUS.CANCELLED);
+    } catch (error) {
+      errors.runnerErrors.push(
+        `stop-time record write failed: ${error.message}`,
+      );
+    }
+    if (d04 && captures.length > 0) {
+      try {
+        writeD04Manifest();
+        log(`D04 capture manifest: ${relativeToRoot(d04ManifestPath)}`);
+      } catch (error) {
+        log(`WARNING: D04 manifest write failed (${error.message}).`);
+      }
+    }
   });
 
   if (!options.skipBuild && !fallback) {
@@ -890,8 +1206,12 @@ async function main() {
     errors.pageErrors.push(error.message);
   });
   page.on('console', (message) => {
+    const text = message.text();
     if (message.type() === 'error') {
-      errors.consoleErrors.push(message.text());
+      errors.consoleErrors.push(text);
+    }
+    if (buildIdentity === null && text.startsWith('[shmup] build ')) {
+      buildIdentity = text;
     }
   });
 
@@ -901,7 +1221,7 @@ async function main() {
     failureInjectedAt: null,
     generation: 1,
   };
-  if (fallback) {
+  if (assetFailure) {
     await installEliteAssetFailure(page, fallbackFacts);
   }
   const prepared = await prepareSession(page, options.port, {
@@ -912,7 +1232,13 @@ async function main() {
   flags.arrivalAt0520 = prepared.arrivalAt0520 === true;
   debugSurfaceExposed = prepared.debugSurfaceCount > 0;
   await installVisibleTerminalObserver(page);
-  if (fallback) {
+  if (d04) {
+    if (productionFallback) {
+      printD04FallbackBriefing();
+    } else {
+      printD04PreparedBriefing();
+    }
+  } else if (fallback) {
     printFallbackBriefing();
   } else {
     printOperatorBriefing();
@@ -923,6 +1249,10 @@ async function main() {
     while (!stopped) {
       await sleep(POLL_MS);
       const visible = await readVisibleState(page);
+      if (visible.countdownText !== lastCountdownText) {
+        lastCountdownText = visible.countdownText;
+        lastCountdownChangeMs = Date.now();
+      }
       const now = new Date().toISOString();
       const elapsedMs = Date.now() - Date.parse(startedAt);
       if (visible.debugSurfaceCount > 0) {
@@ -988,7 +1318,11 @@ async function main() {
           flags.zeroZeroSeen = true;
         }
         const frame = await observeRenderedFrame(page, visible.hudBoxes);
-        if (frame.eliteVisible) {
+        // V02-WI-07 D04-C01: an Elite observation counts only after the authored
+        // 05:20 arrival has been seen (Countdown 00:00 creates the Elite), so a
+        // merged cluster of regular enemies or projectiles can never be recorded
+        // as an Elite state.
+        if (frame.eliteVisible && flags.zeroZeroSeen) {
           if (frame.eliteState === 'armoured') {
             eliteObservations.armouredFrames += 1;
             eliteObservations.armouredFirstSeenAt ??= now;
@@ -996,11 +1330,42 @@ async function main() {
             eliteObservations.vulnerableFrames += 1;
             eliteObservations.vulnerableFirstSeenAt ??= now;
           }
+          // Bounded ordered sequence used for the one-attempt A→V pair rule.
+          if (eliteObservations.sequence.length < 400) {
+            eliteObservations.sequence.push({
+              state: frame.eliteState,
+              at: now,
+              attempt: tracker.attempts().length + 1,
+            });
+          }
         }
-        const decision = selector.consider(
-          { eliteVisible: frame.eliteVisible, eliteState: frame.eliteState },
-          elapsedMs,
-        );
+        const eliteShape = frame.observation.elite;
+        const eliteClipped =
+          eliteShape !== null &&
+          (eliteShape.centerX - eliteShape.width / 2 <= 0 ||
+            eliteShape.centerX + eliteShape.width / 2 >= VIEWPORT.width ||
+            eliteShape.top <= 0 ||
+            eliteShape.bottom >= VIEWPORT.height);
+        const offer = deriveEliteCaptureOffer({
+          zeroZeroSeen: flags.zeroZeroSeen,
+          eliteVisible: frame.eliteVisible,
+          eliteState: frame.eliteState,
+          clipped: eliteClipped,
+          firstSeenAt:
+            frame.eliteState === 'vulnerable'
+              ? eliteObservations.vulnerableFirstSeenAt
+              : eliteObservations.armouredFirstSeenAt,
+          nowMs: Date.parse(now),
+        });
+        const decision = offer.offer
+          ? selector.consider(
+              {
+                eliteVisible: frame.eliteVisible,
+                eliteState: frame.eliteState,
+              },
+              elapsedMs,
+            )
+          : null;
         if (decision !== null) {
           const capturePath = join(
             capturesDirectory,
@@ -1012,16 +1377,46 @@ async function main() {
             index: decision.index,
             relativePath: relativeToRoot(capturePath),
             capturedAt: now,
+            // Attempt provenance: the one-attempt A→V pairing rule rejects any
+            // pair stitched across a Defeat/Repair/replay (V02-WI-07 D04-C02).
+            attempt: tracker.attempts().length + 1,
+            sha256: screenshotSha256(frame.shot),
             visibleFacts: {
               eliteCenterX: frame.observation.elite?.centerX ?? null,
               eliteTop: frame.observation.elite?.top ?? null,
               eliteBottom: frame.observation.elite?.bottom ?? null,
+              clippedByViewportEdge: offer.clipped === true,
             },
           });
           log(
             `Captured ${decision.state} Elite state (${decision.index}) → ${relativeToRoot(capturePath)}`,
           );
-          if (
+          if (d04) {
+            const transition = d04PhaseTransition();
+            if (transition.observed) {
+              log(
+                `Both natural Elite states and their ordered one-attempt transition captured (${transition.armouredCapturedAt} → ${transition.vulnerableCapturedAt}); closing the session.`,
+              );
+              await finish(SESSION_STATUS.CAPTURE_COMPLETE, 0);
+              return;
+            }
+            const captureFacts = deriveD04CaptureFacts({
+              productionArtifact: debugSurfaceExposed === false,
+              zeroZeroSeen: flags.zeroZeroSeen,
+              armouredFrames: eliteObservations.armouredFrames,
+              vulnerableFrames: eliteObservations.vulnerableFrames,
+              armouredFirstSeenAt: eliteObservations.armouredFirstSeenAt,
+              vulnerableFirstSeenAt: eliteObservations.vulnerableFirstSeenAt,
+            });
+            const stillMissing = D04_CAPTURE_FACTS.filter(
+              (fact) => captureFacts[fact] !== true,
+            );
+            if (stillMissing.length > 0) {
+              log(
+                `D04 capture facts still missing: ${stillMissing.join(', ')}`,
+              );
+            }
+          } else if (
             fallback &&
             captures.some((capture) => capture.state === 'armoured') &&
             captures.some((capture) => capture.state === 'vulnerable')
@@ -1067,8 +1462,44 @@ async function main() {
       if (Date.now() - lastHeartbeatMs > 30_000) {
         lastHeartbeatMs = Date.now();
         log(
-          `· ${visible.canvasCount > 0 ? 'Combat' : 'Base'} · countdown ${visible.countdownText ?? '—'} · Hull ${visible.hullVisible ?? '—'} · attempts ${tracker.attempts().length} · captures ${captures.length}`,
+          `· ${visible.canvasCount > 0 ? 'Combat' : 'Base'} · countdown ${visible.countdownText ?? '—'} · Hull ${visible.hullVisible ?? '—'} · dialogs ${visible.dialogCount} · attempts ${tracker.attempts().length} · captures ${captures.length}`,
         );
+        // A frozen Countdown while Combat is on screen means the designed
+        // browser-safety pause latched (focus loss / hidden tab) or the player
+        // opened Pause. It never resumes by itself, so tell the operator.
+        //
+        // V02-WI-07 D04-C02: after the authored final arrival the Countdown is
+        // legitimately fixed at `00:00` and its lack of decrement is NOT pause
+        // evidence. Only that case needs the page's own visibility/focus state.
+        const lifecycle = await readLifecycleFacts(page);
+        const lastLifecycle =
+          lifecycleObservations[lifecycleObservations.length - 1];
+        if (
+          lastLifecycle === undefined ||
+          lastLifecycle.visibilityState !== lifecycle.visibilityState ||
+          lastLifecycle.hasFocus !== lifecycle.hasFocus
+        ) {
+          lifecycleObservations.push(lifecycle);
+        }
+        const countdownFrozen =
+          visible.countdownText !== null &&
+          visible.countdownText === lastCountdownText &&
+          Date.now() - lastCountdownChangeMs > PAUSE_HINT_AFTER_MS;
+        const lifecyclePauseEvidence =
+          lifecycle.visibilityState === 'hidden' ||
+          lifecycle.hasFocus === false;
+        if (
+          visible.canvasCount > 0 &&
+          countdownFrozen &&
+          (visible.countdownText !== '00:00' || lifecyclePauseEvidence)
+        ) {
+          log(
+            visible.countdownText === '00:00'
+              ? `NOTE: Combat time is not advancing at the final 00:00 arrival and the page reports visibilityState=${lifecycle.visibilityState}, hasFocus=${lifecycle.hasFocus} — the browser-safety pause is latched. Click Resume in the page (or press Escape) to continue.`
+              : 'NOTE: Combat time is not advancing — the game is paused (Pause overlay or the browser-safety pause after focus loss). Click Resume in the page (or press Escape) to continue.',
+          );
+          lastCountdownChangeMs = Date.now();
+        }
       }
 
       if (visible.gameOverVisible) {

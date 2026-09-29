@@ -235,30 +235,40 @@ describe('enemy image preload behaviour (V02-WI-01)', () => {
     '/enemies/elite-drone-vulnerable.png',
   ];
 
-  /** jsdom Image stub: captures instances so the test controls load/decode. */
-  function stubControlledImages(): Array<{
-    src: string;
-    onload: (() => void) | null;
-  }> {
-    const instances: Array<{
-      src: string;
-      onload: (() => void) | null;
-    }> = [];
+  /**
+   * Serves the five enemy PNG requests with raw bytes so the prepared-bytes
+   * path (`fetch` → `arrayBuffer` → inline data URI) can settle. Every other
+   * manifest request fails.
+   */
+  function stubEnemyBytes(fetched: string[]): void {
+    const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]).buffer;
+    vi.stubGlobal('fetch', (input: string | URL) => {
+      const url = String(input);
+      if (!ENEMY_PATHS.some((path) => url.includes(path))) {
+        return Promise.resolve({ ok: false });
+      }
+      fetched.push(url);
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(pngBytes),
+      });
+    });
+  }
+
+  /** jsdom Image stub: records the decoded sources (the prepared inline bytes). */
+  function stubDecodingImages(): string[] {
+    const decoded: string[] = [];
     vi.stubGlobal(
       'Image',
       class {
         src = '';
-        onload: (() => void) | null = null;
-        onerror: (() => void) | null = null;
         decode(): Promise<void> {
+          decoded.push(this.src);
           return Promise.resolve();
-        }
-        constructor() {
-          instances.push(this);
         }
       },
     );
-    return instances;
+    return decoded;
   }
 
   function stubNonImageFailures(): void {
@@ -296,23 +306,19 @@ describe('enemy image preload behaviour (V02-WI-01)', () => {
     }
   });
 
-  it('marks all five enemy images ready when they load and decode before the deadline', async () => {
+  it('marks all five enemy images ready with their prepared bytes when they load and decode before the deadline', async () => {
     vi.useFakeTimers();
-    const instances = stubControlledImages();
     stubNonImageFailures();
+    const fetched: string[] = [];
+    stubEnemyBytes(fetched);
+    const decoded = stubDecodingImages();
 
     const resultPromise = preloadRuntimeAssets();
-    await Promise.resolve();
-    const enemyImages = instances.filter((image) =>
-      ENEMY_PATHS.some((path) => image.src.includes(path)),
-    );
-    expect(enemyImages).toHaveLength(5);
-    for (const image of enemyImages) {
-      image.onload?.();
+    // Flush the fetch → arrayBuffer → base64 → decode → settle microtask chain
+    // before the deadline timer fires.
+    for (let i = 0; i < 10; i += 1) {
+      await Promise.resolve();
     }
-    // Decode microtasks settle before the non-enemy loads reach the deadline.
-    await Promise.resolve();
-    await Promise.resolve();
     vi.advanceTimersByTime(PRELOAD_DEADLINE_MS);
     const result = await resultPromise;
 
@@ -320,36 +326,58 @@ describe('enemy image preload behaviour (V02-WI-01)', () => {
     expect(enemyReady).toHaveLength(5);
     for (const asset of enemyReady) {
       expect(asset.status).toBe('ready');
+      // V02-AC-025: the prepared bytes travel with the ready result so Combat
+      // decodes them instead of re-requesting the manifest asset.
+      expect(asset.imageDataUri).toMatch(/^data:image\/png;base64,/);
+      expect(asset.imageDataUri?.length).toBeGreaterThan(16);
+    }
+    // Exactly one manifest request per enemy sprite, and every decode used the
+    // prepared inline source (never the runtime URL) — no second request path.
+    expect(fetched).toHaveLength(5);
+    expect(new Set(fetched).size).toBe(5);
+    expect(decoded).toHaveLength(5);
+    for (const source of decoded) {
+      expect(source).toMatch(/^data:image\/png;base64,/);
     }
   });
 
-  it('keeps enemy images on their stable fallback when the deadline fires and late loads are inert', async () => {
+  it('keeps enemy images on their stable fallback when the deadline fires and late completions are inert', async () => {
     vi.useFakeTimers();
-    const instances = stubControlledImages();
     stubNonImageFailures();
+    const pending: Array<
+      (value: { ok: boolean; arrayBuffer: () => Promise<ArrayBuffer> }) => void
+    > = [];
+    vi.stubGlobal('fetch', (input: string | URL) =>
+      ENEMY_PATHS.some((path) => String(input).includes(path))
+        ? new Promise((resolve) => {
+            pending.push(resolve);
+          })
+        : Promise.resolve({ ok: false }),
+    );
+    stubDecodingImages();
 
     const resultPromise = preloadRuntimeAssets();
     await Promise.resolve();
-    const enemyImages = instances.filter((image) =>
-      ENEMY_PATHS.some((path) => image.src.includes(path)),
-    );
-    expect(enemyImages).toHaveLength(5);
-
     vi.advanceTimersByTime(PRELOAD_DEADLINE_MS);
     const result = await resultPromise;
     for (const asset of result) {
       expect(asset.status).toBe('fallback');
+      expect(asset.imageDataUri).toBeUndefined();
     }
 
     // Late completions after the deadline are inert: the produced result is
-    // stable for the complete page-load session (Master §5.6, MASTER-AC-013).
-    for (const image of enemyImages) {
-      image.onload?.();
+    // stable for the complete page-load session (Master §5.6, MASTER-AC-013),
+    // so a settled-late enemy asset can never replace its fallback.
+    const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]).buffer;
+    for (const resolve of pending) {
+      resolve({ ok: true, arrayBuffer: () => Promise.resolve(pngBytes) });
     }
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve();
+    }
     for (const asset of result) {
       expect(asset.status).toBe('fallback');
+      expect(asset.imageDataUri).toBeUndefined();
     }
   });
 });

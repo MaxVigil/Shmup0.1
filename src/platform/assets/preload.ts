@@ -150,40 +150,20 @@ function loadAsset(
   switch (entry.kind) {
     case 'background':
     case 'aircraft-image':
-      // The prepared aircraft is re-consumed as an Image by Combat and the
-      // prepared backgrounds as CSS background-images by the re-mounting Base
-      // Screens (Combat §12.7, Base §3). Their bytes are prepared once as an
-      // inline data URI so every re-consumption decodes the prepared asset
-      // with no second application/network request (MASTER-AC-014, V02-WI-02
-      // C02). Enemies render as deterministic shapes and are only prepared for
-      // readiness, so they keep the Image load.
-      return loadPreparedImageDataUri(url);
     case 'enemy-image':
-      return loadImage(url);
+      // The prepared aircraft and the five approved enemy sprites are
+      // re-consumed as Images by Combat (Combat §12.7, Epic §16.1), and the
+      // prepared backgrounds as CSS background-images by the re-mounting Base
+      // Screens (Base §3). Their bytes are prepared once as an inline data URI
+      // so every re-consumption decodes the prepared asset with no second
+      // application/network request across Combat entry and re-entry
+      // (MASTER-AC-014, V02-WI-02 C02, V02-AC-025).
+      return loadPreparedImageDataUri(url);
     case 'font':
       return loadFont(url, entry.weight, isClosed);
     case 'icon':
       return loadIcon(url);
   }
-}
-
-/** Image success requires both a successful load and decode (Master §5.6). */
-function loadImage(url: string): Promise<AssetLoadOutcome> {
-  return new Promise((resolve) => {
-    const image = new Image();
-    image.onload = () => {
-      if (typeof image.decode !== 'function') {
-        resolve({ ok: true });
-        return;
-      }
-      void image.decode().then(
-        () => resolve({ ok: true }),
-        () => resolve({ ok: false }),
-      );
-    };
-    image.onerror = () => resolve({ ok: false });
-    image.src = url;
-  });
 }
 
 /**

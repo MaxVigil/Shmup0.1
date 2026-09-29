@@ -1382,6 +1382,33 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-033 | Approved | exact Elite entry, movement RNG, attacks, entry/contact, and deflection contract | E02 has deterministic fixed-step geometry and no agent-authored combat values |
 | V02-DEC-034 | Approved | Boot save-data causes use development-console diagnostics, not Combat Debug Overlay | failed Boot has no Combat Overlay; generic player error and production silence remain |
 | V02-DEC-035 | Approved | version-1 upgrade requires an unmarked row envelope before C03 migration | conflicting marker cannot be rewritten into playable progress or seed the allocator |
+| V02-DEC-036 | Approved | one-time split verification acceptance for WI-07 D04 | unchanged-candidate passing components count for D04 only; failed aggregate history and final Epic gates remain unchanged |
+
+### 22.1 V02-DEC-036 — bounded D04 verification exception
+
+**Product Owner approval:** 2026-09-29, explicitly approving the independent
+reviewer's recommendation. This decision applies only to `V02-WI-07-D04`,
+including its C01–C03 corrections.
+
+Accept the verified split sequence on implementation candidate HEAD
+`92b0473e2eb1b93ceac856f37039bc7df778fe00`, source fingerprint `31c90de6`,
+dirty-candidate digest `7e7aecc2`: successful formatting, lint, typecheck,
+1098 unit tests and production build, followed by the authorized complete
+browser continuation (134 development and 23 production tests), plus verified
+current-candidate prepared and forced-fallback Elite manual captures. The
+Product Owner confirmed the white damaging-hit flash in Vulnerable in both
+presentation modes.
+
+The earlier `npm run verify:all` invocation remains failed in the historical
+evidence. This decision does not claim that invocation exited successfully,
+relax any assertion, workload, performance floor or asset budget, or establish
+a permanent alternative verification policy. Final WI-07 D06 and Epic
+acceptance gates, physical-device requirements, and explicit final v0.2
+acceptance remain unchanged.
+
+The split-sequence reports and manual verification records are retained under
+`.agent-handoff/evidence/`; their original candidate identities must not be
+rewritten to include this subsequent decision-only documentation change.
 
 ## 23. Consistency and Definition of Ready audit
 

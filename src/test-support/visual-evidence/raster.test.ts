@@ -146,17 +146,57 @@ describe('rendered-pixel reader boundary (V02-WI-06 E04-C01-M01)', () => {
     expect(observation.enemies[0]?.centerX).toBeCloseTo(274, 0);
   });
 
-  it('distinguishes the Elite Vulnerable state by its exposed centred Core geometry', () => {
-    const armoured = createRaster(1280, 600);
-    fillRect(armoured, 620, 98, 32, 46, GREY);
-    fillRect(armoured, 615, 456, 50, 48, GREY);
-    expect(classifyFrame(armoured).elite?.vulnerable).toBe(false);
-    const vulnerable = createRaster(1280, 600);
-    fillRect(vulnerable, 620, 98, 32, 46, GREY);
-    fillRect(vulnerable, 615, 456, 50, 48, GREY);
-    // The exposed Core is a small accent-coloured shape inside the silhouette.
-    fillRect(vulnerable, 630, 112, 12, 12, ACCENT);
+  it('reads the Elite Vulnerable state only from a small centred Core inside the body (V02-WI-07 D04-C02)', () => {
+    const baseElite = (): Raster => {
+      const raster = createRaster(1280, 600);
+      // Elite body (~32 x 46 at 1280x600) and the Aircraft below it.
+      fillRect(raster, 620, 98, 32, 46, GREY);
+      fillRect(raster, 615, 456, 50, 48, GREY);
+      return raster;
+    };
+
+    // Positive: the approved Core is a small centred pale-cyan feature. The real
+    // rendering measures 9 accent pixels in a 5 x 4 px box inside a ~35 x 40 px
+    // body, which is below the general 12 px cluster floor: the Core evidence
+    // pass must use its own small minimum.
+    const vulnerable = baseElite();
+    fillRect(vulnerable, 634, 119, 3, 3, ACCENT);
     expect(classifyFrame(vulnerable).elite?.vulnerable).toBe(true);
+
+    // Armoured: identical body, no Core opening.
+    expect(classifyFrame(baseElite()).elite?.vulnerable).toBe(false);
+
+    // Negative: the procedural body token `--color-border-strong` #526471
+    // (82,100,113) covers the whole body and must never read as a Core.
+    const bodyToken = baseElite();
+    fillRect(bodyToken, 620, 98, 32, 46, [82, 100, 113]);
+    expect(classifyFrame(bodyToken).elite?.vulnerable).toBe(false);
+
+    // Negative: a homing Core projectile beside the Elite is not the opening.
+    const beside = baseElite();
+    fillRect(beside, 664, 150, 6, 6, ACCENT);
+    expect(classifyFrame(beside).elite?.vulnerable).toBe(false);
+
+    // Negative: an off-centre accent blob inside the body is not the Core.
+    const offCentre = baseElite();
+    fillRect(offCentre, 621, 99, 6, 6, ACCENT);
+    expect(classifyFrame(offCentre).elite?.vulnerable).toBe(false);
+
+    // Negative: a broad blue region spanning the body is not a Core opening.
+    const broad = baseElite();
+    fillRect(broad, 620, 98, 30, 44, ACCENT);
+    expect(classifyFrame(broad).elite?.vulnerable).toBe(false);
+
+    // Negative: a long thin projectile column is never an Elite body.
+    const column = createRaster(1280, 600);
+    fillRect(column, 636, 60, 8, 120, GREY);
+    fillRect(column, 615, 456, 50, 48, GREY);
+    expect(classifyFrame(column).elite).toBeNull();
+
+    // Negative: a dim bluish highlight inside the body is not an accent Core.
+    const highlight = baseElite();
+    fillRect(highlight, 630, 116, 10, 10, [70, 96, 120]);
+    expect(classifyFrame(highlight).elite?.vulnerable).toBe(false);
   });
 
   it('detects incoming danger shots and accent Cores as threats', () => {
