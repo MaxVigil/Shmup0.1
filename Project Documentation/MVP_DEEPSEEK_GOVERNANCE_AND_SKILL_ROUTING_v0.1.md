@@ -382,8 +382,9 @@ as a bounded experiment on 2026-10-05. This section alone owns experiment status
 the retrospective remains historical analysis, not another execution registry.
 
 - Policy approval: approved; implementation amendment: **Independently accepted, 2026-10-05**.
-  Review: `verification/p123-amendment-acceptance.md`. Local changes are not yet
-  committed/integrated into `main`; commit/push/merge/tag need explicit authority.
+  Review: `verification/p123-amendment-acceptance.md`. The amendment was committed
+  as `ce9ff0cbc11c42d724b952b1de9166dfe8a1d993`, integrated by fast-forward
+  into `main`, and pushed to `origin/main` on 2026-10-05.
 - Trial: first two independently accepted v0.3 Work Items; **0/2 enrolled**.
   The reviewer records their IDs and links to metrics here when assigned/accepted.
 - Owner: acceptance reviewer/TPM; product/scope/risk decisions: Product Owner.
@@ -397,14 +398,13 @@ the retrospective remains historical analysis, not another execution registry.
 - Non-goals: universal fault framework, orchestrator, wholesale spec rewrite,
   simulation refactor, dependency authority expansion, production hook or new product scope.
 
-Branch recommendation (not authorization): fast-forward `main` to accepted v0.2
-revision `825a2f8b0ecfe1a79547479d85dd06b339507c5e`, annotate that exact product
-revision as `v0.2.0` with local-only acceptance conditions, then integrate the
-separately reviewed process amendment. Start v0.3 WIs from the resulting accepted
-`main`. Fetch on 2026-10-05 confirmed `origin/main...825a2f8` = `0/22`, and no
-`v0.2*` tag existed. Merge/tag/push require a separate explicit command. Keep
-the WI-07 branch and backed-up ignored evidence until retention is agreed;
-do not delete worktrees as part of this experiment. No deployment is implied.
+Integration decision completed on 2026-10-05 under explicit Product Owner
+authorization: `main` and `origin/main` contain the accepted product plus the
+reviewed process amendment. The annotated `v0.2.0` tag points to the exact
+locally accepted product revision `825a2f8b0ecfe1a79547479d85dd06b339507c5e`;
+the later process commit is not part of that tag. Start v0.3 WIs from current
+`main`. Keep the WI-07 worktree and backed-up ignored evidence until retention
+is agreed. No deployment or external-use certification is implied.
 
 ### 15.2 Assignment readiness and repair budget
 
