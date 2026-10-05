@@ -539,3 +539,88 @@ results in §§17.1–17.3, and does not certify the reference device. Physical
 validation and reevaluation of the security exception remain required before
 an external playtest or minimum-system-requirement claim. No deployment is
 authorized by local acceptance.
+
+## 18. P123 risk-linked verification amendment
+
+Authority/status: Governance §15, PROCESS-DEC-001. This prospective amendment
+applies to the approved bounded tooling introduction and routed post-v0.2 tasks;
+it does not revise any historical v0.2 evidence or threshold. Existing commands
+`verify`, `verify:browser` and `verify:all` keep their complete test membership.
+
+### 18.1 Required lanes and claim coverage
+
+| Lane | Required use | Checks and exclusions |
+| --- | --- | --- |
+| Preflight | Before costly/manual evidence | Identity; cheap dependency/security checks when applicable; focused harness counter-tests; actual import/build/discovery; producer order; host readiness. `evidence:preflight` reuses the real disposable-base preflight without measuring FPS. |
+| Change | Every code increment | `verify` plus changed-risk focused integration/browser tests. R0 factual docs use scoped format/link/consistency checks. Tooling-only changes use runner regressions, type/build and discovery, plus affected adapter smoke; do not run gameplay journeys solely because a runner changed. |
+| Integration | Frozen integrated R2/R3 candidate, milestone, test-build or broad/unknown impact | `verify:isolated` runs the unchanged `verify:all` in one isolated attempt. Explicit legacy required gates remain binding. Dependency changes still follow §12. |
+| Release evidence | Approved representative-workload/method change or release milestone | Natural production journeys, soak, visual evidence and the applicable controlled performance chain. Physical reference-device conditions remain separately required. |
+
+For a bounded correction, the reviewer may assign the changed-risk checks rather
+than repeat an unaffected full browser suite. The gate plan must identify covered
+claims and why the omitted lane is unaffected; unknown impact falls back to full
+verification. R2/R3 integrated product changes still require the integration gate.
+Never omit a mandatory AC/manual/physical check merely because the shorter lane
+passes, and never retrospectively route around an observed failure.
+
+`verify:smoke` builds ordinary production and runs its production project except
+four explicitly tagged `@release-evidence` cases: natural Defeat, repeated
+Defeat/Game Over soak, Mission 01 regular-workload timing, and three-mission asset
+traversal. It is a **subset**, not `verify:all` or release acceptance. It retains
+Boot, lazy-load, Evacuation wiring, request, artifact and fallback checks.
+Affected excluded claims require their focused case or the full lane. Unit
+permutations stay at deterministic owners; browser input sampling uses authoritative
+simulation time, while real-time performance remains measured in real time.
+
+The bounded tooling introduction requires `verify`, direct runner/validator
+counter-tests, all-project discovery, actual base-copy preflight and a short
+ordinary-production boundary smoke. It does not regenerate accepted performance
+numbers: measurement formulas, workloads, thresholds and product code are unchanged.
+
+### 18.2 Isolated attempt output and execution
+
+`node scripts/run-verification.mjs <integration|smoke|preflight|evidence> --list`
+prints the command plan without execution. npm aliases are `verify:isolated`,
+`verify:smoke`, `evidence:preflight` and `evidence:chain`.
+
+The wrapper creates `.agent-handoff/runs/attempt-*/`, supplies `SHMUP_EVIDENCE_DIR`
+to every child, records stage status/duration/logs, stops at the first non-zero
+exit and seals the attempt. It binds the active control runId and current source
+fingerprint; without control, smoke/integration/preflight output is diagnostic,
+not acceptance-owned evidence. The multi-record evidence chain rejects a missing
+or stale control before executing any costly command.
+The evidence chain preflights the historical base, runs full verification, Pass A,
+Elite Pass B, legacy (including its comparison), mutations and final comparison.
+The final comparison is intentional after mutation tests; do not independently
+repeat the full chain for an already unchanged passing candidate.
+
+The output helper routes direct Playwright/script diagnostics to a fresh open
+directory too. It never defaults to `.agent-handoff/evidence/`. Direct diagnostics
+are not automatically sealed or acceptance-ready. Do not reuse an output directory
+for another attempt or hand-set the variable to accepted/historical paths.
+Manual-review sessions already have distinct session directories; preserve their
+existing recording/verification contract. No manual gameplay is auto-launched.
+
+Historical accepted evidence and its fingerprints remain immutable. For a new
+accepted attempt, the independent reviewer creates a SHA-256 artifact manifest
+and retains it with the sealed directory and review verdict (the wrapper's
+completion marker alone is not acceptance); record its pointer in the execution registry. Back it up before
+retiring a worktree. Never restore/overwrite historical raw files merely to keep
+a conventional filename current. This introduction does not redesign the broad
+source fingerprint or allow reusing evidence whose relevant inputs changed.
+
+### 18.3 Failure and rerun policy
+
+Preserve the first failed sample and report unrun stages. Narrow development
+diagnostics may iterate within the repair budget; the final frozen acceptance
+sequence does not retry until green. A plan may pre-authorize one diagnostic or
+requalification after a recorded material environment change or distinct
+hypothesis. A valid below-budget measurement remains a failed observation; a
+later pass does not erase it. A deterministic failure requires repair. The
+correction checkpoint in Governance §15.2 overrides further automatic attempts.
+
+Do not schedule competing heavy work during timing evidence. Record host/browser,
+viewport, workload and attempt conditions; load average alone is not proof of an
+environment-only cause. Never change thresholds, samples or retry policy to
+manufacture a pass. Audit observations are dated external-state facts; existing
+dependency authority and explicit security-exception boundaries remain unchanged.

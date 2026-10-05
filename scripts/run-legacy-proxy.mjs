@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { evidenceDirectory } from './evidence-output.mjs';
 /**
  * V02-WI-04 C04 legacy five-Basic proxy runner (Epic §20.1, delta 5/6/7).
  *
@@ -46,7 +47,7 @@ import { computeSourceFingerprint } from './evidence-source-fingerprint.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASE_REV = '168822f4fac647c8a14ffe751c3c2363c7a71c41';
-const EVIDENCE_DIR = join(ROOT, '.agent-handoff', 'evidence');
+const EVIDENCE_DIR = evidenceDirectory();
 const LEGACY_PORT = 4176;
 
 /** V02-WI-04 C05 evidence ownership: the active control runId and the current
@@ -263,6 +264,7 @@ async function invokeLegacyWorkload(cwd, env) {
 export const BASE_COPY_SHARED_FILES = [
   'e2e/legacy-proxy-performance.spec.ts',
   'e2e/evidence-ownership.ts',
+  'scripts/evidence-output.mjs',
   'src/test-support/legacy-proxy-evidence.ts',
   'playwright.legacy.config.ts',
 ];

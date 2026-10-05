@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { evidenceDirectory } from './evidence-output.mjs';
 /**
  * V02-WI-04 C05 evidence-integrity mutation coverage (Epic §20.1, V02-AC-028;
  * C05 deltas 1-4). Runs the comparison validator's evaluation core against
@@ -54,7 +55,7 @@ import {
 } from './compare-performance-evidence.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const EVIDENCE_DIR = join(ROOT, '.agent-handoff', 'evidence');
+const EVIDENCE_DIR = evidenceDirectory();
 const REAL_DIST = join(ROOT, 'dist');
 const REAL_UNINSTRUMENTED = join(ROOT, 'dist-evidence-uninstrumented');
 

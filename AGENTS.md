@@ -156,6 +156,11 @@ Report the conflict if following the skill would materially change the assigned 
 
 ## 7. Work cycle
 
+For new post-v0.2 assignments, use the bounded P123 experiment in Governance
+§15 and Verification §18. These sections own current trial status, readiness,
+repair authority and gate routing; do not copy their rules into every handoff.
+Historical v0.2 envelopes and evidence retain their original contract.
+
 Before editing:
 
 1. pass the Repository Identity Gate in §0.1;
@@ -253,6 +258,10 @@ When `.agent-handoff/control.json` exists, it is the active transient assignment
 
 Write new `control.json` assignments with this exact protocol-v2 shape:
 
+For P123 trial assignments, add the compact fields specified in Governance
+§15.2. They extend v2 without rewriting legacy envelopes. Protocol validation
+checks structure/order, never semantic product readiness or acceptance.
+
 ```json
 {
   "protocolVersion": 2,
@@ -294,6 +303,12 @@ The Product Owner relays only `DeepSeek completed the cycle.` The independent re
 
 ## 9. Verification
 
+Verification §18 is the approved P123 routing amendment for new assignments
+(including its bounded tooling introduction). It supersedes the blanket
+per-correction browser requirement below only where an explicit risk-linked
+gate plan applies. Missing routing falls back to the existing full requirements;
+milestone, dependency, security and physical-device obligations are not waived.
+
 - During implementation, run the narrowest relevant tests. Before handoff, run `npm run verify` once against the final unchanged revision.
 - Browser/player-visible/lifecycle/build work also runs `npm run verify:browser` once against the final unchanged revision.
 - Milestone or test-build handoff: `npm run verify:all` plus applicable manual evidence.
@@ -333,6 +348,7 @@ Rules:
 - defer a material issue only with one-sentence impact, a concrete owning Slice, and proof that no current or dependent contract relies on the defect; otherwise fix now;
 - do not create a general defect backlog for MVP;
 - after a second failed correction for the same defect class, stop automatic repetition and review the root cause: specification, test, decomposition, or agent execution;
+- also after two rejected corrections in one Work Item, apply the canonical role's broader checkpoint: record the cause, changed plan, and Product Owner decision before a third assignment; Governance §15.2 records this without creating another status authority;
 - ambiguity outside the assigned scope creates no requirement and no speculative implementation.
 
 Acceptance requires no known `S0`–`S2`, passing required gates, proportionate evidence, no unresolved source conflict, no ownerless deferral, and no known-defective foundation passed to the next dependent scope.

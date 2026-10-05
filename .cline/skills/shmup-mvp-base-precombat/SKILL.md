@@ -31,7 +31,7 @@ If the diff enters another owner or AC, expand the route before editing. Do not 
 - Preserve pending-versus-confirmed Overlay behaviour and one-time state transitions.
 - Use only approved Design Tokens and Design System components.
 - Preserve native keyboard semantics, focus containment, restoration, and Screen-transition focus.
-- Do not add persistence, save/load, profiles, research, manufacturing, buildings, personnel management, timers, campaign progression, or additional resources.
+- Do not add systems beyond the assigned approved product contract. MVP exclusions do not prohibit explicitly approved post-MVP persistence/progression; profiles, research, manufacturing and other unassigned systems remain out of scope.
 - Do not create future component variants before a real approved consumer exists.
 
 ## Generic skill restrictions
@@ -41,5 +41,9 @@ The old `strategic-base-management v0.2` is not applicable to MVP execution: it 
 `game-ui-ux` may be used only for general responsive/focus techniques that agree with the Design System specification. It does not authorize mobile, touch, gamepad, localization, safe-area, screen-stack, or additional settings scope.
 
 ## Completion
+
+For new post-v0.2 work, route to Governance §15 and Verification §18 for the P123
+trial, risk-linked gates and immutable attempt output. For a stateful flow, use
+the canonical transition/readiness table before changing UI and session owners.
 
 Map the change to approved requirements and negative requirements. Run the required automated gates and record applicable keyboard, visual, lifecycle, and performance evidence. Report rather than invent unresolved behaviour.

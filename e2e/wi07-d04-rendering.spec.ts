@@ -1,3 +1,4 @@
+import { evidenceDirectory } from '../scripts/evidence-output.mjs';
 /**
  * V02-WI-07 D04-C03 isolated real-renderer Combat rendering proof.
  *
@@ -50,7 +51,7 @@ function resolveRepoRoot(): string {
   }
 }
 const REPO_ROOT = resolveRepoRoot();
-const EVIDENCE_DIR = join(REPO_ROOT, '.agent-handoff', 'evidence');
+const EVIDENCE_DIR = evidenceDirectory({ root: REPO_ROOT });
 const FIXTURE_PATH =
   '/src/test-support/visual-evidence/rendering-fixture/index.html';
 const VIEWPORT = { width: 1280, height: 600 } as const;

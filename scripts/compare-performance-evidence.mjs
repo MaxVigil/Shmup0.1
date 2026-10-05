@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { evidenceDirectory } from './evidence-output.mjs';
 /**
  * V02-WI-04 C05 machine-readable performance comparison package (Epic §20.1,
  * V02-AC-028; C03/C04 delta 8/9, C05 deltas 1-6; V02-WI-06 E04-C02). Reads the
@@ -73,7 +74,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { computeSourceFingerprint } from './evidence-source-fingerprint.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_EVIDENCE_DIR = join(ROOT, '.agent-handoff', 'evidence');
+const DEFAULT_EVIDENCE_DIR = evidenceDirectory();
 const SESSION_SEED = 19023;
 const CANONICAL_MISSION_SEED = 609704137;
 const KNOWN_BASE_REVISION = '168822f4fac647c8a14ffe751c3c2363c7a71c41';

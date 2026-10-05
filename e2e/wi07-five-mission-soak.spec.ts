@@ -1,3 +1,4 @@
+import { evidenceDirectory } from '../scripts/evidence-output.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -54,7 +55,7 @@ const SESSION_SEED = 20260924;
 const DB_NAME = 'shmup-v0.2';
 const STARTING_CREDITS = 12;
 const FULL_REPAIR_COST = 8;
-const EVIDENCE_DIR = join(process.cwd(), '.agent-handoff', 'evidence');
+const EVIDENCE_DIR = evidenceDirectory();
 const RECORD_FILE = 'wi07-d03-five-mission-soak.json';
 /** `window`/`document` listener types counted by the bounded ledger. */
 const OBSERVED_LISTENER_TYPES = [

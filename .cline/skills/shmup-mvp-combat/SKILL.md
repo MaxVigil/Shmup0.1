@@ -44,4 +44,9 @@ Generic skills may explain an API or technique only when routed by `AGENTS.md`. 
 
 ## Completion
 
+For new post-v0.2 work, route to Governance §15 and Verification §18 for the P123
+trial and gate plan. Prove rendered behavior (not only flags) on affected renderer
+paths; test capture classifiers on positive and negative fixtures before manual
+play. Scenario evidence never substitutes for an ordinary-production journey.
+
 Map the change to approved requirements and negative requirements. Run the required automated gates and record any mandatory manual or performance evidence. Report rather than invent unresolved behaviour.

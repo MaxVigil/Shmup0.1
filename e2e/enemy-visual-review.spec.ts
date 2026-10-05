@@ -1,3 +1,4 @@
+import { evidenceDirectory } from '../scripts/evidence-output.mjs';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -17,7 +18,7 @@ import type { Page } from '@playwright/test';
  */
 const MINIMUM_VIEWPORT = { width: 1280, height: 600 };
 const FIXTURE_URL = '/src/fixtures/enemy-visual-review/';
-const EVIDENCE_DIR = join(process.cwd(), '.agent-handoff', 'evidence');
+const EVIDENCE_DIR = evidenceDirectory();
 
 const KINDS = [
   'basic-drone',

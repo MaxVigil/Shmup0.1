@@ -1,5 +1,5 @@
+import { evidenceDirectory } from '../scripts/evidence-output.mjs';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
-import { join } from 'node:path';
 
 import { expect, test } from '@playwright/test';
 import type { BrowserContext, Page } from '@playwright/test';
@@ -32,7 +32,7 @@ import { recordLegacyProxyAttempt } from '../src/test-support/legacy-proxy-evide
  * shape, every assertion, the floor, the workload, the sample window and the
  * fixed seed are unchanged.
  */
-const DEFAULT_EVIDENCE_DIR = join(process.cwd(), '.agent-handoff', 'evidence');
+const DEFAULT_EVIDENCE_DIR = evidenceDirectory();
 const SESSION_SEED = 19023;
 
 async function startCombat(page: Page): Promise<void> {
@@ -242,8 +242,7 @@ test('records the legacy five-Basic production proxy with exact concurrent workl
   // what keeps it comparator-ineligible instead of inventing a passing cleanup.
   const { record: finalEvidence } = await recordLegacyProxyAttempt({
     target: {
-      evidenceDir:
-        process.env.LEGACY_PROXY_EVIDENCE_DIR ?? DEFAULT_EVIDENCE_DIR,
+      evidenceDir: DEFAULT_EVIDENCE_DIR,
       recordName:
         process.env.LEGACY_PROXY_RECORD ?? 'legacy-five-basic-proxy.json',
     },

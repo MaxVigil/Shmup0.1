@@ -294,7 +294,7 @@ Passing on a development machine does not constitute approved physical reference
 - Before refactoring a poorly understood or high-change existing path, add focused characterization tests for relevant current behaviour. A characterization test records what the accepted system does; it does not convert an accidental behaviour into a product requirement. Resolve any conflict with the canonical contract before preserving it.
 - TDD is a technique, not a universal ceremony. Documentation, generated declarations, exploratory spikes, manual visual judgement, and slow cross-system acceptance flows may use another feedback loop when test-first execution would add cost without improving the design signal.
 - The implementation author may write the primary tests, but the independent reviewer judges their correctness and sufficiency. The reviewer derives boundary and failure cases independently and checks that a relevant broken implementation would make the tests fail.
-- Tests must not depend on execution order, real waiting, network access, or uncontrolled randomness.
+- Deterministic unit tests must not depend on execution order, real waiting, network access, or uncontrolled randomness. Browser integration and performance evidence may use required real time and controlled local requests under Verification §18; they must not mistake wall-clock delay for authoritative simulation progress.
 - Fake timers are used only for adapter-level time behaviour; fixed-step Domain tests pass time explicitly.
 - Snapshot tests must not replace behavioural assertions or visual review.
 - A flaky test is a defect. It is fixed or removed with a documented replacement gate; it is not retried until green and ignored.

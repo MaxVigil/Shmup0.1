@@ -1,3 +1,4 @@
+import { evidenceDirectory } from '../scripts/evidence-output.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -33,7 +34,7 @@ import type { SourceFingerprint } from './evidence-ownership';
  * screenshots are supplementary evidence only.
  */
 const MINIMUM_VIEWPORT = { width: 1280, height: 600 };
-const EVIDENCE_DIR = join(process.cwd(), '.agent-handoff', 'evidence');
+const EVIDENCE_DIR = evidenceDirectory();
 const DB_NAME = 'shmup-v0.2';
 
 interface DevObservability {

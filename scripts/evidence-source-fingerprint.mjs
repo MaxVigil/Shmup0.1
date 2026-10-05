@@ -69,6 +69,9 @@ export function collectSourceInputFiles(root = ROOT) {
     'scripts/evidence-integrity.mutation.test.mjs',
     'scripts/evidence-source-fingerprint.mjs',
     'scripts/run-legacy-proxy.mjs',
+    'scripts/evidence-output.mjs',
+    'scripts/run-verification.mjs',
+    'scripts/validate-agent-handoff.mjs',
   ]) {
     addIfExists(file);
   }

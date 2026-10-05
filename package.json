@@ -34,6 +34,10 @@
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
     "verify:browser": "npm run test:e2e && npm run test:e2e:production",
     "verify:all": "npm run verify && npm run verify:browser",
+    "verify:smoke": "node scripts/run-verification.mjs smoke",
+    "verify:isolated": "node scripts/run-verification.mjs integration",
+    "evidence:preflight": "node scripts/run-verification.mjs preflight",
+    "evidence:chain": "node scripts/run-verification.mjs evidence",
     "context:validate": "node scripts/validate-project-context.mjs",
     "handoff:validate": "npm run context:validate && node scripts/validate-agent-handoff.mjs"
   },

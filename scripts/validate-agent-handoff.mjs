@@ -55,6 +55,46 @@ function validateCurrentControl(control) {
   strings(control.delta, 'control.delta', { nonEmpty: true });
   strings(control.risks, 'control.risks');
   strings(control.requiredGates, 'control.requiredGates', { nonEmpty: true });
+  if (control.processExperiment !== undefined) validateExperiment(control);
+}
+
+function validateExperiment(control) {
+  if (control.processExperiment !== 'P123') fail('unknown processExperiment');
+  string(control.readinessRef, 'control.readinessRef');
+  strings(control.repairOwners, 'control.repairOwners', { nonEmpty: true });
+  if (
+    !Array.isArray(control.gatePlan) ||
+    control.gatePlan.length !== control.requiredGates.length
+  )
+    fail('gatePlan must cover requiredGates exactly in execution order');
+  const seen = new Set();
+  for (const [index, gate] of control.gatePlan.entries()) {
+    if (gate.command !== control.requiredGates[index] || seen.has(gate.command))
+      fail('gatePlan command order/duplicates differ from requiredGates');
+    if (!['preflight', 'change', 'integration', 'release'].includes(gate.lane))
+      fail('invalid gate lane');
+    strings(gate.dependsOn, 'gate.dependsOn');
+    if (gate.dependsOn.some((dependency) => !seen.has(dependency)))
+      fail('gate dependency must precede its consumer');
+    string(gate.reason, 'gate.reason');
+    seen.add(gate.command);
+  }
+  if (control.correctionCheckpoint !== undefined) {
+    const checkpoint = control.correctionCheckpoint;
+    if (
+      !Number.isInteger(checkpoint.rejectedCorrections) ||
+      checkpoint.rejectedCorrections < 0
+    )
+      fail('invalid rejectedCorrections');
+    string(checkpoint.causeClass, 'correctionCheckpoint.causeClass');
+    if (checkpoint.rejectedCorrections >= 2) {
+      string(checkpoint.diagnosisRef, 'correctionCheckpoint.diagnosisRef');
+      string(
+        checkpoint.productOwnerDecisionRef,
+        'correctionCheckpoint.productOwnerDecisionRef',
+      );
+    }
+  }
 }
 
 export function validateControl(control) {

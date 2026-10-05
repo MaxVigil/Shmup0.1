@@ -301,6 +301,10 @@ Architecture, build, lint, dependency, or governance work uses canonical technic
 
 ## 10. Conflict examples
 
+MVP-only examples below are historical scope examples, not bans on an explicitly
+approved post-MVP contract. Current assigned product decisions supersede MVP
+absence of persistence, progression or enemy fire; skills never authorize new scope.
+
 | Skill suggestion | Project decision | Required action |
 |---|---|---|
 | Use Phaser Registry for Credits/Hull | Application-owned Shared Session Store | Ignore skill pattern; use application API. |
@@ -368,3 +372,112 @@ The governance package is **READY FOR IMPLEMENTATION**. DeepSeek may work only t
 - [DeepSeek Models and Pricing](https://api-docs.deepseek.com/quick_start/pricing/)
 - [Google Engineering Practices: Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html)
 - [Google Engineering Practices: What to look for in a code review](https://google.github.io/eng-practices/review/reviewer/looking-for.html)
+
+## 15. P123 bounded process experiment — 2026-10-05
+
+### 15.1 Decision and single current-status owner
+
+**Decision PROCESS-DEC-001:** Product Owner approved retrospective packages 1–3
+as a bounded experiment on 2026-10-05. This section alone owns experiment status;
+the retrospective remains historical analysis, not another execution registry.
+
+- Policy approval: approved; implementation amendment: **Independently accepted, 2026-10-05**.
+  Review: `verification/p123-amendment-acceptance.md`. Local changes are not yet
+  committed/integrated into `main`; commit/push/merge/tag need explicit authority.
+- Trial: first two independently accepted v0.3 Work Items; **0/2 enrolled**.
+  The reviewer records their IDs and links to metrics here when assigned/accepted.
+- Owner: acceptance reviewer/TPM; product/scope/risk decisions: Product Owner.
+- Readout: after two trial WIs; broader re-audit after three accepted post-MVP
+  scopes under Verification §15. Record keep/revise/stop, not automatic rollout.
+- Applicability: prepare all new post-v0.2 assignments using this protocol once
+  the amendment is independently accepted; legacy accepted scopes do not reopen.
+- Benefit/guardrails: fewer repeated gate minutes and technical relay messages,
+  without weaker acceptance claims or increased escaped defects. Use actual
+  usage data, not guessed token prices; see `verification/process-metrics-template.md`.
+- Non-goals: universal fault framework, orchestrator, wholesale spec rewrite,
+  simulation refactor, dependency authority expansion, production hook or new product scope.
+
+Branch recommendation (not authorization): fast-forward `main` to accepted v0.2
+revision `825a2f8b0ecfe1a79547479d85dd06b339507c5e`, annotate that exact product
+revision as `v0.2.0` with local-only acceptance conditions, then integrate the
+separately reviewed process amendment. Start v0.3 WIs from the resulting accepted
+`main`. Fetch on 2026-10-05 confirmed `origin/main...825a2f8` = `0/22`, and no
+`v0.2*` tag existed. Merge/tag/push require a separate explicit command. Keep
+the WI-07 branch and backed-up ignored evidence until retention is agreed;
+do not delete worktrees as part of this experiment. No deployment is implied.
+
+### 15.2 Assignment readiness and repair budget
+
+Before issuing a handoff, the reviewer records a short readiness conclusion at
+the affected canonical owner: observable outcome, AC/negative requirements,
+allowed owners, unresolved questions, verification feasibility and risk R0–R3.
+Use the canonical TPM role's classification (risk is not defect severity):
+
+- R0: factual documentation only; no product/runtime/generated-data change.
+- R1: local reversible implementation, without save migration, economy,
+  cross-system state or critical-journey impact.
+- R2: gameplay, UI flow, economy, progression, persistence behavior, shared
+  content schema or multiple subsystems.
+- R3: migration, canonical ID change, broad refactor, security/trust boundary,
+  platform dependency change or expensive rollback.
+
+Governance changes and evidence-runner changes require independent amendment
+review even when they do not alter gameplay; they are not factual R0 edits.
+For stateful R2/R3 changes include state/event/guard/next state/durable write/
+visible result/forbidden side effects; cover relevant stale, duplicate, failure,
+replacement and disposal cases. Name supported legacy save formats before
+requesting a migration. Do not manufacture values for unknown content geometry.
+
+Protocol v2 adds these fields for P123 assignments (legacy envelopes stay valid):
+
+```json
+{
+  "processExperiment": "P123",
+  "readinessRef": "Project Documentation/<owner>.md §<section>",
+  "repairOwners": ["scripts/<assigned-owner>.mjs"],
+  "gatePlan": [
+    { "command": "npm run verify", "lane": "change", "dependsOn": [], "reason": "Tooling regressions, lint, types and build" }
+  ]
+}
+```
+
+`gatePlan` must cover `requiredGates` exactly, once, in execution order; lanes
+are `preflight`, `change`, `integration`, `release`. Dependencies reference earlier
+command strings. The validator checks shape and declared order, not whether the
+declared graph, readiness reference or AC coverage is semantically sufficient.
+The reviewer checks real commands/imports, aggregate duplication and coverage.
+
+`repairOwners` permits self-discovered/correction repairs in those owners and
+their named direct regressions while the approved behavior remains unchanged.
+The implementer may iterate narrow diagnostics before the final frozen sequence;
+no new PO relay is needed for an already-authorized implementation choice.
+It does not authorize additional architecture/schema/dependency contracts,
+changed product behavior, omitted gates, risk waivers, destructive or external
+actions. Stop the affected work and consolidate those questions. Independent
+review remains required; scope expansion never hides inside a repair budget.
+
+Record rejected correction count and cause in the metrics ledger. After two
+rejected corrections in a WI (and earlier when two repeat the same class), stop
+automatic reassignment, diagnose specification/handoff/architecture/implementation/
+test/evidence/context, and obtain a PO decision on a changed plan. The next
+envelope includes `correctionCheckpoint` with `rejectedCorrections`, `causeClass`,
+`diagnosisRef`, and `productOwnerDecisionRef`; validation requires the latter
+two when the count is at least two. It does not verify the referenced decision.
+
+### 15.3 Context, evidence and experiment completion
+
+Use the existing project skills as routes, not duplicated policy. Keep corrections
+in the same dialogue while owner/contract and hypotheses remain current; use a
+fresh reviewer context for final Epic acceptance. Read risk-linked evidence after
+deriving independent failure cases and inspecting the diff.
+
+Verification §18 owns gate selection and isolated evidence. Trial metrics are
+filled after **each** of the first two WIs, not deferred to the Epic's end.
+Use one outcome/exception/evidence pointer in the existing execution registry;
+technical documents describe contracts and dated evidence describes runs.
+Do not replicate live audit/acceptance status across documents.
+
+At readout, compare risk/size, first-pass acceptance, cause-coded rework,
+repeated gate minutes, environment wait and PO relay count. Stop expanding an
+optimization that adds maintenance without benefit. Fewer tests alone is not a
+success measure. Physical-device conditions and `V02-DEC-037` remain unchanged.

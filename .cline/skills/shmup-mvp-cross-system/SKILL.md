@@ -46,7 +46,7 @@ Do not use this skill for a task that belongs entirely to `shmup-mvp-combat` or 
 - Mission Snapshot is immutable; Mission Result commitment is idempotent and occurs exactly once.
 - Use the approved FNV-1a/Mulberry32 stream contract and fixed test vectors.
 - Keep Phaser behind the lazy Combat boundary.
-- Do not introduce a second store, global event bus, generic service layer, persistence, backend, analytics, or speculative extension point.
+- Do not introduce a second store, global event bus, generic service layer, backend, analytics, or speculative extension point. Persistence changes require an explicitly approved current contract; MVP absence of persistence does not override post-MVP decisions.
 - Preserve explicit setup/cleanup ownership across Boot, Base, Combat, browser lifecycle, and React Strict Mode.
 - Treat performance as a gate in the slice that introduces the work.
 
@@ -57,5 +57,9 @@ Load `shmup-mvp-combat` or `shmup-mvp-base-precombat` in addition only when the 
 Generic skills remain optional technique references and are allowed only through `AGENTS.md`. They cannot define product behaviour or architecture.
 
 ## Completion
+
+For new post-v0.2 work, route to Governance §15 and Verification §18 for the P123
+trial and gate plan. Review identity lifetime, replacement, retry, stale events
+and supported migration fixtures before a cross-owner contract spreads.
 
 Confirm that state ownership, transition idempotency, deterministic behaviour, lifecycle cleanup, and affected source-qualified Acceptance Criteria are covered at the lowest reliable test layer. Run the required gates and record applicable browser, manual, or performance evidence. Stop rather than invent a missing cross-system rule.

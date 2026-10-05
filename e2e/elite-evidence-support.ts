@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { evidenceDirectory } from '../scripts/evidence-output.mjs';
 
 import type { Page } from '@playwright/test';
 import { expect } from '@playwright/test';
@@ -18,11 +18,7 @@ import { expect } from '@playwright/test';
  */
 export const ELITE_EVIDENCE_VIEWPORT = { width: 1366, height: 768 } as const;
 export const ELITE_EVIDENCE_SESSION_SEED = 19023;
-export const ELITE_EVIDENCE_DIR = join(
-  process.cwd(),
-  '.agent-handoff',
-  'evidence',
-);
+export const ELITE_EVIDENCE_DIR = evidenceDirectory();
 const DB_NAME = 'shmup-v0.2';
 
 /** The canonical maximum-speed horizontal sweep contract. */

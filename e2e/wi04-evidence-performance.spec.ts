@@ -1,3 +1,4 @@
+import { evidenceDirectory } from '../scripts/evidence-output.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { join } from 'node:path';
@@ -32,7 +33,7 @@ import { readEvidenceOwnership } from './evidence-ownership';
  *   contaminate the sample; continuous automatic Machine Gun fire is
  *   preserved.
  */
-const EVIDENCE_DIR = join(process.cwd(), '.agent-handoff', 'evidence');
+const EVIDENCE_DIR = evidenceDirectory();
 const SESSION_SEED = 19023;
 const CANONICAL_MISSION_SEED = 609704137;
 

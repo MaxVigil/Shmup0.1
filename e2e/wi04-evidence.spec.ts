@@ -1,3 +1,4 @@
+import { evidenceDirectory } from '../scripts/evidence-output.mjs';
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -19,7 +20,7 @@ import type { Page } from '@playwright/test';
  * asserted — never merely the output path. Development project only.
  */
 const MINIMUM_VIEWPORT = { width: 1280, height: 600 };
-const EVIDENCE_DIR = join(process.cwd(), '.agent-handoff', 'evidence');
+const EVIDENCE_DIR = evidenceDirectory();
 
 type DevObservability = {
   readonly activeEnemiesByType: Readonly<Record<string, number>>;

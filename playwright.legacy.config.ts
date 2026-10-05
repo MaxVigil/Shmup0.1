@@ -1,3 +1,7 @@
+import { evidenceDirectory } from './scripts/evidence-output.mjs';
+
+evidenceDirectory();
+
 import { defineConfig } from '@playwright/test';
 
 /**

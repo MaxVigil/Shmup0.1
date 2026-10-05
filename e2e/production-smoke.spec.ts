@@ -1,3 +1,4 @@
+import { evidenceDirectory } from '../scripts/evidence-output.mjs';
 import { execSync } from 'node:child_process';
 import {
   existsSync,
@@ -54,7 +55,7 @@ const MINIMUM_VIEWPORT = { width: 1280, height: 600 };
 const DEFEAT_SESSION_SEED = 19023;
 
 /** V02-WI-04 C01 fresh runtime/performance evidence output directory. */
-const EVIDENCE_DIR = join(process.cwd(), '.agent-handoff', 'evidence');
+const EVIDENCE_DIR = evidenceDirectory();
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize(MINIMUM_VIEWPORT);
@@ -498,7 +499,7 @@ test('a selected Mission 02 starts and resolves through the supported production
   expect(pageErrors).toEqual([]);
 });
 
-test('a natural Defeat resolves once and Continue returns to Operations for the next mission (Delivery §7.5, Combat AC-010/028–036, MASTER-AC-005)', async ({
+test('a natural Defeat resolves once and Continue returns to Operations for the next mission (Delivery §7.5, Combat AC-010/028–036, MASTER-AC-005) @release-evidence', async ({
   page,
 }) => {
   // V02-WI-04 authored M01 staging (first arrival at 10 s) removes the
@@ -1007,7 +1008,7 @@ test('the production artifact is locally servable and hygienic with a distinct l
   }
 });
 
-test('repeated fixed-seed Defeat/Game Over mission cycles leave no Combat residue and no persistent memory growth (V02-WI-05 E01 interim for V02-AC-027)', async ({
+test('repeated fixed-seed Defeat/Game Over mission cycles leave no Combat residue and no persistent memory growth (V02-WI-05 E01 interim for V02-AC-027) @release-evidence', async ({
   page,
   context,
 }) => {
@@ -1389,7 +1390,7 @@ async function samplePassBFrames(
   );
 }
 
-test('records the uninstrumented Mission 01 regular-workload performance record in the production build (V02-AC-028, V02-WI-04 C03 Pass B)', async ({
+test('records the uninstrumented Mission 01 regular-workload performance record in the production build (V02-AC-028, V02-WI-04 C03 Pass B) @release-evidence', async ({
   page,
   context,
 }) => {
@@ -2172,7 +2173,7 @@ async function observeD04CombatFrame(page: Page): Promise<{
  * checks below. See `.agent-handoff/evidence/wi07-d04-c03-coverage-map.md`.
  */
 
-test('V02-WI-07 D04 the ordinary production build enters Interception 01–03 through the real flow, renders each authored encounter from the prepared sprites, and requests every approved asset at most once per page load (V02-AC-024/025)', async ({
+test('V02-WI-07 D04 the ordinary production build enters Interception 01–03 through the real flow, renders each authored encounter from the prepared sprites, and requests every approved asset at most once per page load (V02-AC-024/025) @release-evidence', async ({
   page,
 }) => {
   test.setTimeout(300_000);
@@ -2663,7 +2664,7 @@ test('V02-WI-07 D04 controlled Elite sprite failures keep each Elite asset to on
     recordedAt: new Date().toISOString(),
     failedRequestPaths: elitePaths,
     screenshot: {
-      path: '.agent-handoff/evidence/v02-wi-07-d04-m03-pre-elite-basic-encounter-under-elite-asset-failure.png',
+      path: preEliteFramePath,
       semantics:
         'the authored pre-Elite Mission 03 first encounter (Basic Drones) rendered by the ordinary production artifact while both approved Elite sprite requests failed at Boot; it is not an Elite fallback frame and provides no Elite rendering evidence',
     },
