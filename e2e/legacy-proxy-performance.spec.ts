@@ -1,4 +1,3 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,6 +5,7 @@ import { expect, test } from '@playwright/test';
 import type { BrowserContext, Page } from '@playwright/test';
 
 import { readEvidenceOwnership } from './evidence-ownership';
+import { recordLegacyProxyAttempt } from '../src/test-support/legacy-proxy-evidence';
 
 /**
  * V02-WI-04 C04 legacy five-Basic production proxy harness (Epic §20.1, delta
@@ -24,6 +24,13 @@ import { readEvidenceOwnership } from './evidence-ownership';
  * labels base/post-integration; `LEGACY_PROXY_BUILD_IDENTIFIER` overrides the
  * recorded build identity (the base copy has no git, so the known revision is
  * injected by the runner).
+ *
+ * V02-WI-07 D05-C01: this attempt's measured facts are persisted BEFORE the
+ * budget assertions (see `recordLegacyProxyAttempt`), so a failing floor or a
+ * later cleanup failure can no longer discard the current sample, and no
+ * cleanup object is invented for an incomplete attempt. The successful record
+ * shape, every assertion, the floor, the workload, the sample window and the
+ * fixed seed are unchanged.
  */
 const DEFAULT_EVIDENCE_DIR = join(process.cwd(), '.agent-handoff', 'evidence');
 const SESSION_SEED = 19023;
@@ -228,42 +235,55 @@ test('records the legacy five-Basic production proxy with exact concurrent workl
     pageErrors: pageErrors.length,
   };
 
-  expect(evidence.frameTimeMs.count).toBeGreaterThan(100);
-  expect(evidence.minimumSustainedWindowFps).toBeGreaterThanOrEqual(50);
-  expect(pageErrors).toEqual([]);
+  // V02-WI-07 D05-C01: persist THIS attempt's measured facts before any budget
+  // assertion runs. A failing floor can no longer discard the current sample
+  // (nor leave an earlier run's file masquerading as this attempt), and an
+  // incomplete attempt keeps a raw record WITHOUT a `cleanup` object, which is
+  // what keeps it comparator-ineligible instead of inventing a passing cleanup.
+  const { record: finalEvidence } = await recordLegacyProxyAttempt({
+    target: {
+      evidenceDir:
+        process.env.LEGACY_PROXY_EVIDENCE_DIR ?? DEFAULT_EVIDENCE_DIR,
+      recordName:
+        process.env.LEGACY_PROXY_RECORD ?? 'legacy-five-basic-proxy.json',
+    },
+    attempt: evidence,
+    // Unchanged budget assertions (C03 delta 7 / C04 delta 1).
+    assertBudgets: () => {
+      expect(evidence.frameTimeMs.count).toBeGreaterThan(100);
+      expect(evidence.minimumSustainedWindowFps).toBeGreaterThanOrEqual(50);
+      expect(pageErrors).toEqual([]);
+    },
+    completeWithMeasuredCleanup: async () => {
+      // Post-run cleanup facts (V02-WI-05 E01): no Combat residue after
+      // resolving the running mission. The temporary Return to Base seam is
+      // removed, so the canonical active-mission refresh Defeat recovery
+      // (V02-AC-018) resolves the persisted marker exactly once and opens
+      // Operations with no residue.
+      await page.reload();
+      await expect(page.getByTestId('operations-screen')).toBeVisible();
+      await expect(page.locator('canvas')).toHaveCount(0);
+      await expect(page.locator('.ds-combat-hud')).toHaveCount(0);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
 
-  // Post-run cleanup facts (V02-WI-05 E01): no Combat residue after resolving
-  // the running mission. The temporary Return to Base seam is removed, so the
-  // canonical active-mission refresh Defeat recovery (V02-AC-018) resolves the
-  // persisted marker exactly once and opens Operations with no residue.
-  await page.reload();
-  await expect(page.getByTestId('operations-screen')).toBeVisible();
-  await expect(page.locator('canvas')).toHaveCount(0);
-  await expect(page.locator('.ds-combat-hud')).toHaveCount(0);
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-
-  // C05 delta 2: the machine-readable cleanup object is recorded ONLY after
-  // the cleanup assertions above actually passed, measured from the real
-  // post-cleanup state — never pre-authored prose.
-  const cleanup = {
-    operationsVisible: await page.getByTestId('operations-screen').isVisible(),
-    canvasCount: await page.locator('canvas').count(),
-    combatHudCount: await page.locator('.ds-combat-hud').count(),
-    dialogOverlayCount: await page.getByRole('dialog').count(),
-  };
-  expect(cleanup.operationsVisible).toBe(true);
-  expect(cleanup.canvasCount).toBe(0);
-  expect(cleanup.combatHudCount).toBe(0);
-  expect(cleanup.dialogOverlayCount).toBe(0);
-
-  mkdirSync(process.env.LEGACY_PROXY_EVIDENCE_DIR ?? DEFAULT_EVIDENCE_DIR, {
-    recursive: true,
+      // C05 delta 2: the machine-readable cleanup object is returned ONLY after
+      // the cleanup assertions above actually passed, measured from the real
+      // post-cleanup state — never pre-authored prose. It reaches the record
+      // only when this function returns.
+      const cleanup = {
+        operationsVisible: await page
+          .getByTestId('operations-screen')
+          .isVisible(),
+        canvasCount: await page.locator('canvas').count(),
+        combatHudCount: await page.locator('.ds-combat-hud').count(),
+        dialogOverlayCount: await page.getByRole('dialog').count(),
+      };
+      expect(cleanup.operationsVisible).toBe(true);
+      expect(cleanup.canvasCount).toBe(0);
+      expect(cleanup.combatHudCount).toBe(0);
+      expect(cleanup.dialogOverlayCount).toBe(0);
+      return cleanup;
+    },
   });
-  const path = join(
-    process.env.LEGACY_PROXY_EVIDENCE_DIR ?? DEFAULT_EVIDENCE_DIR,
-    process.env.LEGACY_PROXY_RECORD ?? 'legacy-five-basic-proxy.json',
-  );
-  const finalEvidence = { ...evidence, cleanup };
-  writeFileSync(path, `${JSON.stringify(finalEvidence, null, 2)}\n`);
   console.log('V02-WI04-LEGACY-PROXY', JSON.stringify(finalEvidence));
 });

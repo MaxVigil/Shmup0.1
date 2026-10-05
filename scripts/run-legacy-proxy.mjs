@@ -14,7 +14,19 @@
  * injected into the base record so `buildIdentifier` is never unknown. The
  * active checkout is never touched.
  *
- * Usage: node scripts/run-legacy-proxy.mjs
+ * V02-WI-07 D05: each side is invoked exactly ONCE. The previous bounded
+ * retry-until-pass loop is removed, so a failing sample propagates immediately
+ * as raw failure evidence and is never replaced by a later attempt. The single
+ * side invocation is exported for the focused tooling regression.
+ *
+ * V02-WI-07 D05-C02: the disposable base copy receives the complete shared
+ * harness set, including the local evidence helper the harness imports, and the
+ * absent `src/test-support` destination directory is created first.
+ * `--preflight` prepares a disposable base copy through the same real path and
+ * verifies the historical dependency/build context and Playwright discovery
+ * without executing any measurement.
+ *
+ * Usage: node scripts/run-legacy-proxy.mjs [--preflight]
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
@@ -198,7 +210,27 @@ function serveBuild(cwd, outDir) {
   );
 }
 
-async function recordProxy(cwd, recordName, side, buildIdentifier) {
+/**
+ * Runs ONE side of the legacy five-Basic proxy exactly once (V02-WI-07 D05).
+ *
+ * The unchanged Playwright workload is invoked a single time per side. A
+ * non-zero result propagates immediately as the side's raw failure evidence, so
+ * an unfavourable sample can never be replaced by a later, more favourable
+ * attempt. The harness writes its record only after every in-browser assertion
+ * passed, and nothing here deletes or rewrites an existing record file, so a
+ * failed attempt leaves whatever raw data exists on disk untouched. The sample
+ * duration, the 50 FPS floor, the seeds, and the workload are unchanged.
+ *
+ * `invoke` is injectable only so the single-attempt contract is covered by the
+ * focused tooling regression (`scripts/run-legacy-proxy.test.mjs`).
+ */
+export async function recordProxy(
+  cwd,
+  recordName,
+  side,
+  buildIdentifier,
+  invoke = invokeLegacyWorkload,
+) {
   const env = {
     LEGACY_PROXY_RECORD: recordName,
     LEGACY_PROXY_SIDE: side,
@@ -210,57 +242,63 @@ async function recordProxy(cwd, recordName, side, buildIdentifier) {
   if (buildIdentifier !== undefined) {
     env.LEGACY_PROXY_BUILD_IDENTIFIER = buildIdentifier;
   }
-  // V02-WI-04 C04: bounded ambient-load retries inside ONE controlled run. The
-  // harness's 6 s sample and 1 s minimum-sustained-window are sensitive to
-  // transient machine stalls (headless Chromium under ambient load), which the
-  // base and post-integration sides catch at random — never a systematic code
-  // regression (both sides measure ~60 FPS in clean windows). A pass writes
-  // the record; a sub-50 sustained/minimum-window result or an error keeps
-  // retrying, and a side that cannot pass after MAX_ATTEMPTS fails the run.
-  // The 50 FPS floor is never weakened: the final record must pass it.
-  const MAX_ATTEMPTS = 3;
-  let lastError = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    try {
-      run('npx', ['playwright', 'test', '-c', 'playwright.legacy.config.ts'], {
-        cwd,
-        env,
-      });
-      return;
-    } catch (error) {
-      lastError = error;
-      console.warn(
-        `[legacy-proxy] ${side} attempt ${attempt}/${MAX_ATTEMPTS} failed (ambient-load flake or boundary); retrying...`,
-      );
-      await delay(2000);
-    }
-  }
-  throw lastError ?? new Error(`${side} legacy proxy failed after retries`);
+  await invoke(cwd, env);
 }
 
-mkdirSync(EVIDENCE_DIR, { recursive: true });
+/** Runs the unchanged legacy Playwright workload for exactly one side. */
+async function invokeLegacyWorkload(cwd, env) {
+  run('npx', ['playwright', 'test', '-c', 'playwright.legacy.config.ts'], {
+    cwd,
+    env,
+  });
+}
 
-// ---------------------------------------------------------------------------
-// 1. Base legacy proxy: fresh disposable reconstruction + identity-hook
-//    injection (never touches the active checkout; cleaned in `finally`).
-// ---------------------------------------------------------------------------
-let baseDir = null;
-let basePreview = null;
-let postPreview = null;
-try {
-  baseDir = mkdtempSync(join(tmpdir(), 'shmup-v02-wi-04-base-proxy-'));
-  console.log(`Fresh base copy at ${baseDir}`);
+/**
+ * The current shared harness files the disposable base copy must receive, at
+ * the same relative paths. The base revision keeps its own application source;
+ * only the harness, every local module that harness imports, and the evidence
+ * Playwright config are taken from the current tree (V02-WI-07 D05-C02: the
+ * explicit list is the whole contract — never a source-tree copy).
+ */
+export const BASE_COPY_SHARED_FILES = [
+  'e2e/legacy-proxy-performance.spec.ts',
+  'e2e/evidence-ownership.ts',
+  'src/test-support/legacy-proxy-evidence.ts',
+  'playwright.legacy.config.ts',
+];
+
+/**
+ * Copies the shared harness files into a disposable base copy, creating each
+ * destination's parent directory first: the immutable base revision has no
+ * `src/test-support`, so the destination directory for the shared
+ * legacy-proxy evidence helper has to be created before it can be written
+ * (V02-WI-07 D05-C02 repair of the base-copy preparation).
+ */
+export function copySharedHarnessIntoBaseCopy(baseDir, sourceRoot = ROOT) {
+  for (const relative of BASE_COPY_SHARED_FILES) {
+    const destination = join(baseDir, relative);
+    mkdirSync(dirname(destination), { recursive: true });
+    cpSync(join(sourceRoot, relative), destination);
+  }
+}
+
+/** Extracts the immutable base revision into the disposable directory. */
+export function extractBaseRevision(baseDir) {
   const archive = execFileSync('git', ['archive', BASE_REV], {
     cwd: ROOT,
     maxBuffer: 64 * 1024 * 1024,
   });
   execFileSync('tar', ['-xzf', '-'], { cwd: baseDir, input: archive });
+}
 
-  // Inject the identity hook into the base entry and patch the base's
-  // `forceFinalGroupSpawn` so the proxy materializes the SAME five top-entry
-  // Basic workload as the post-integration benchmark (the base has no
-  // evidence-scenario infrastructure; the injection is the compile-time
-  // evidence-only scenario).
+/**
+ * Injects the identity hook into the base entry and patches the base's
+ * `forceFinalGroupSpawn` so the proxy materializes the SAME five top-entry
+ * Basic workload as the post-integration benchmark (the base has no
+ * evidence-scenario infrastructure; the injection is the compile-time
+ * evidence-only scenario).
+ */
+export function injectBaseWorkloadIdentity(baseDir) {
   const entryPath = join(baseDir, 'src', 'combat-presentation', 'entry.ts');
   const entrySource = readFileSync(entryPath, 'utf8');
   if (!entrySource.includes(INJECT_ANCHOR)) {
@@ -289,71 +327,130 @@ try {
     FORCE_FINAL_GROUP_SPAWN_REPLACEMENT,
   );
   writeFileSync(simulationPath, injectedSimulation);
+}
 
-  // The SAME harness version and config are copied into the base copy,
-  // including the shared evidence-ownership helper it imports.
-  cpSync(
-    join(ROOT, 'e2e', 'legacy-proxy-performance.spec.ts'),
-    join(baseDir, 'e2e', 'legacy-proxy-performance.spec.ts'),
-  );
-  cpSync(
-    join(ROOT, 'e2e', 'evidence-ownership.ts'),
-    join(baseDir, 'e2e', 'evidence-ownership.ts'),
-  );
-  cpSync(
-    join(ROOT, 'playwright.legacy.config.ts'),
-    join(baseDir, 'playwright.legacy.config.ts'),
-  );
+/**
+ * CLI entry (V02-WI-07 D05): reconstruct the immutable base side, record the
+ * current post-integration side, and then run the shared comparison validator.
+ * Guarded below so importing this module for the focused tooling regression
+ * never performs any build, browser, or filesystem work.
+ */
+async function main() {
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
 
-  console.log('Installing base copy dependencies (npm ci)...');
-  run('npm', ['ci'], { cwd: baseDir });
-  console.log('Building the base production artifact...');
-  run('npm', ['run', 'build'], { cwd: baseDir });
-  basePreview = serveBuild(baseDir, 'dist');
-  await waitForServer(`http://127.0.0.1:${LEGACY_PORT}/`);
-  console.log('Recording the base legacy five-Basic proxy...');
-  await recordProxy(
-    baseDir,
-    'base-legacy-five-basic.json',
-    'base',
-    `[shmup] build shmup@0.1.0 (${BASE_REV})`,
-  );
-  basePreview.kill();
-  basePreview = null;
+  // ---------------------------------------------------------------------------
+  // 1. Base legacy proxy: fresh disposable reconstruction + identity-hook
+  //    injection (never touches the active checkout; cleaned in `finally`).
+  // ---------------------------------------------------------------------------
+  let baseDir = null;
+  let basePreview = null;
+  let postPreview = null;
+  try {
+    baseDir = mkdtempSync(join(tmpdir(), 'shmup-v02-wi-04-base-proxy-'));
+    console.log(`Fresh base copy at ${baseDir}`);
+    extractBaseRevision(baseDir);
+    injectBaseWorkloadIdentity(baseDir);
+    // The SAME harness version, its local imports and the evidence config are
+    // copied into the base copy (V02-WI-07 D05-C02: the shared legacy-proxy
+    // evidence helper is part of that set).
+    copySharedHarnessIntoBaseCopy(baseDir);
 
-  // -------------------------------------------------------------------------
-  // 2. Post-integration legacy proxy (current uninstrumented scenario build:
-  //    scenarios ON, counters OFF — timing is never instrumented).
-  // -------------------------------------------------------------------------
-  console.log('Building the current uninstrumented scenario artifact...');
-  run('npm', ['run', 'build:evidence-uninstrumented'], { cwd: ROOT });
-  postPreview = serveBuild(ROOT, 'dist-evidence-uninstrumented');
-  await waitForServer(`http://127.0.0.1:${LEGACY_PORT}/`);
-  console.log('Recording the post-integration legacy five-Basic proxy...');
-  await recordProxy(
-    ROOT,
-    'post-integration-legacy-five-basic.json',
-    'post-integration',
-    undefined,
-  );
-  postPreview.kill();
-  postPreview = null;
-} finally {
-  if (basePreview !== null) {
+    console.log('Installing base copy dependencies (npm ci)...');
+    run('npm', ['ci'], { cwd: baseDir });
+    console.log('Building the base production artifact...');
+    run('npm', ['run', 'build'], { cwd: baseDir });
+    basePreview = serveBuild(baseDir, 'dist');
+    await waitForServer(`http://127.0.0.1:${LEGACY_PORT}/`);
+    console.log('Recording the base legacy five-Basic proxy...');
+    await recordProxy(
+      baseDir,
+      'base-legacy-five-basic.json',
+      'base',
+      `[shmup] build shmup@0.1.0 (${BASE_REV})`,
+    );
     basePreview.kill();
-  }
-  if (postPreview !== null) {
+    basePreview = null;
+
+    // -------------------------------------------------------------------------
+    // 2. Post-integration legacy proxy (current uninstrumented scenario build:
+    //    scenarios ON, counters OFF — timing is never instrumented).
+    // -------------------------------------------------------------------------
+    console.log('Building the current uninstrumented scenario artifact...');
+    run('npm', ['run', 'build:evidence-uninstrumented'], { cwd: ROOT });
+    postPreview = serveBuild(ROOT, 'dist-evidence-uninstrumented');
+    await waitForServer(`http://127.0.0.1:${LEGACY_PORT}/`);
+    console.log('Recording the post-integration legacy five-Basic proxy...');
+    await recordProxy(
+      ROOT,
+      'post-integration-legacy-five-basic.json',
+      'post-integration',
+      undefined,
+    );
     postPreview.kill();
+    postPreview = null;
+  } finally {
+    if (basePreview !== null) {
+      basePreview.kill();
+    }
+    if (postPreview !== null) {
+      postPreview.kill();
+    }
+    if (baseDir !== null && baseDir.startsWith(tmpdir())) {
+      rmSync(baseDir, { recursive: true, force: true });
+      console.log(`Cleaned base copy at ${baseDir}`);
+    }
   }
-  if (baseDir !== null && baseDir.startsWith(tmpdir())) {
-    rmSync(baseDir, { recursive: true, force: true });
-    console.log(`Cleaned base copy at ${baseDir}`);
+
+  // ---------------------------------------------------------------------------
+  // 3. Comparison package with assertions (delta 8).
+  // ---------------------------------------------------------------------------
+  console.log('Building the machine-readable comparison package...');
+  run('node', ['scripts/compare-performance-evidence.mjs'], { cwd: ROOT });
+  console.log('Legacy proxy evidence complete.');
+}
+
+/**
+ * V02-WI-07 D05-C02 preflight: prepares a disposable base copy through the
+ * REAL reconstruction path (extract → inject → copy the shared harness set) and
+ * proves the historical dependency/build context and Playwright discovery
+ * work, without executing any workload, server or measurement. Every
+ * temporary resource is removed in `finally`.
+ */
+async function runBaseCopyPreflight() {
+  let baseDir = null;
+  try {
+    baseDir = mkdtempSync(join(tmpdir(), 'shmup-v02-wi-04-base-preflight-'));
+    console.log(`Preflight base copy at ${baseDir}`);
+    extractBaseRevision(baseDir);
+    injectBaseWorkloadIdentity(baseDir);
+    copySharedHarnessIntoBaseCopy(baseDir);
+    console.log('Preflight: installing base copy dependencies (npm ci)...');
+    run('npm', ['ci'], { cwd: baseDir });
+    console.log('Preflight: base build (typecheck + vite build)...');
+    run('npm', ['run', 'build'], { cwd: baseDir });
+    console.log(
+      'Preflight: Playwright discovery (--list) of the real legacy test...',
+    );
+    run(
+      'npx',
+      ['playwright', 'test', '-c', 'playwright.legacy.config.ts', '--list'],
+      { cwd: baseDir },
+    );
+    console.log(
+      'Base-copy preflight passed: the disposable 168822f copy builds and resolves the shared harness imports.',
+    );
+  } finally {
+    if (baseDir !== null && baseDir.startsWith(tmpdir())) {
+      rmSync(baseDir, { recursive: true, force: true });
+      console.log(`Cleaned preflight base copy at ${baseDir}`);
+    }
   }
 }
 
-// ---------------------------------------------------------------------------
-// 3. Comparison package with assertions (delta 8).
-// ---------------------------------------------------------------------------
-console.log('Building the machine-readable comparison package...');
-run('node', ['scripts/compare-performance-evidence.mjs'], { cwd: ROOT });
-console.log('Legacy proxy evidence complete.');
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  if (process.argv.includes('--preflight')) {
+    await runBaseCopyPreflight();
+  } else {
+    await main();
+  }
+}

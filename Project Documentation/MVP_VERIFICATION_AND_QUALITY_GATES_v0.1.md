@@ -339,3 +339,203 @@ The dependency lockfile, repository configuration scaffold, and verification-com
 The final cross-document technical audit and `npm run verify:all` passed on `2026-08-20`.
 
 The Verification and Quality Gates are **READY FOR IMPLEMENTATION** and mandatory for every applicable Slice, Epic, Work Item, correction, and milestone.
+
+## 17. Shmup v0.2 final-candidate verification status — 2026-09-29
+
+This section records evidence status only. It changes no command, gate, floor,
+threshold, workload, sample window, discovery rule, failure rule or policy in
+§§1–16, and it authorizes no waiver. Status observations added after 2026-09-29 are
+dated in place in §§17.1–17.4.
+
+Final candidate: worktree `/Users/maximvigilev/Shmup0.1-worktrees/v02-wi-07`,
+origin `https://github.com/MaxVigil/Shmup0.1`, branch `feat/v02-wi-07`,
+HEAD `0c8901d7b3b9c9fd63288b4ca9011846732ee291` with the accepted `V02-WI-07`
+`D01`–`D05` candidate as uncommitted working-tree changes.
+
+Identities referenced by this record, kept strictly apart:
+
+- **Accepted `D05` evidence:** source fingerprint `2d4f8f31`, run
+  `v02-wi-07-performance-d05-c02-0c8901d`. Those records keep their own identity,
+  are never rewritten, and are never compared with `D06` artifacts.
+- **Historical blocked `D06` attempts:** the pre-lock-refresh attempt ran at
+  source fingerprint `c61afb46` and stopped at `npm audit` (§17.1). That value
+  describes only that historical attempt and is not a current candidate.
+- **Submitted `D06` candidate:** source fingerprint `31e86ec3` — the candidate
+  that the passing gate record in §17.3 was measured on, with its original
+  control envelope archived byte-identically under
+  `.agent-handoff/evidence/wi07-d06-review-backup/`.
+- **Correction envelope `V02-WI-07-D06-C01`:** replacing `control.json` alone
+  moves the control-inclusive fingerprint to `0fe518f2`. A read-only substitution
+  check recomputes the canonical digest over the same 291 input files with the
+  archived original control and reproduces `31e86ec3` exactly, so every
+  non-control input — product code, tests, build configuration, dependency
+  lockfile and scripts — is byte-identical to the submitted candidate. Only the
+  documentation and the transient envelope differ, which is why this correction
+  re-runs no gate or performance evidence.
+
+Already accepted predecessor evidence for the same candidate content
+(`V02-WI-07 D05`, run `v02-wi-07-performance-d05-c02-0c8901d`, source
+fingerprint `2d4f8f31`, `wi07-d05-independent-acceptance.json`):
+
+- six workload records sharing one runId, source fingerprint, build identity,
+  `1366×768` viewport and session seed `19023`, with both legacy sides measured
+  once and above the unchanged 50 FPS minimum-window floor;
+- a comparison package whose checks all pass, and the evidence mutation suite at
+  66/66;
+- the production delivery audit (`wi07-d05-delivery-audit.md`/`.json`);
+- byte-identical preserved copies with SHA-256 hashes in
+  `.agent-handoff/archive/wi07-d05-accepted-2d4f8f31/`.
+
+Open gates and limits:
+
+- the physical Windows 10 Chrome/Edge reference-device profile remains
+  **pending**; every recorded performance fact is labelled non-reference local
+  proxy evidence, so `MASTER-AC-015` is not satisfied for an external playtest or
+  a minimum-system-requirement claim;
+- the bounded `V02-DEC-036` split-gate exception applies to `V02-WI-07-D04`
+  only and is not a general verification policy or precedent;
+- the bounded local-only `V02-DEC-037` security exception (§17.4) applies to one
+  named dev-only advisory only; the whole-tree `npm audit` command stays non-zero
+  and is reported as such;
+- the final-candidate residual-risk ledger is maintained in
+  `verification/v02-wi-07-final-candidate-checklist.md`.
+
+### 17.1 Historical first gate attempt (pre-refresh candidate `c61afb46`) — blocked at `npm audit`
+
+The following commands were run once, in order, on that historical pre-refresh
+candidate (`c61afb46`), which stopped at the first required failure; no command
+was retried and no threshold was relaxed. This block is a dated historical record
+of a resolved blocker, not current status.
+
+```text
+npm run format:check   pass   (pass after the reported documentation-format cause was fixed)
+npm ci                 pass   (300 packages; optional fsevents install-script warnings only)
+npm audit              FAIL   exit 1 — 2 newly published advisories in unchanged dev-only transitive
+                              dependencies: brace-expansion 5.0.9 (high, via eslint@10.8.1 >
+                              minimatch@10.2.6) and fast-uri 3.1.7 (moderate, via stylelint@17.14.1 >
+                              table@6.9.0 > ajv@8.20.0); npm audit --omit=dev exits 0 with zero
+                              runtime vulnerabilities and package.json is unchanged
+npm run verify:all     not_run  (the sequence stopped at the first required failure)
+final identity audit   not_run  (same stop; the accepted D05 archive integrity check had already passed
+                                 as its own prerequisite step)
+```
+
+The `D06` cycle is therefore **blocked** and reported to the Product Owner with
+the exact audit facts: the approved lockfile is unmodified (only the accepted
+three-line `undici` entry differs from `HEAD`), no runtime dependency is
+affected, and neither the reviewable documentation package nor any accepted
+`D05` evidence was invalidated. Resolving the two dev-only advisories requires an
+authorized dependency/lockfile decision that `D06` scope explicitly excludes; no
+threshold, workload, sample or policy was changed here.
+
+### 17.2 Product Owner authorization and authorized continuation
+
+The blocked `D06` report was accepted by the Product Owner on 2026-10-01 with an
+explicit authorization of the recommended solution: a bounded lockfile-only
+refresh of exactly the two dev-only transitive toolchain dependencies named
+above, with `package.json`, every direct pin, the Node/npm versions and the
+runtime dependency set unchanged, and no `--force`, overrides or unrelated
+package updates.
+
+Delivered and verified before the authorized re-run: `brace-expansion`
+`5.0.9 → 5.0.12` and `fast-uri` `3.1.7 → 3.1.8` are the only two changed lockfile
+entries; `npm ci` installs both; `npm audit` and `npm audit --omit=dev` both
+report **zero** vulnerabilities; the accepted `undici` `8.11.2` entry is
+untouched. The accepted `D05` evidence archive and the documentation package in
+§17 are unaffected.
+
+### 17.3 Recorded `D06` final re-run results
+
+The required `D06` gates were run on the byte-identical candidate after the
+authorized refresh. No threshold, workload, sample window or method was relaxed:
+the first attempt failed and was reported as a blocked gate with its exact facts,
+the Product Owner then authorized exactly one re-run of that same candidate
+inside a quiet-host window, and that run passed.
+
+First attempt (`verify:all` started at a 15.36 one-minute host load): `format:check`,
+`npm ci` and `npm audit` passed, and the development suite reported
+`132 passed / 2 failed` — the two unchanged wall-clock input loops in
+`e2e/combat-controls.spec.ts` (`:374`, `:570`) timed out. The failure was reported
+to the Product Owner as a blocked gate with the exact facts, and a labelled single
+diagnostic of exactly those two tests passed `2/2` at a 1-minute load of 4.85.
+
+Product Owner authorization and final quiet-window run: the Product Owner
+authorized one re-run of the unchanged candidate with `verify:all` started inside
+a quiet-host window (1-minute load at or below 3.0, no other change). The
+candidate fingerprint was identical (`31e86ec3`), the window was reached after
+120 s (2.57, two consecutive samples at or below 3.0), and the gate run passed:
+
+```text
+npm run format:check   pass
+npm ci                 pass    300 packages; optional fsevents install-script warnings only; 0 vulnerabilities
+npm audit              pass    0 vulnerabilities (whole tree and runtime-only) on the refreshed lockfile
+npm run verify:all     pass    exit 0: format/lint/typecheck, Vitest 97 files / 1106 tests, production build,
+                               development 134 passed (6.5m), production 23 passed (16.4m)
+final identity audit   pass    fingerprint 31e86ec3 unchanged, accepted D05 archive 30/30 OK, accepted D05
+                               ownership intact in all six live records, comparison package still accepted
+```
+
+The quiet-window run's measured production facts: cold Boot response body
+`2,240,465 B` (≤ 3 MiB), Operations interactive `148 ms`, runtime assets
+`1,800,725 B` (≤ 2 MiB), enemy pack `221,772 B` (≤ 450,000); the D06-regenerated
+ordinary regular Pass B record reported `58.5` FPS sustained and `53.6` FPS
+minimum window, both above the unchanged 50 FPS floor, and it was preserved
+separately as `wi07-d06-regenerated-regular-pass-b.json` rather than being mixed
+with the accepted D05 chain.
+
+Correction of record: the accepted `D05-C02` report states `1104` unit tests,
+while the preserved `D05-C02` gate log reports `Tests 1106 passed`; `D06` records
+the correct current value (`1106`) and no gate result changes. The archived
+accepted evidence keeps its original text as history.
+
+### 17.4 Local-only security status update — 2026-10-03 (dev-only `braces` advisory)
+
+Recorded as part of correction `V02-WI-07-D06-C02` (the 2026-10-03 final-review
+observation) on the same unchanged candidate and lockfile. No gate from
+§§17.1–17.3 was re-run, because no product, test, build or dependency input
+changed.
+
+```text
+npm audit              FAIL   exit 1 — braces@3.0.3 (high, GHSA-vfj7-8cjw-p6xm / CVE-2026-93687)
+                              reached only through stylelint@17.14.1 > micromatch@4.0.8 > braces.
+                              npm lists 7 affected entries (braces, micromatch, fast-glob, globby,
+                              stylelint, stylelint-config-recommended, stylelint-config-standard)
+                              for this one root advisory — not 7 independent root defects. Official
+                              advisory: affected <= 3.0.3, patched versions: none (published
+                              2026-09-18, reviewed 2026-10-02); registry latest braces is 3.0.3 and
+                              the only offered fix is a breaking stylelint downgrade. Not marked as
+                              passed, not suppressed, no threshold changed.
+npm audit --omit=dev   pass   exit 0 — 0 runtime vulnerabilities; dev-only/runtime separation intact
+lockfile and integrity pass   package-lock.json SHA-256 f3b4f2cd… unchanged; package.json untouched;
+                              accepted D05 archive SHA-256 manifest 30/30 OK (0 FAILED)
+```
+
+The two dated facts stay separate. The **2026-10-01** whole-tree and runtime-only
+zero-vulnerability result (§17.2) is the correct historical fact for the accepted
+refresh; the **2026-10-03** non-zero result above dates a subsequently published
+advisory on that same lockfile. Neither record rewrites the other and no line in
+§§17.1–17.3 is altered.
+
+The Product Owner's 2026-10-03 decision on this observation is recorded canonically
+as `V02-DEC-037` in
+`SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md` §22.2: for local v0.2
+candidate acceptance only, exactly this named advisory in this dev-only dependency
+path is an accepted, owned exception. The command remains non-zero and must be
+reported as such; the exception covers no other advisory, no runtime finding, no
+failed test, no dependency, lockfile or pin change, no external playtest,
+deployment or minimum-system-requirement claim, and the physical Windows 10
+Chrome/Edge reference-device gate remains pending. This section records status and
+authorizes nothing by itself.
+
+### 17.5 Local v0.2 acceptance — 2026-10-05
+
+The independent final review accepted `V02-WI-07` and the v0.2 Epic as a
+**local-only candidate** (`.agent-handoff/evidence/wi07-final-independent-acceptance.json`).
+The Product Owner explicitly accepted Shmup v0.2 as a locally complete version
+on 2026-10-05 with the bounded `V02-DEC-037` exception and deferred physical
+Windows 10 Chrome/Edge validation. This status does not turn the non-zero
+whole-tree `npm audit` in §17.4 into a pass, does not change the dated gate
+results in §§17.1–17.3, and does not certify the reference device. Physical
+validation and reevaluation of the security exception remain required before
+an external playtest or minimum-system-requirement claim. No deployment is
+authorized by local acceptance.

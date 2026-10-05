@@ -134,9 +134,25 @@ The authoritative source is `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION
 | Active-mission recovery and hidden-tab pause | §§14.3–14.4 | V02-AC-018–019 | V02-WI-02 | Covered |
 | Atomic persistence and corrupted-save recovery | §§13.2, 14.1–14.2, 17; V02-DEC-034–035 | V02-AC-020–021 | V02-WI-02 persistence foundation; V02-WI-07 D02-B diagnostics and upgrade-provenance guard | Covered; startup diagnostic and migration-guard ownership explicit |
 | Minimal Combat UI and terminal result UX | §15; Design System §8.26 | V02-AC-022–023 | V02-WI-04 Success; V02-WI-05 alternate outcomes and compatibility-seam removal | Covered; staged boundary explicit |
-| Enemy visual vocabulary and runtime asset contract | §16 | V02-AC-024–025 | V02-WI-01 asset layer; V02-WI-07 final three-mission traversal | Covered; staged evidence ownership explicit |
+| Enemy visual vocabulary and runtime asset contract | §16 | V02-AC-024–025 | V02-WI-01 asset layer; V02-WI-07 final three-mission traversal | Covered; final three-mission production traversal and the asset-failure/fallback contracts are accepted (`V02-WI-07 D04`) |
 | Debug authority | §17 | V02-AC-026 | V02-WI-07 | Covered |
 | Cleanup and repeated missions | §§13, 18, 20 | V02-AC-027 | V02-WI-07 | Covered |
-| Representative performance workloads | §§16, 20.1 | V02-AC-028 | V02-WI-07 | Covered |
+| Representative performance workloads | §§16, 20.1 | V02-AC-028 | V02-WI-07 | Covered; accepted local proxy evidence (`V02-WI-07 D05`: six-record chain, 128/128 comparator checks, delivery audit); physical reference-device validation pending |
 
 The negative requirements in §18 apply to every Work Item. Every handoff must cite its owned AC, relevant negative requirements, preceding accepted revision, and exact verification gates. No v0.2 AC is orphaned.
+
+**D06 coverage audit (2026-09-29):** every `V02-AC-001`–`V02-AC-028` was re-read
+from `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md` §§1–20 against this
+table, the specification's negative requirements in §18, and the accepted
+`V02-WI-01`–`V02-WI-06` revisions plus `V02-WI-07` checkpoints `D01`–`D05`. Each
+criterion has exactly one primary domain row above and one row in
+`verification/v02-wi-07-final-candidate-checklist.md`, which records its source
+section, canonical implementation owner, lowest relevant test or evidence path,
+observed status and any unresolved gate. `V02-AC-011`, `V02-AC-020`, `V02-AC-022`
+and `V02-AC-023` intentionally appear in two domain rows because two normative
+sections constrain them; their single primary ownership is the checklist row, so
+no criterion is orphaned and none is counted twice. No normative v0.2 section in
+§§1–20, and no §18 negative requirement, is left without a covering row or
+checklist entry. Physical Windows 10 Chrome/Edge validation remains pending and
+is recorded as an unresolved gate for the performance rows rather than as a
+product defect.

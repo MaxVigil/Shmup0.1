@@ -1,6 +1,6 @@
 # Shmup v0.2 Tactical Combat Foundation — Implementation Slices
 
-- **Status:** APPROVED — READY FOR SEQUENTIAL DEEPSEEK HANDOFFS
+- **Status:** APPROVED — v0.2 LOCALLY ACCEPTED (2026-10-05); physical reference-device validation pending
 - **Product authority:** `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md`
 - **Traceability:** `MVP_TRACEABILITY_MATRIX_v0.1.md` §8
 - **Decision owner:** Product Owner
@@ -281,29 +281,65 @@ Acceptance evidence:
 - complete source-qualified AC checklist with no orphan requirement;
 - independent final Epic review and explicit Product Owner acceptance.
 
-**WI-07 checkpoint status (2026-09-29):** D04 three-mission production asset
-traversal, including C01–C03 rendering/evidence corrections, is independently
-accepted on implementation candidate HEAD
-`92b0473e2eb1b93ceac856f37039bc7df778fe00`, source fingerprint `31c90de6`,
-dirty-candidate digest `7e7aecc2`, under the Product Owner's bounded
-`V02-DEC-036` verification exception. This is not acceptance of WI-07 or v0.2.
-D05 integrated workloads/delivery audit and D06 documentation/traceability/final
-acceptance package remain outstanding. No implementation handoff, commit,
-push or deployment is authorized by this status record.
+**WI-07 checkpoint status (2026-09-29, D06):** the Epic hardening checkpoints are
+independently accepted: `D01` at revision
+`3f6727d68e70afca6b73d15df97b8d9914e4a314`; `D02-A` and `D02-B` including its
+C01–C02 corrections (`wi07-d02b-acceptance.md`, accepted candidate SHA-256
+`198b0f87…`); `D03` including its C01 verification correction
+(`wi07-d03-acceptance.md`); `D04` three-mission production asset traversal under
+the Product Owner's bounded, `D04`-only `V02-DEC-036` split-gate exception
+(`wi07-d04-independent-acceptance.json`, implementation candidate `92b0473e…`,
+source fingerprint `31c90de6`); and `D05` integrated workloads, the approved
+development-dependency security correction, the production delivery audit and the
+complete six-record comparator chain (`wi07-d05-independent-acceptance.json`,
+uncommitted candidate at HEAD `0c8901d7b3b9c9fd63288b4ca9011846732ee291`, source
+fingerprint `2d4f8f31`, 12/12 required gates, 128/128 comparator checks).
+
+`D06` produced the final documentation, traceability and residual-risk package:
+this document, `MVP_TECHNICAL_FOUNDATION_v0.1.md` §§14–15,
+`MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md` §17,
+`MVP_TRACEABILITY_MATRIX_v0.1.md` §8 and
+`verification/v02-wi-07-final-candidate-checklist.md`. This 2026-09-29 checkpoint
+record preceded the final independent and Product Owner acceptance recorded in §9.
+Physical Windows 10 Chrome/Edge reference-device validation remains **pending**:
+no external playtest or minimum-system-requirement claim is possible from proxy
+evidence. This historical checkpoint record authorized no commit, push, deployment
+or publication.
+
+**WI-07 checkpoint, documentation and security status update (2026-10-01 to
+2026-10-03):** `D06` is independently accepted
+(`wi07-d06-independent-acceptance.json`, 2026-10-01, covering correction
+`D06-C01`), and correction `D06-C02` records the Product Owner's 2026-10-03
+local-only security decision `V02-DEC-037` for the dev-only `braces` advisory
+`GHSA-vfj7-8cjw-p6xm`. Both corrections change documentation only: no code,
+dependency, lockfile, test, build, threshold or accepted `D05`/`D06` evidence input
+changes, and the whole-tree `npm audit` now exits non-zero for that single named
+advisory and is reported as such (`MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md`
+§17.4, `MVP_TECHNICAL_FOUNDATION_v0.1.md` §15). At this dated checkpoint,
+`V02-WI-07` and Shmup v0.2 still required final independent and Product Owner
+acceptance; §9 records their later 2026-10-05 local acceptance. The physical
+Windows 10 Chrome/Edge reference-device gate remains pending.
 
 ## 9. Handoff readiness
 
 `V02-WI-01` through `V02-WI-05` have accepted implementation revisions;
 `V02-WI-05` is accepted at
 `175b5dd6061f7192947a3c6ac4c44bfcb483eea8`. Product Owner approval and
-canonical `V02-DEC-032` now close the final Mission 03 staging gap.
+canonical `V02-DEC-032` close the final Mission 03 staging gap.
 
-`V02-WI-06 E01` is accepted at
-`c4c54771ef952a6cdec061f7bd704936c4efb6c7`. Product Owner approval and
-canonical `V02-DEC-033` close the remaining E02 entry, movement RNG, attack,
-collision, and local-feedback values. `V02-WI-06 E02` is accepted at
-`b68f6de8e5dc644c83acb5ce8b383821e51fabf9`. `V02-WI-06 E03` is the next
-checkpoint ready for one separately authorized handoff. `V02-WI-07` remains
-dependency-blocked until the complete `V02-WI-06` is accepted.
-Starting any later Work Item, combining Work Items, or sending the whole Epic as
-one DeepSeek task violates this plan.
+`V02-WI-06` is accepted: `E01` at
+`c4c54771ef952a6cdec061f7bd704936c4efb6c7`, `E02` at
+`b68f6de8e5dc644c83acb5ce8b383821e51fabf9`, and the completed Elite
+integration and evidence at `707b50b`, which the Product Owner accepted and
+pushed on the `V02-WI-06` branch. Product Owner approval and canonical
+`V02-DEC-033` closed the remaining `E02` entry, movement RNG, attack, collision
+and local-feedback values.
+
+`V02-WI-07` checkpoints `D01`–`D06` and correction `D06-C03` are independently
+accepted (see §8 and `wi07-d06-c03-independent-acceptance.json`). The independent
+final `V02-WI-07`/Epic review accepted the local candidate on 2026-10-05
+(`wi07-final-independent-acceptance.json`), and the Product Owner explicitly
+accepted Shmup v0.2 as a locally complete version on 2026-10-05 under
+`V02-DEC-037`. Physical Windows 10 Chrome/Edge validation remains pending before
+any external playtest or minimum-system-requirement claim. Neither this status
+nor the local acceptance authorizes deployment or a subsequent Epic.

@@ -10,7 +10,13 @@
 **Mission 03 staging decision:** 2026-09-15
 **Elite movement, attack, and collision decisions:** 2026-09-16
 **Repository baseline audited:** `91f2aa29f2783c90af584d95720453a1eabc8c3e`
-**Status:** **APPROVED — V02-WI-06 E02 READY FOR BOUNDED HANDOFF**
+**Status:** **APPROVED — v0.2 LOCALLY ACCEPTED (2026-10-05); physical reference-device validation pending**
+
+**Acceptance boundary:** The Product Owner accepted Shmup v0.2 as a locally complete
+version on 2026-10-05 after independent final Epic review. The bounded
+`V02-DEC-037` dev-only advisory exception remains open. This acceptance is not
+physical Windows 10 Chrome/Edge certification and authorizes no external playtest,
+deployment, or minimum-system-requirement claim.
 
 ## 1. Purpose and authority
 
@@ -1383,6 +1389,7 @@ Unaffected MVP control, movement-bound, deterministic AABB, pause/Settings prece
 | V02-DEC-034 | Approved | Boot save-data causes use development-console diagnostics, not Combat Debug Overlay | failed Boot has no Combat Overlay; generic player error and production silence remain |
 | V02-DEC-035 | Approved | version-1 upgrade requires an unmarked row envelope before C03 migration | conflicting marker cannot be rewritten into playable progress or seed the allocator |
 | V02-DEC-036 | Approved | one-time split verification acceptance for WI-07 D04 | unchanged-candidate passing components count for D04 only; failed aggregate history and final Epic gates remain unchanged |
+| V02-DEC-037 | Approved | one bounded local-only security exception for the dev-only `braces` advisory `GHSA-vfj7-8cjw-p6xm` | whole-tree `npm audit` stays non-zero and is reported as such; runtime audit, every other advisory and every other gate unchanged |
 
 ### 22.1 V02-DEC-036 — bounded D04 verification exception
 
@@ -1409,6 +1416,56 @@ acceptance remain unchanged.
 The split-sequence reports and manual verification records are retained under
 `.agent-handoff/evidence/`; their original candidate identities must not be
 rewritten to include this subsequent decision-only documentation change.
+
+### 22.2 V02-DEC-037 — bounded local-only exception for the dev-only `braces` advisory
+
+**Product Owner approval:** 2026-10-03, granted when the final `V02-WI-07` review
+surfaced the observation below. This decision applies only to the local development
+toolchain of the Shmup v0.2 candidate and to exactly one named advisory.
+
+**Observed fact (2026-10-03, unchanged accepted lockfile).** Whole-tree
+`npm audit` exits non-zero with `braces@3.0.3` (high, `GHSA-vfj7-8cjw-p6xm`,
+CVE-2026-93687, CWE-674 uncontrolled recursion, availability-only stack-exhaustion
+denial of service) reached only through `stylelint@17.14.1` > `micromatch@4.0.8` >
+`braces`. npm reports seven entries — `braces`, `micromatch`, `fast-glob`, `globby`,
+`stylelint`, `stylelint-config-recommended`, `stylelint-config-standard` — because
+this single root advisory propagates through that one chain; they are **not** seven
+independent root defects. The official advisory lists affected versions `<= 3.0.3`
+with no patched release (published 2026-09-18, reviewed 2026-10-02), and the
+registry's latest `braces` release is `3.0.3`, so no compatible repair exists; the
+only offered fix is a breaking `stylelint` downgrade, which is not applied.
+`npm audit --omit=dev` exits `0` with zero runtime vulnerabilities, and the
+previously approved `brace-expansion` `5.0.12` and `fast-uri` `3.1.8` repairs and
+the accepted `undici` `8.11.2` entry are unchanged.
+
+**Decision.** For local Shmup v0.2 candidate acceptance only, this named advisory in
+this dev-only dependency path is an accepted, owned exception to the requirement
+that the whole-tree `npm audit` command pass. Consequences:
+
+1. the whole-tree `npm audit` command remains **non-zero** and every report must
+   state that fact; it is never recorded as a passing gate and no command output is
+   rewritten;
+2. the exception covers no other advisory, no runtime or `--omit=dev` finding, no
+   failed test, no new dependency, no future lockfile change, no external playtest,
+   no deployment and no minimum-system-requirement claim;
+3. no `npm audit fix`, `--force`, override, suppression flag or alternative audit
+   threshold may be used to produce a green command, and `package.json`,
+   `package-lock.json` and every direct pin remain exactly as accepted;
+4. the physical Windows 10 Chrome/Edge reference-device gate remains pending
+   independently of this decision;
+5. this decision must be reevaluated before any external playtest or
+   minimum-system-requirement claim, whenever a patched `braces` release becomes
+   available, or if a new advisory, a runtime finding, or a materially changed
+   advisory state appears; that reevaluation, not this decision, closes the item.
+
+The 2026-10-01 zero-vulnerability audit remains the correct historical fact for the
+lockfile accepted by `V02-WI-07 D05`; the 2026-10-03 non-zero result dates a
+subsequently published advisory on that same lockfile. Neither record rewrites the
+other.
+
+This decision records a bounded local-only exception. It does not accept
+`V02-WI-07`, the Epic or Shmup v0.2, does not relax any other verification gate,
+and establishes no permanent verification policy.
 
 ## 23. Consistency and Definition of Ready audit
 

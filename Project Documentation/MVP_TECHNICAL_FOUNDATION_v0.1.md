@@ -302,3 +302,103 @@ For `V02-WI-02` only, the Product Owner approved exactly pinned `dexie@4.4.5` as
 This approval does not authorize another persistence dependency, backend, cloud sync, multiple save slots, or mid-Combat restoration.
 
 **APPROVED CONTRACT (2026-09-24; V02-DEC-035, pending V02-WI-07 D02-B-C02 implementation):** the version-1 → version-2 upgrade may promote a valid C03 campaign only when the version-1 row envelope has no own `rowFormatVersion` property. An explicit marker of any value is conflicting provenance even if the campaign fields validate; the upgrade leaves that row and the allocator untouched for the existing Save Data Error path. This is a guard at the existing Dexie upgrade owner, not a new schema version, dependency, or data-repair feature.
+
+**STATUS (V02-WI-07 D06 reconciliation, 2026-09-29):** the installed Dexie state above is no longer a candidate, and the `V02-DEC-035` guard is no longer pending. `V02-WI-02` and its approved persistence-contract expansion were independently accepted, and `V02-WI-07 D02-A`/`D02-B` including the C01–C02 corrections independently accepted the version-1 → version-2 promotion guard (`wi07-d02b-acceptance.md`): the shared own-property `rowFormatVersion` provenance guard runs before the migration write or allocator seed, a marked version-1 row stays invalid and byte-for-structure untouched, and a genuinely unmarked valid C03 row still migrates with Campaign, Settings and monotonic attempt allocation preserved. The current tree installs exactly `dexie@4.4.5`; `npm ci`, `npm audit` and `npm run verify:all` passed on the `V02-WI-07` `D05` candidate accepted for that checkpoint and on the `V02-WI-07` `D06` final candidate, whose gates passed on **2026-10-01** with whole-tree and runtime-only `npm audit` reporting zero findings then, and whose checkpoint including correction `D06-C01` was independently accepted on 2026-10-01 (`wi07-d06-independent-acceptance.json`). The current **2026-10-03** whole-tree `npm audit` is non-zero for one subsequently published dev-only advisory under the bounded local-only `V02-DEC-037` exception recorded in §15; the runtime-only audit stays zero. This record authorizes no further persistence dependency, schema version, backend, cloud sync or data-repair feature.
+
+## 15. Approved D05 development-dependency security correction
+
+**Product Owner approval (2026-09-29):** within `V02-WI-07-D05-C01`,
+authorize the smallest lockfile-only refresh of the existing dev-only transitive
+`undici` dependency of `jsdom@30.0.1` to `8.10.2` or a compatible patched
+`8.x` version. This addresses
+[`GHSA-3wwx-pv8p-q78v`](https://github.com/advisories/GHSA-3wwx-pv8p-q78v).
+The currently locked `8.10.0` is affected; this is not an installed-fix claim.
+
+Keep `package.json`, all direct dependency pins, Node/npm versions and runtime
+dependencies unchanged. Do not use `--force`, introduce overrides or apply
+unrelated package updates. If the refresh cannot be limited to the named
+compatible dependency, report the necessary expansion before applying it.
+Inspect the exact lockfile diff, resolved version/integrity, licence and engine
+compatibility; record the new source fingerprint and run `npm ci`, `npm audit`,
+focused regressions and the complete D05 sequence against that final candidate.
+
+The same approved correction preserves the single-attempt legacy runner repair,
+adds truthful persistence of the current failed measurement before its budget
+assertions, and runs Elite Pass B before the legacy command's embedded
+all-record comparison. Workloads, sample windows, assertions and performance
+floors are unchanged. No advisory waiver, D04-only verification exception,
+dependency-matrix redesign, final Epic acceptance, commit, push or deployment
+is authorized.
+
+**STATUS (V02-WI-07 D05–D06 delivered fact, 2026-09-29):** the approved refresh
+was delivered and independently accepted in `V02-WI-07-D05`. `package-lock.json`
+pins the dev-only transitive `undici` at `8.11.2` — a compatible patched `8.x`
+inside `jsdom@30.0.1`'s declared `^8.9.0` range (npm 11 rejects a
+version-pinned `npm update` argument, so the approved compatible-`8.x`
+alternative was used with npm's own resolution; the MIT licence and the
+`node >=22.19.0` engine requirement are unchanged from `8.10.0`).
+`package.json`, every direct dependency pin, the Node/npm versions and all
+runtime dependencies are unchanged, the exact lockfile diff is three lines for
+that single entry, and no `--force`, override or unrelated package update was
+applied. `npm ci` installs `8.11.2`, and both `npm audit` and
+`npm audit --omit=dev` report zero vulnerabilities; the D05 acceptance record
+(`wi07-d05-independent-acceptance.json`) confirms the current lockfile content
+and the clean audit. This status reports a delivered fact only: it waives no
+advisory, changes no dependency-matrix decision, and authorizes no dependency
+addition, removal or upgrade.
+
+**STATUS (2026-09-30, `V02-WI-07 D06` gate observation):** the
+zero-vulnerability result above is the independently accepted 2026-09-29 fact for
+this lockfile. The `D06` final-gate audit on the same unmodified lockfile reports
+two newly published advisories in *other*, dev-only transitive toolchain
+dependencies — `brace-expansion` 5.0.9 (high, via `eslint@10.8.1` >
+`minimatch@10.2.6`) and `fast-uri` 3.1.7 (moderate, via `stylelint@17.14.1` >
+`table@6.9.0` > `ajv@8.20.0`) — while `npm audit --omit=dev` still reports zero
+runtime vulnerabilities. `package.json`, every direct pin and the runtime
+dependency set are unchanged, and the `undici` repair above is untouched. The
+failed gate is recorded in `MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md` §17.1 and
+was, at that time, blocked pending an authorized dependency/lockfile decision —
+a **historical** state that the Product Owner authorization recorded below
+resolved; this note changed no approval and relaxed no gate.
+
+**STATUS (2026-10-01, Product Owner authorization and delivered replacement):**
+the Product Owner authorized the recommended bounded lockfile-only refresh of
+exactly those two dev-only transitive toolchain dependencies. `package-lock.json`
+now pins `brace-expansion` at `5.0.12` (inside its parent range
+`minimatch@10.2.6 > ^5.0.8`) and `fast-uri` at `3.1.8` (inside
+`table@6.9.0 > ajv@8.20.0 > ^3.0.1`); both remain `dev` dependencies with
+unchanged licences and engine requirements. No `--force`, override or unrelated
+package update was applied, `package.json` and every direct pin are unchanged,
+and the refresh changes exactly those two lockfile entries. `npm ci` installs
+both patched versions and both `npm audit` and `npm audit --omit=dev` report zero
+vulnerabilities. The accepted `undici` `8.11.2` repair above is untouched and
+remains independently accepted.
+
+**STATUS (2026-10-03, dev-only `braces` advisory and the approved local-only
+exception):** the zero-vulnerability result above remains the correct historical
+fact for that date and lockfile. On that same unchanged lockfile, whole-tree
+`npm audit` now exits non-zero for one subsequently published advisory reached
+through a single chain: `braces@3.0.3` (high, `GHSA-vfj7-8cjw-p6xm` /
+CVE-2026-93687) via `stylelint@17.14.1` > `micromatch@4.0.8` > `braces`. npm lists
+seven affected entries (`braces`, `micromatch`, `fast-glob`, `globby`, `stylelint`,
+`stylelint-config-recommended`, `stylelint-config-standard`) for that one root
+advisory; they must not be counted as seven independent root defects. The official
+advisory reports affected versions `<= 3.0.3` with no patched release and the
+registry's latest `braces` is `3.0.3`, so no compatible repair exists, and the only
+offered fix — a breaking `stylelint` downgrade — is not applied. `npm audit
+--omit=dev` still exits `0` with zero runtime vulnerabilities, and the approved
+`brace-expansion` `5.0.12` and `fast-uri` `3.1.8` repairs and the accepted `undici`
+`8.11.2` entry are unchanged: `package.json`, every direct pin and all other
+lockfile entries were not modified for this observation.
+
+The Product Owner's 2026-10-03 decision is recorded canonically as `V02-DEC-037`
+(`SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md` §22.2) and reflected as
+status in `MVP_VERIFICATION_AND_QUALITY_GATES_v0.1.md` §17.4: exactly this named
+advisory, in this dev-only dependency path, is an accepted owned exception for
+local v0.2 candidate acceptance only. The whole-tree `npm audit` command remains
+non-zero and must be reported as such. This status waives no other advisory, no
+runtime finding, no failed test and no dependency or lockfile change, and it
+authorizes no dependency addition, removal or upgrade, commit, push, deployment or
+publication. The exception must be reevaluated before any external playtest or
+minimum-system-requirement claim and whenever a patched release or a materially
+changed advisory state appears.
