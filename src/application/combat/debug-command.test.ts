@@ -546,14 +546,16 @@ describe('S13/V02-WI-07 Debug: per-type spawn controls (Combat §11.5, Epic §17
       type: 'combat-debug/spawn-encounter',
       encounterId: 'interception-01-e1',
     });
-    // e1 (10 s) is the authored opening Encounter: 4 Basics at the authored
-    // placements, appended without advancing mission time or consuming the
-    // mission-data stream's Hunter draws. The spawned groups are consumed by
-    // removal from the plan (the cursor points at the first still-scheduled
-    // group).
-    expect(forced.enemies.length).toBe(state.enemies.length + 4);
+    // e1 (00:04) is the authored opening Encounter: 7 §2.1 blocks = 92 Basics
+    // (`B16`, four `B12`, `B16`, `B12`) at the authored placements, appended
+    // without advancing mission time or consuming the mission-data stream's
+    // draws (every §2.1 Mission 01 member is a Top or fixed-side Placement). The
+    // spawned groups (the 23 authored Arrival Groups of those seven blocks) are
+    // consumed by removal from the plan (the cursor points at the first
+    // still-scheduled group).
+    expect(forced.enemies.length).toBe(state.enemies.length + 92);
     expect(forced.missionTimeSeconds).toBe(state.missionTimeSeconds);
-    expect(forced.arrivalGroups).toHaveLength(state.arrivalGroups.length - 1);
+    expect(forced.arrivalGroups).toHaveLength(state.arrivalGroups.length - 23);
     expect(
       forced.arrivalGroups.every(
         (group) => group.encounterId !== 'interception-01-e1',
@@ -573,11 +575,11 @@ describe('S13/V02-WI-07 Debug: per-type spawn controls (Combat §11.5, Epic §17
       type: 'combat-debug/spawn-encounter',
       encounterId: 'interception-01-e5',
     });
-    // e5 is the final (03:10) Encounter: 3 Basic + 1 Ranged + 1 Hunter. The
-    // previous implementation silently no-opped here (the cursor only walked
-    // the next scheduled encounter), which is why the C01 visual evidence was
-    // false-green.
-    expect(forced.enemies.length).toBe(state.enemies.length + 5);
+    // e5 is the final Encounter (03:08.70, last member 03:10.00): one §2.1
+    // BRH14 block = 8 Basic + 4 Ranged + 2 fixed-side Hunter. The previous
+    // implementation silently no-opped here (the cursor only walked the next
+    // scheduled encounter), which is why the C01 visual evidence was false-green.
+    expect(forced.enemies.length).toBe(state.enemies.length + 14);
     const roles = forced.enemies
       .slice(state.enemies.length)
       .map((enemy) => enemy.type)
@@ -586,7 +588,16 @@ describe('S13/V02-WI-07 Debug: per-type spawn controls (Combat §11.5, Epic §17
       'basic-drone',
       'basic-drone',
       'basic-drone',
+      'basic-drone',
+      'basic-drone',
+      'basic-drone',
+      'basic-drone',
+      'basic-drone',
       'hunter-drone',
+      'hunter-drone',
+      'ranged-drone',
+      'ranged-drone',
+      'ranged-drone',
       'ranged-drone',
     ]);
     expect(
@@ -774,7 +785,9 @@ describe('V02-WI-07 Debug: Elite phase controls (Epic §17, V02-AC-026)', () => 
     // attack timer, so the Debug action can never leave a parallel/old timer.
     expect(elite.phaseStepsElapsed).toBe(0);
     expect(elite.phaseStepsRemaining).toBe(360);
-    expect(elite.attackStepsRemaining).toBe(150);
+    // A newly entered Vulnerable phase owns the fresh 30-step first-Core timer
+    // (patch §3.1, V021-DEC-004).
+    expect(elite.attackStepsRemaining).toBe(30);
     // Re-entering the phase it already owns is a strict no-op.
     const repeated = debug(vulnerable, {
       type: 'combat-debug/set-elite-phase',

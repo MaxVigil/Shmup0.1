@@ -128,12 +128,16 @@ interface RouteStep {
 }
 
 /**
- * The assigned five-mission route. Each Debug Encounter is authored well after
- * the moment the baseline is captured and is never the mission's final Encounter,
- * so the natural authored schedule keeps its cursor and the live baseline is
- * exact rather than an approximation. The two Evacuations are the missions whose
+ * The assigned five-mission route. Each Debug Encounter is never the mission's
+ * final Encounter, and the composition assertion compares the per-role delta of
+ * the exact `beforeSpawn`/`liveBaseline` snapshots taken around the one
+ * authoritative Debug command, so a naturally staged neighbour cannot make the
+ * live baseline an approximation. The two Evacuations are the missions whose
  * committed five-second countdown must not be lost, so their spawned Encounter
- * holds no lethal contact threat (Basic/Ranged only).
+ * holds no lethal contact threat: Interception 02 evacuates on its Basic-only
+ * e1 (§2.2 `B16` blocks, no Ranged or Hunter), because the approved v0.2.1 §2.2
+ * e3 now stages four fixed-side Hunters and 24 Ranged; Interception 03 keeps
+ * its unchanged single-scheduled Basic e2.
  */
 const ROUTE: readonly RouteStep[] = [
   {
@@ -141,16 +145,24 @@ const ROUTE: readonly RouteStep[] = [
     terminal: 'success',
     encounterLabel: 'Spawn E4',
     encounterId: 'interception-01-e4',
-    encounterComposition: { 'basic-drone': 3, 'hunter-drone': 1 },
+    // v0.2.1 §2.1: `BR12` + `BRH14` + `BR18` + `BR12` + `BRH14` + `BR18` + `BR12`.
+    encounterComposition: {
+      'basic-drone': 74,
+      'ranged-drone': 22,
+      'hunter-drone': 4,
+    },
     completionReward: 8,
     unlocksMissionId: 'interception-02',
   },
   {
     missionId: 'interception-02',
     terminal: 'evacuation',
-    encounterLabel: 'Spawn E3',
-    encounterId: 'interception-02-e3',
-    encounterComposition: { 'basic-drone': 2, 'ranged-drone': 2 },
+    encounterLabel: 'Spawn E1',
+    encounterId: 'interception-02-e1',
+    // v0.2.1 §2.2: five `B16` blocks = 80 Basic, the only Interception 02
+    // Encounter whose authored content is free of any projectile or Hunter
+    // contact threat.
+    encounterComposition: { 'basic-drone': 80 },
     completionReward: 12,
     unlocksMissionId: 'interception-03',
   },
@@ -159,10 +171,11 @@ const ROUTE: readonly RouteStep[] = [
     terminal: 'defeat',
     encounterLabel: 'Spawn E5',
     encounterId: 'interception-02-e5',
+    // v0.2.1 §2.2: 4×`R4-12` + `H4-12` + `B16`.
     encounterComposition: {
-      'basic-drone': 1,
-      'ranged-drone': 1,
-      'hunter-drone': 1,
+      'basic-drone': 56,
+      'ranged-drone': 16,
+      'hunter-drone': 4,
     },
     completionReward: 12,
     unlocksMissionId: 'interception-03',
@@ -172,7 +185,12 @@ const ROUTE: readonly RouteStep[] = [
     terminal: 'success',
     encounterLabel: 'Spawn E4',
     encounterId: 'interception-02-e4',
-    encounterComposition: { 'basic-drone': 4 },
+    // v0.2.1 §2.2: 2×`H4-12` + 3×`R4-12` + `R4-16` + `RH6-16`.
+    encounterComposition: {
+      'basic-drone': 58,
+      'ranged-drone': 20,
+      'hunter-drone': 14,
+    },
     completionReward: 12,
     unlocksMissionId: 'interception-03',
   },
@@ -181,7 +199,7 @@ const ROUTE: readonly RouteStep[] = [
     terminal: 'evacuation',
     encounterLabel: 'Spawn E2',
     encounterId: 'interception-03-e2',
-    encounterComposition: { 'basic-drone': 3 },
+    encounterComposition: { 'basic-drone': 52, 'ranged-drone': 20 },
     completionReward: 16,
     unlocksMissionId: null,
   },

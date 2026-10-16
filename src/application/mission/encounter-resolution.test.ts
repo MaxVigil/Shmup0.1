@@ -6,10 +6,7 @@ import {
   INTERCEPTION_03,
   MISSIONS,
 } from '@content/index';
-import {
-  resolveMissionEncounters,
-  type ResolvedSpawnPlacement,
-} from './encounter-resolution';
+import { resolveMissionEncounters } from './encounter-resolution';
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const SEED = 0xdeadbeef;
@@ -38,20 +35,22 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
       'interception-01-e5',
     ]);
     expect(plan.encounters.map((e) => e.timeSeconds)).toEqual([
-      10, 55, 100, 140, 190,
+      4, 55, 100, 140, 188.7,
     ]);
+    // v0.2.1 patch §2.1 (V021-AC-002): e5 opens at 03:08.70 and its last
+    // authored row lands on exactly 03:10, so the final arrival is still 03:10.
     expect(plan.finalArrivalTimeSeconds).toBe(190);
     expect(plan.finalArrivalStepIndex).toBe(
       Math.round(190 / FIXED_STEP_SECONDS),
     );
     // Compositions are the authored data, unchanged by the seed.
     expect(plan.encounters[0]?.composition).toEqual([
-      { type: 'basic-drone', count: 4 },
+      { type: 'basic-drone', count: 92 },
     ]);
     expect(plan.encounters[4]?.composition).toEqual([
-      { type: 'basic-drone', count: 3 },
-      { type: 'ranged-drone', count: 1 },
-      { type: 'hunter-drone', count: 1 },
+      { type: 'basic-drone', count: 8 },
+      { type: 'ranged-drone', count: 4 },
+      { type: 'hunter-drone', count: 2 },
     ]);
     // Typed entry/formation/delay data passes through unchanged: role-level
     // delays carry the delayed role, and entry regions are explicitly absent
@@ -59,65 +58,260 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
     expect(plan.encounters[0]).toMatchObject({
       entryRegion: 'top',
       entryVariants: null,
-      formation: 'wide-top',
+      formation: 'authored-stagger',
       roleDelays: [],
     });
-    expect(plan.encounters[1]).toMatchObject({
-      entryRegion: null,
-      formation: 'centred-behind-basics',
-      roleDelays: [{ type: 'ranged-drone', delaySeconds: 2 }],
-    });
-    expect(plan.encounters[3]).toMatchObject({
-      formation: null,
-      roleDelays: [{ type: 'hunter-drone', delaySeconds: 3 }],
-    });
-    // e4/e5 are seeded Hunter encounters (V02-WI-04): their entry region is
-    // resolved from the mission-data stream in authored order.
-    expect(['upper-left', 'upper-right']).toContain(
-      plan.encounters[3]?.entryRegion,
-    );
-    expect(['upper-left', 'upper-right']).toContain(
-      plan.encounters[4]?.entryRegion,
-    );
-    // Fixed encounters carry no seeded variant set.
-    expect(plan.encounters[0]?.entryVariants).toBeNull();
+    // §2.1 authors every Mission 01 Encounter itself, so no role delay and no
+    // seeded entry variant survives (V021-AC-002).
+    for (const encounter of plan.encounters) {
+      expect(encounter.entryVariants).toBeNull();
+      expect(encounter.roleDelays).toEqual([]);
+      expect(encounter.formation).toBe('authored-stagger');
+    }
+    expect(plan.encounters.map((e) => e.entryRegion)).toEqual([
+      'top',
+      'top',
+      null,
+      null,
+      null,
+    ]);
   });
 
-  it('resolves the exact Mission 01 Arrival Groups with normalized placements (V02-DEC-021, V02-AC-003)', () => {
+  it('resolves the exact Mission 01 Arrival Groups with normalized placements and only the three preserved mission-data draws (V02-DEC-021, V02-AC-003)', () => {
     const plan = resolveMissionEncounters(
       INTERCEPTION_01,
       SEED,
       FIXED_STEP_SECONDS,
     );
-    // e2: +0 s two Top Basics and +2 s one Top Ranged at fraction 0.5.
-    const e2 = plan.encounters[1];
-    expect(e2?.staging?.map((group) => group.stepIndex)).toEqual([
-      Math.round(55 / FIXED_STEP_SECONDS),
-      Math.round(57 / FIXED_STEP_SECONDS),
+    const step = (seconds: number): number =>
+      Math.round(seconds / FIXED_STEP_SECONDS);
+    // v0.2.1 patch §2.1 authors 23 + 18 + 15 + 21 + 3 = 80 Arrival Groups, each
+    // on the fixed step of its block start (rows inside a block are the authored
+    // 0.65 s = 39 steps apart).
+    expect(
+      plan.encounters.map((encounter) => encounter.staging?.length),
+    ).toEqual([23, 18, 15, 21, 3]);
+    // e1 (00:04): B16, B12 at 00:04 / 00:10 / 00:18 / 00:26 / 00:34, B16 at
+    // 00:42 and B12 at 00:50 — a 4-row block then six 3-row blocks.
+    expect(
+      plan.encounters[0]?.staging?.map((group) => group.stepIndex),
+    ).toEqual([
+      step(4),
+      step(4.65),
+      step(5.3),
+      step(5.95),
+      step(10),
+      step(10.65),
+      step(11.3),
+      step(18),
+      step(18.65),
+      step(19.3),
+      step(26),
+      step(26.65),
+      step(27.3),
+      step(34),
+      step(34.65),
+      step(35.3),
+      step(42),
+      step(42.65),
+      step(43.3),
+      step(43.95),
+      step(50),
+      step(50.65),
+      step(51.3),
     ]);
-    expect(e2?.staging?.[1]?.members).toEqual([
+    // e2 (00:55): BR12 at 00:55 / 01:03 / 01:11 / 01:19, B12 at 01:27 and
+    // BR12 at 01:35 — six 3-row blocks, so Basic visibly leads Ranged.
+    expect(
+      plan.encounters[1]?.staging?.map((group) => group.stepIndex),
+    ).toEqual([
+      step(55),
+      step(55.65),
+      step(56.3),
+      step(63),
+      step(63.65),
+      step(64.3),
+      step(71),
+      step(71.65),
+      step(72.3),
+      step(79),
+      step(79.65),
+      step(80.3),
+      step(87),
+      step(87.65),
+      step(88.3),
+      step(95),
+      step(95.65),
+      step(96.3),
+    ]);
+    // e3 (01:40): BRH14, BR18, BR12 at 01:40 / 01:48 / 01:56, then BRH14 at
+    // 02:04 and BR12 at 02:12 — the first Mission 01 Ranged/Hunter members and
+    // the two symmetric `fixed-side` Hunters appear at 01:40.
+    expect(
+      plan.encounters[2]?.staging?.map((group) => group.stepIndex),
+    ).toEqual([
+      step(100),
+      step(100.65),
+      step(101.3),
+      step(108),
+      step(108.65),
+      step(109.3),
+      step(116),
+      step(116.65),
+      step(117.3),
+      step(124),
+      step(124.65),
+      step(125.3),
+      step(132),
+      step(132.65),
+      step(133.3),
+    ]);
+    // e4 (02:20): BR12, BRH14, BR18, BR12, BRH14, BR18, BR12 at
+    // 02:20 / 02:27 / 02:34 / 02:41 / 02:48 / 02:55 / 03:02.
+    expect(
+      plan.encounters[3]?.staging?.map((group) => group.stepIndex),
+    ).toEqual([
+      step(140),
+      step(140.65),
+      step(141.3),
+      step(147),
+      step(147.65),
+      step(148.3),
+      step(154),
+      step(154.65),
+      step(155.3),
+      step(161),
+      step(161.65),
+      step(162.3),
+      step(168),
+      step(168.65),
+      step(169.3),
+      step(175),
+      step(175.65),
+      step(176.3),
+      step(182),
+      step(182.65),
+      step(183.3),
+    ]);
+    // e5 (03:08.70): the single BRH14 block, whose last row closes 03:10.
+    expect(
+      plan.encounters[4]?.staging?.map((group) => group.stepIndex),
+    ).toEqual([step(188.7), step(189.35), step(190)]);
+    expect(plan.finalArrivalStepIndex).toBe(step(190));
+    // Placements are normalized fractions, never pixels: e1 row 0 is a
+    // four-column Top row ...
+    expect(plan.encounters[0]?.staging?.[0]?.members).toEqual([
       {
-        type: 'ranged-drone',
-        placement: { kind: 'top', engagementBandFraction: 0.5 },
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.32 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.44 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.56 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.68 },
       },
     ]);
-    // e3/e4/e5 seeded-side Hunters resolve to their drawn side at 20% VH.
-    for (const index of [2, 3, 4]) {
-      const members = plan.encounters[index]?.staging?.flatMap(
-        (group) => group.members,
-      );
-      const hunter = members?.find((member) => member.type === 'hunter-drone');
-      expect(hunter?.placement.kind).toBe('side');
-      if (hunter?.placement.kind === 'side') {
-        expect(hunter.placement.yViewportFraction).toBe(0.2);
-        expect(['upper-left', 'upper-right']).toContain(hunter.placement.side);
-      }
-    }
-    // Top Placements consume zero draws: only the three seeded Hunter draws
-    // occurred, in e3 → e4 → e5 order (the e5 member side matches e5's region).
-    expect(plan.encounters[4]?.staging?.[0]?.members[4]?.placement.kind).toBe(
-      'side',
-    );
+    // ... and e3's BR18 block (01:48) is the six-column Top Basic row
+    // (§2.1 Layout).
+    expect(plan.encounters[2]?.staging?.[3]?.members).toEqual([
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.25 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.35 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.45 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.55 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.65 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.75 },
+      },
+    ]);
+    // e5 row 0: four Top Basics plus the two §2.1 `fixed-side` Hunters at 0.2 —
+    // the patch's Basic-leads-Ranged screening order.
+    expect(plan.encounters[4]?.staging?.[0]?.members).toEqual([
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.32 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.44 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.56 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.68 },
+      },
+      {
+        type: 'hunter-drone',
+        placement: {
+          kind: 'side',
+          side: 'upper-left',
+          yViewportFraction: 0.2,
+        },
+      },
+      {
+        type: 'hunter-drone',
+        placement: {
+          kind: 'side',
+          side: 'upper-right',
+          yViewportFraction: 0.2,
+        },
+      },
+    ]);
+    // e5 row 2 is the block's four Top Ranged members.
+    expect(plan.encounters[4]?.staging?.[2]?.members).toEqual([
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.32 },
+      },
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.44 },
+      },
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.56 },
+      },
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.68 },
+      },
+    ]);
+    // Zero mission-data draws (V021-AC-002): §2.1 authors every Mission 01
+    // member as a Top row or a `fixed-side` Hunter, so the mission-data stream
+    // is never consumed — an unrelated mission seed must resolve the same plan.
+    const unrelatedSeed = createMissionDataStream(SEED).nextInt(0x7fffffff);
+    expect(
+      resolveMissionEncounters(
+        INTERCEPTION_01,
+        unrelatedSeed,
+        FIXED_STEP_SECONDS,
+      ),
+    ).toEqual(plan);
   });
 
   it('preserves the delayed-role association for the V02-WI-04 consumer (C02)', () => {
@@ -126,15 +320,17 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
       SEED,
       FIXED_STEP_SECONDS,
     );
-    // Ranged +2 s belongs to the Ranged role of M01 e2, never the encounter as
-    // a whole; Hunter +3 s belongs to the Hunter role of M01 e4.
-    expect(plan.encounters[1]?.roleDelays).toEqual([
-      { type: 'ranged-drone', delaySeconds: 2 },
+    // v0.2.1 patch §2.1 replaces the v0.2 role delays (M01 e2 Ranged +2 s, M01
+    // e4 Hunter +3 s) with explicit staged rows, so no Mission 01 Encounter
+    // carries a delay any more: every member's timing is its authored row
+    // offset. Role-delay pass-through stays covered by the Mission 03 test.
+    expect(plan.encounters.map((encounter) => encounter.roleDelays)).toEqual([
+      [],
+      [],
+      [],
+      [],
+      [],
     ]);
-    expect(plan.encounters[3]?.roleDelays).toEqual([
-      { type: 'hunter-drone', delaySeconds: 3 },
-    ]);
-    expect(plan.encounters[0]?.roleDelays).toEqual([]);
   });
 
   it('is identical for identical explicit inputs (V02-AC-003)', () => {
@@ -151,7 +347,7 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
     expect(second).toEqual(first);
   });
 
-  it('resolves the exact Mission 02 Arrival Groups and three mission-data draws in e4 → e5 → e6 order (V02-DEC-026, V02-AC-003)', () => {
+  it('resolves the exact Mission 02 Arrival Groups with fully authored placements and zero mission-data draws (V021-AC-002, V02-AC-003)', () => {
     const seed = SEED;
     const plan = resolveMissionEncounters(
       INTERCEPTION_02,
@@ -168,74 +364,207 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
       'interception-02-e6',
     ]);
     expect(plan.encounters.map((e) => e.timeSeconds)).toEqual([
-      10, 50, 100, 150, 200, 260,
+      10, 50, 100, 150, 200, 244,
     ]);
+    // The last authored row closes at exactly 04:20, so the final member step is
+    // 04:20 even though e6 itself opens at 04:04.
     expect(plan.finalArrivalTimeSeconds).toBe(260);
     expect(plan.finalArrivalStepIndex).toBe(
       Math.round(260 / FIXED_STEP_SECONDS),
     );
     const step = (seconds: number): number =>
       Math.round(seconds / FIXED_STEP_SECONDS);
-    // e4: +0 s three Top Basics and +2 s the seeded-side Basic flank.
+    // v0.2.1 patch §2.2 authors 20 + 24 + 23 + 19 + 18 + 8 = 112 Arrival Groups.
+    expect(
+      plan.encounters.map((encounter) => encounter.staging?.length),
+    ).toEqual([20, 24, 23, 19, 18, 8]);
+    // e4 (02:30): H4-12, R4-12, RH6-16, R4-12, R4-16, H4-12, R4-12 at
+    // 02:30 / 02:37 / 02:44 / 02:51 / 02:58 / 03:05 / 03:12.
     expect(
       plan.encounters[3]?.staging?.map((group) => group.stepIndex),
-    ).toEqual([step(150), step(152)]);
-    expect(plan.encounters[3]?.staging?.[1]?.members).toHaveLength(1);
-    expect(plan.encounters[3]?.staging?.[1]?.members[0]).toMatchObject({
+    ).toEqual([
+      step(150),
+      step(150.65),
+      step(157),
+      step(157.65),
+      step(158.3),
+      step(164),
+      step(164.65),
+      step(171),
+      step(171.65),
+      step(172.3),
+      step(178),
+      step(178.65),
+      step(179.3),
+      step(179.95),
+      step(185),
+      step(185.65),
+      step(192),
+      step(192.65),
+      step(193.3),
+    ]);
+    // e4 row 0: the symmetric `fixed-side` H4-12 group — four Top Basics plus
+    // four Hunters, two per side, on the single 02:30 step.
+    expect(plan.encounters[3]?.staging?.[0]?.members).toEqual([
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.32 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.44 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.56 },
+      },
+      {
+        type: 'basic-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.68 },
+      },
+      {
+        type: 'hunter-drone',
+        placement: {
+          kind: 'side',
+          side: 'upper-left',
+          yViewportFraction: 0.15,
+        },
+      },
+      {
+        type: 'hunter-drone',
+        placement: {
+          kind: 'side',
+          side: 'upper-left',
+          yViewportFraction: 0.25,
+        },
+      },
+      {
+        type: 'hunter-drone',
+        placement: {
+          kind: 'side',
+          side: 'upper-right',
+          yViewportFraction: 0.15,
+        },
+      },
+      {
+        type: 'hunter-drone',
+        placement: {
+          kind: 'side',
+          side: 'upper-right',
+          yViewportFraction: 0.25,
+        },
+      },
+    ]);
+    // e4 group 5 is the first RH6-16 row: a six-column Top Basic row plus the
+    // six symmetric `fixed-side` Hunters, all created on the single 02:44 step.
+    expect(plan.encounters[3]?.staging?.[5]?.members).toHaveLength(12);
+    expect(plan.encounters[3]?.staging?.[5]?.members[0]).toEqual({
       type: 'basic-drone',
-      placement: { kind: 'side', yViewportFraction: 0.25 },
+      placement: { kind: 'top', engagementBandFraction: 0.25 },
     });
-    // e5: +0 s Basic, +1 s Ranged, +2 s seeded-side Hunter.
+    expect(plan.encounters[3]?.staging?.[5]?.members[6]).toEqual({
+      type: 'hunter-drone',
+      placement: {
+        kind: 'side',
+        side: 'upper-left',
+        yViewportFraction: 0.1,
+      },
+    });
+    expect(plan.encounters[3]?.staging?.[5]?.members[11]).toEqual({
+      type: 'hunter-drone',
+      placement: {
+        kind: 'side',
+        side: 'upper-right',
+        yViewportFraction: 0.3,
+      },
+    });
+    // e5 (03:20): R4-12 at 03:20 / 03:27 / 03:34, H4-12 at 03:42, R4-12 at
+    // 03:49 and B16 at 03:56.
     expect(
       plan.encounters[4]?.staging?.map((group) => group.stepIndex),
-    ).toEqual([step(200), step(201), step(202)]);
-    expect(plan.encounters[4]?.staging?.[2]?.members[0]).toMatchObject({
-      type: 'hunter-drone',
-      placement: { kind: 'side', yViewportFraction: 0.2 },
-    });
-    // e6: single 04:20 creation step with both Top Basics plus the Hunter.
+    ).toEqual([
+      step(200),
+      step(200.65),
+      step(201.3),
+      step(207),
+      step(207.65),
+      step(208.3),
+      step(214),
+      step(214.65),
+      step(215.3),
+      step(222),
+      step(222.65),
+      step(229),
+      step(229.65),
+      step(230.3),
+      step(236),
+      step(236.65),
+      step(237.3),
+      step(237.95),
+    ]);
+    // The e5 H4-12 group (index 9) is the third symmetric 4-Hunter group.
+    expect(
+      plan.encounters[4]?.staging?.[9]?.members.map((member) => [
+        member.type,
+        member.placement.kind,
+      ]),
+    ).toEqual([
+      ['basic-drone', 'top'],
+      ['basic-drone', 'top'],
+      ['basic-drone', 'top'],
+      ['basic-drone', 'top'],
+      ['hunter-drone', 'side'],
+      ['hunter-drone', 'side'],
+      ['hunter-drone', 'side'],
+      ['hunter-drone', 'side'],
+    ]);
+    // e6 (04:04): RH6-16 at 04:04, R4-12 at 04:11 and R4-12 at 04:18.70 — the
+    // last row lands on the final 04:20 step with the closing four Top Ranged.
     expect(
       plan.encounters[5]?.staging?.map((group) => group.stepIndex),
-    ).toEqual([step(260)]);
-    expect(plan.encounters[5]?.staging?.[0]?.members).toHaveLength(3);
-    // Exactly three mission-data draws exist and belong to e4/e5/e6 in order:
-    // the same stream read in authored encounter order maps draw 0 → the e4
-    // flank side, draw 1 → the e5 Hunter side, draw 2 → the e6 Hunter side.
-    // Top-only encounters consume zero draws, so any extra or reordered draw
-    // shifts the mapping below.
-    const stream = createMissionDataStream(seed);
-    const expectedSides: readonly ('upper-left' | 'upper-right')[] = [
-      stream.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
-      stream.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
-      stream.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
-    ];
-    const resolveSide = (
-      placement: ResolvedSpawnPlacement | undefined,
-    ): 'upper-left' | 'upper-right' => {
-      expect(placement?.kind).toBe('side');
-      return placement?.kind === 'side' ? placement.side : 'upper-left';
-    };
+    ).toEqual([
+      step(244),
+      step(244.65),
+      step(251),
+      step(251.65),
+      step(252.3),
+      step(258.7),
+      step(259.35),
+      step(260),
+    ]);
+    expect(plan.encounters[5]?.staging?.[0]?.members).toHaveLength(12);
+    expect(plan.encounters[5]?.staging?.[7]?.members).toEqual([
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.32 },
+      },
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.44 },
+      },
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.56 },
+      },
+      {
+        type: 'ranged-drone',
+        placement: { kind: 'top', engagementBandFraction: 0.68 },
+      },
+    ]);
+    // Zero mission-data draws (V021-AC-002): §2.2 authors every Mission 02
+    // placement as a Top row or a `fixed-side` Hunter, so the stream is never
+    // consumed and an unrelated mission seed resolves the identical plan.
+    const unrelatedSeed = createMissionDataStream(seed).nextInt(0x7fffffff);
     expect(
-      resolveSide(plan.encounters[3]?.staging?.[1]?.members[0]?.placement),
-    ).toBe(expectedSides[0]);
-    expect(
-      resolveSide(plan.encounters[4]?.staging?.[2]?.members[0]?.placement),
-    ).toBe(expectedSides[1]);
-    expect(
-      resolveSide(plan.encounters[5]?.staging?.[0]?.members[2]?.placement),
-    ).toBe(expectedSides[2]);
-    // Top Placements consumed zero draws: e1–e3 expose no side members and the
-    // staged side members above stayed aligned with exactly the three draws.
-    for (const encounter of plan.encounters.slice(0, 3)) {
-      for (const group of encounter.staging ?? []) {
-        for (const member of group.members) {
-          expect(member.placement.kind).toBe('top');
-        }
-      }
-    }
+      resolveMissionEncounters(
+        INTERCEPTION_02,
+        unrelatedSeed,
+        FIXED_STEP_SECONDS,
+      ),
+    ).toEqual(plan);
   });
 
-  it('resolves the exact Mission 03 Arrival Groups and three mission-data draws in e3 delayed Hunter → e5 Hunter → e7 Hunter order (V02-DEC-032, V02-AC-003)', () => {
+  it('resolves the exact Mission 03 Arrival Groups with fully authored placements and zero mission-data draws (V021-AC-001, V02-AC-003)', () => {
     const seed = SEED;
     const plan = resolveMissionEncounters(
       INTERCEPTION_03,
@@ -262,51 +591,110 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
     // exact Combat Countdown 00:00 step (§15.2, V02-AC-005).
     expect(plan.finalArrivalTimeSeconds).toBe(320);
     expect(plan.finalArrivalStepIndex).toBe(step(320));
-    // e1: +0 s three screened Basics, +2 s the single Ranged (the only other
-    // positive Mission 03 offset).
+    // §2.3 projects 44 regular formations into 123 Arrival Group rows plus the
+    // preserved Elite-only group (e1 18, e2 18, e3 16, e4 19, e5 16, e6 16,
+    // e7 20, e8 1).
+    expect(plan.encounters.map((e) => e.staging?.length ?? 0)).toEqual([
+      18, 18, 16, 19, 16, 16, 20, 1,
+    ]);
+    const groups = plan.encounters.flatMap((e) => e.staging ?? []);
+    expect(groups).toHaveLength(124);
+    expect(groups.flatMap((group) => group.members).length).toBe(553);
+    expect(Math.min(...groups.map((group) => group.stepIndex))).toBe(step(10));
+    expect(Math.max(...groups.map((group) => group.stepIndex))).toBe(step(320));
+    // Every Encounter opens on its own authored arrival step.
+    expect(plan.encounters.map((e) => e.staging?.[0]?.stepIndex)).toEqual([
+      step(10),
+      step(55),
+      step(95),
+      step(140),
+      step(190),
+      step(235),
+      step(275),
+      step(320),
+    ]);
+    // §2.3 boundaries: Ranged first enters at 00:11.30 behind two Basic rows,
+    // Hunters first enter at 01:35, and the last regular row arrives at 05:19.30
+    // — exactly 0.70 s (42 fixed steps) before the separate 05:20 Elite, with no
+    // regular cleaned up.
+    const rangedSteps = groups
+      .filter((group) =>
+        group.members.some((member) => member.type === 'ranged-drone'),
+      )
+      .map((group) => group.stepIndex);
+    expect(Math.min(...rangedSteps)).toBe(step(11.3));
+    const hunterSteps = groups
+      .filter((group) =>
+        group.members.some((member) => member.type === 'hunter-drone'),
+      )
+      .map((group) => group.stepIndex);
+    expect(Math.min(...hunterSteps)).toBe(step(95));
+    const regularSteps = groups
+      .filter((group) =>
+        group.members.some((member) => member.type !== 'elite-drone'),
+      )
+      .map((group) => group.stepIndex);
+    expect(regularSteps).toHaveLength(123);
+    expect(Math.max(...regularSteps)).toBe(step(319.3));
+    expect(step(319.3)).toBe(19158);
+    expect(step(320)).toBe(19200);
+    expect(step(320) - step(319.3)).toBe(42);
+    // e1 opens with a `BR12` block: two four-column Basic rows at 00:10 /
+    // 00:10.65 and then the four-Ranged row at 00:11.30.
     expect(plan.encounters[0]?.staging?.map((g) => g.stepIndex)).toEqual([
       step(10),
-      step(12),
+      step(10.65),
+      step(11.3),
+      step(18),
+      step(18.65),
+      step(19.3),
+      step(26),
+      step(26.65),
+      step(27.3),
+      step(34),
+      step(34.65),
+      step(35.3),
+      step(42),
+      step(42.65),
+      step(43.3),
+      step(50),
+      step(50.65),
+      step(51.3),
     ]);
-    expect(plan.encounters[0]?.roleDelays).toEqual([
-      { type: 'ranged-drone', delaySeconds: 2 },
-    ]);
-    expect(plan.encounters[0]?.staging?.[1]?.members[0]).toMatchObject({
-      type: 'ranged-drone',
-      placement: { kind: 'top', engagementBandFraction: 0.5 },
-    });
-    // e2/e4/e6: single Top-only groups.
-    expect(plan.encounters[1]?.staging?.map((g) => g.stepIndex)).toEqual([
-      step(55),
-    ]);
-    expect(plan.encounters[3]?.staging?.map((g) => g.stepIndex)).toEqual([
-      step(140),
-    ]);
-    expect(plan.encounters[5]?.staging?.map((g) => g.stepIndex)).toEqual([
-      step(235),
-    ]);
-    // e3: +0 s Basic/Ranged/Basic, +2 s the delayed seeded-side Hunter.
-    expect(plan.encounters[2]?.staging?.map((g) => g.stepIndex)).toEqual([
-      step(95),
-      step(97),
-    ]);
-    expect(plan.encounters[2]?.roleDelays).toEqual([
-      { type: 'hunter-drone', delaySeconds: 2 },
-    ]);
-    expect(plan.encounters[2]?.staging?.[1]?.members[0]).toMatchObject({
-      type: 'hunter-drone',
-      placement: { kind: 'side', yViewportFraction: 0.2 },
-    });
-    // e5: the Basic and the seeded-side Hunter share the single 03:10 step.
-    expect(plan.encounters[4]?.staging?.map((g) => g.stepIndex)).toEqual([
-      step(190),
-    ]);
+    expect(plan.encounters[0]?.roleDelays).toEqual([]);
     expect(
-      plan.encounters[4]?.staging?.[0]?.members.map((m) => m.type),
-    ).toEqual(['basic-drone', 'hunter-drone']);
-    // e7: the single pre-Elite seeded-side Hunter.
-    expect(plan.encounters[6]?.staging?.map((g) => g.stepIndex)).toEqual([
-      step(275),
+      plan.encounters[0]?.staging?.[2]?.members.map((member) => member.type),
+    ).toEqual(['ranged-drone', 'ranged-drone', 'ranged-drone', 'ranged-drone']);
+    expect(plan.encounters[0]?.staging?.[2]?.members[0]?.placement).toEqual({
+      kind: 'top',
+      engagementBandFraction: 0.32,
+    });
+    // The first Hunter wave (e3 01:35 `RH6-16`) resolves six Top Basics followed
+    // by the authored fixed sides — three Hunters per side, left side first and
+    // each side in ascending Y — with no draw involved.
+    expect(
+      plan.encounters[2]?.staging?.[0]?.members
+        .slice(6)
+        .map((member) => member.placement),
+    ).toEqual([
+      { kind: 'side', side: 'upper-left', yViewportFraction: 0.1 },
+      { kind: 'side', side: 'upper-left', yViewportFraction: 0.2 },
+      { kind: 'side', side: 'upper-left', yViewportFraction: 0.3 },
+      { kind: 'side', side: 'upper-right', yViewportFraction: 0.1 },
+      { kind: 'side', side: 'upper-right', yViewportFraction: 0.2 },
+      { kind: 'side', side: 'upper-right', yViewportFraction: 0.3 },
+    ]);
+    // The first `H4-12` wave (e6 04:09) carries two fixed-side Hunters per side
+    // at 0.15 / 0.25 VH behind four Top Basics.
+    expect(
+      plan.encounters[5]?.staging?.[6]?.members
+        .slice(4)
+        .map((member) => member.placement),
+    ).toEqual([
+      { kind: 'side', side: 'upper-left', yViewportFraction: 0.15 },
+      { kind: 'side', side: 'upper-left', yViewportFraction: 0.25 },
+      { kind: 'side', side: 'upper-right', yViewportFraction: 0.15 },
+      { kind: 'side', side: 'upper-right', yViewportFraction: 0.25 },
     ]);
     // e8: the single 05:20 Elite-only group at Top fraction 0.5.
     expect(plan.encounters[7]?.staging?.map((g) => g.stepIndex)).toEqual([
@@ -318,46 +706,29 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
         placement: { kind: 'top', engagementBandFraction: 0.5 },
       },
     ]);
-    // Exactly three mission-data draws exist and belong to e3/e5/e7 in that
-    // order. A reversed draw order would map draw 0 to the e7 Hunter and shift
-    // every side below.
-    const stream = createMissionDataStream(seed);
-    const expectedSides: readonly ('upper-left' | 'upper-right')[] = [
-      stream.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
-      stream.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
-      stream.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
-    ];
-    const resolveSide = (
-      placement: ResolvedSpawnPlacement | undefined,
-    ): 'upper-left' | 'upper-right' => {
-      expect(placement?.kind).toBe('side');
-      return placement?.kind === 'side' ? placement.side : 'upper-left';
-    };
-    expect(
-      resolveSide(plan.encounters[2]?.staging?.[1]?.members[0]?.placement),
-    ).toBe(expectedSides[0]);
-    expect(
-      resolveSide(plan.encounters[4]?.staging?.[0]?.members[1]?.placement),
-    ).toBe(expectedSides[1]);
-    expect(
-      resolveSide(plan.encounters[6]?.staging?.[0]?.members[0]?.placement),
-    ).toBe(expectedSides[2]);
-    // Every other Mission 03 member — including the Elite — is a Top Placement
-    // and therefore consumed zero draws.
-    const seededEncounterIndexes = new Set([2, 4, 6]);
-    plan.encounters.forEach((encounter, index) => {
-      for (const group of encounter.staging ?? []) {
-        group.members.forEach((member, memberIndex) => {
-          const isSeededHunter =
-            seededEncounterIndexes.has(index) &&
-            member.placement.kind === 'side';
-          if (!isSeededHunter) {
-            expect(member.placement.kind).toBe('top');
-          }
-          expect(memberIndex).toBeLessThan(group.members.length);
-        });
-      }
-    });
+    // V021-DEC-003: no Encounter is seeded and no member is a seeded-side
+    // member, so the whole mission resolves zero `mission-data` draws.
+    expect(plan.encounters.map((e) => e.entryRegion)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(plan.encounters.filter((e) => e.entryVariants !== null)).toEqual([]);
+    // Every authored fixed side is content, never a stream draw: a different
+    // seed resolves identical Mission 03 placements.
+    const otherSeed = resolveMissionEncounters(
+      INTERCEPTION_03,
+      0x22222222,
+      FIXED_STEP_SECONDS,
+    );
+    expect(otherSeed.encounters.flatMap((e) => e.staging ?? [])).toEqual(
+      groups,
+    );
     // Two runs with identical explicit inputs resolve identically.
     expect(
       resolveMissionEncounters(INTERCEPTION_03, seed, FIXED_STEP_SECONDS),
@@ -385,27 +756,39 @@ describe('resolveMissionEncounters (Epic §7.2, V02-AC-003–004)', () => {
         }
       }
     }
-    // The two authored `upper-left or upper-right` encounters are seeded.
+    // Mission 01 carries no seeded encounter after the v0.2.1 patch (§2.1): e1
+    // and e2 are fixed Top, e3–e5 are unspecified, so no entry draw exists.
     const m01 = resolveMissionEncounters(
       INTERCEPTION_01,
       SEED,
       FIXED_STEP_SECONDS,
     );
-    expect(['upper-left', 'upper-right']).toContain(
-      m01.encounters[2]?.entryRegion,
-    );
-    expect(m01.encounters[2]?.entryVariants).toEqual([
-      'upper-left',
-      'upper-right',
+    expect(m01.encounters.map((e) => e.entryRegion)).toEqual([
+      'top',
+      'top',
+      null,
+      null,
+      null,
     ]);
+    expect(m01.encounters.filter((e) => e.entryVariants !== null)).toEqual([]);
+    // Mission 03 carries no seeded encounter after the v0.2.1 patch (§2.3): all
+    // eight encounters name no entry region, so the mission resolves no draw.
     const m03 = resolveMissionEncounters(
       INTERCEPTION_03,
       SEED,
       FIXED_STEP_SECONDS,
     );
-    expect(['upper-left', 'upper-right']).toContain(
-      m03.encounters[6]?.entryRegion,
-    );
+    expect(m03.encounters.map((e) => e.entryRegion)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(m03.encounters.filter((e) => e.entryVariants !== null)).toEqual([]);
   });
 
   it('different seeds can change only the seeded entry regions, never timestamps, compositions, or ordering (V02-AC-004)', () => {

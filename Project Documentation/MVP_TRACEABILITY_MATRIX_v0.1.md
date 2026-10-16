@@ -156,3 +156,30 @@ no criterion is orphaned and none is counted twice. No normative v0.2 section in
 checklist entry. Physical Windows 10 Chrome/Edge validation remains pending and
 is recorded as an unresolved gate for the performance rows rather than as a
 product defect.
+
+## 9. Shmup v0.2.1 local checkpoint and integration coverage
+
+`SHMUP_V0.2.1_COMBAT_PATCH_SPECIFICATION.md` owns the approved delta. These
+rows summarize the independent local checkpoints and the 2026-10-16 final
+technical integration verdict (`verification/v021-final-local-integration-review.md`,
+source fingerprint `7cb6cd22`). The Product Owner accepted the complete local
+patch on 2026-10-17 with V021-DEC-007; see `verification/v021-local-product-acceptance.md`.
+External release and physical-device validation remain separate. Historical
+v0.2 rows above remain accurate for the accepted `v0.2.0` tag.
+
+| v0.2.1 requirement | Delta AC | Primary Work Item | Current status |
+| --- | --- | --- | --- |
+| Authored Mission 01/02 density and regular scale | V021-AC-001 (Missions 01/02), V021-AC-002 | V021-WI-01-C02/C03 | Accepted local checkpoint on 2026-10-07 (`verification/v021-wi-01-local-acceptance.md`): 348/480 regulars and shared 1.5× bounds. Product Owner completed M01 and reached M02 Defeat around two minutes. Included in final technical local integration; historical failed long cases remain failed. |
+| Authored Mission 03 density, Elite overlap, no pre-Elite recovery | V021-AC-001 (Mission 03), V021-DEC-003 | V021-WI-02 | Accepted local checkpoint on 2026-10-12 (`verification/v021-wi-02-local-acceptance.md`): exact 44-formation schedule, 376/128/48 regulars and one Elite at 05:20, zero phantom side draws. Included in final technical integration; no full Mission 03 playthrough or balance claim. |
+| Faster Elite cannon and six sequential Vulnerable Cores | V021-AC-008, V021-DEC-004 | V021-WI-02 | Accepted WI-02/C01 local checkpoint: 45-step cannon pairs; first Core 30 steps into Vulnerable, then every 60, cap six; boundary/cap/freeze and repeated-cycle regressions. Included in final technical integration; old WI-06 cadence records are not current proof. |
+| Hitbox-free enemy destruction shatter | V021-AC-009, V021-DEC-005 | V021-WI-05 | Corrected C01 accepted on 2026-10-13 (`verification/v021-wi-05-local-acceptance.md`): 6/10 fragments, 12/15 steps, second Elite ring at age 3. Product Owner local visual approval recorded; included in final technical integration. |
+| Bounded Hunter committed steering, orientation and rotated AABB | V021-AC-003 | V021-WI-03 | Accepted local checkpoint on 2026-10-08 (`verification/v021-wi-03-local-acceptance.md`), with local visual approval; included in final technical integration. |
+| Projectile silhouette changes | V021-AC-004 | V021-WI-04-A | Accepted local checkpoint on 2026-10-09 (`verification/v021-wi-04-a-local-acceptance.md`), including red circles and player teardrops; included in final technical integration. |
+| Post-commit Success/Evacuation/Defeat fades | V021-AC-005 | V021-WI-04-B | Accepted local checkpoint on 2026-10-10 (`verification/v021-wi-04-b-local-acceptance.md`): commit-before-fade and safety/retry/cleanup coverage; included in final technical integration. |
+| Integrated performance, cleanup and local human feel | V021-AC-006–007, V021-DEC-008 | Patch stabilization; local Mission 01/02 feel in WI-01 | DEC-008 independently reviewed and accepted; C02-SIMPLE independently accepted at 7cb6cd22: ordinary-production six-second M01 observation, 60.1 sustained / 59.9 minimum-window FPS, clean errors/cleanup. Recorded M01/M02 feedback and M03 risk decision retained. Final technical local integration accepted 2026-10-16; complete local patch accepted by the Product Owner on 2026-10-17 with V021-DEC-007 (`verification/v021-local-product-acceptance.md`). No full traversal, combined-Elite worst-case, no-regression or physical-device claim follows. |
+
+For the accepted v0.2.0 source, the patch specifically changes the applicable
+parts of `V02-AC-003`, `V02-AC-007`, later `V02-AC-010`, `V02-AC-015`, `V02-AC-023`, and the
+representative-workload application of `V02-AC-028`; unaffected consequences,
+negative requirements, and old evidence are not relabelled. The patch's local
+human pilot cannot substitute for its integrated or physical-device gates.

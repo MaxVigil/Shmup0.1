@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import {
+  BASIC_DRONE,
+  HUNTER_DRONE,
+  enemyRenderedBounds,
+} from '@application/content';
 import { CONTENT_CATALOGUE } from '@test-support/content';
 import {
   AIRCRAFT_WIDTH,
@@ -16,9 +21,12 @@ import {
   resolveEnemyProjectileCollisions,
   resolveProjectileCollisions,
   PAIR_CONTACT_COOLDOWN_STEPS,
+  DESTRUCTION_SHATTER_REGULAR_STEPS,
   ENEMY_HIT_FLASH_STEPS,
 } from './collision';
 import type { CombatEnemy } from './enemies';
+import { hunterRotatedBounds } from './enemies';
+import type { HunterEnemyState } from './enemies';
 import { spawnProjectile } from './projectiles';
 import type { EnemyProjectile } from './projectiles';
 import {
@@ -91,8 +99,13 @@ function makeEnemy(
     ...common,
     kind: 'hunter' as const,
     phase: 'committed' as const,
-    committedVx: 0,
-    committedVy: 1,
+    // V021-WI-03 (patch §3): the heading owns the committed movement vector and
+    // the visual rotation; `0` is nose-down (straight down) here.
+    headingRadians: 0,
+    visualWidth: size,
+    visualHeight: size,
+    committedStepsExecuted: 0,
+    steeringEnded: false,
     approachStepsElapsed: 120,
   };
 }
@@ -128,7 +141,21 @@ describe('player projectile → enemy (Epic §11, single-hit lifecycle)', () => 
     });
     expect(result.enemies).toHaveLength(0);
     expect(result.destroyedEnemies).toEqual([{ id: 0, type: 'basic-drone' }]);
-    expect(result.destroyedEnemyFlashes).toHaveLength(1);
+    // V021-WI-05 E01 (patch §4.1): exactly one hitbox-free shatter record, at
+    // the destruction step's authoritative centre, scaled by this enemy's
+    // complete visual dimension, aged `0` on its creation step, and carrying the
+    // regular variant with its exact 12-step lifetime.
+    expect(result.destructionShatters).toEqual([
+      {
+        enemyId: enemy.id,
+        centerX: enemy.centerX,
+        centerY: enemy.centerY,
+        size: Math.max(enemy.width, enemy.height),
+        variant: 'regular',
+        totalSteps: DESTRUCTION_SHATTER_REGULAR_STEPS,
+        ageSteps: 0,
+      },
+    ]);
   });
 
   it('uses the complete rendered bounds AABB for hits (V02-DEC-019)', () => {
@@ -136,6 +163,46 @@ describe('player projectile → enemy (Epic §11, single-hit lifecycle)', () => 
     const aabb = enemyCollisionAabb(enemy);
     expect(aabb.width).toBe(enemy.width);
     expect(aabb.height).toBe(enemy.height);
+  });
+
+  it('registers a hit through the enlarged v0.2.1 complete bounds and misses the smaller v0.2 bounds (V021-AC-002)', () => {
+    const bounds = createState().enemyBoundsByType['basic-drone'];
+    const enemy: CombatEnemy = {
+      ...makeEnemy('basic-drone', 640, 300),
+      width: bounds.width,
+      height: bounds.height,
+    };
+    const geometry = { width: 3, height: 9 };
+    // One pixel inside the v0.2.1 top edge. AABB contact is strict (edge-only
+    // contact is not overlap), so only the enlarged authoritative bounds
+    // register this shot.
+    const projectileTopY = 300 - bounds.height / 2 + 1;
+    const hit = resolveProjectileCollisions({
+      projectiles: [spawnProjectile(0, 1, 640, projectileTopY, geometry)],
+      enemies: [enemy],
+      projectileWidth: geometry.width,
+      projectileHeight: geometry.height,
+      existingFlashes: {},
+    });
+    expect(hit.projectiles).toHaveLength(0);
+    expect(hit.enemies[0]?.hullIntegrity).toBe(2);
+    // The same shot stops short of the smaller v0.2 complete bounds.
+    const v02Height = enemyRenderedBounds(
+      {
+        visualFootprintAreaRatio: 1,
+        visualAspectRatio: BASIC_DRONE.visualAspectRatio,
+      },
+      600,
+    ).heightPx;
+    const miss = resolveProjectileCollisions({
+      projectiles: [spawnProjectile(0, 1, 640, projectileTopY, geometry)],
+      enemies: [{ ...enemy, height: v02Height }],
+      projectileWidth: geometry.width,
+      projectileHeight: geometry.height,
+      existingFlashes: {},
+    });
+    expect(miss.projectiles).toHaveLength(1);
+    expect(miss.enemies[0]?.hullIntegrity).toBe(3);
   });
 });
 
@@ -312,5 +379,90 @@ describe('aircraft hitbox (Combat §8.6)', () => {
     );
     expect(aabb.width).toBeCloseTo(AIRCRAFT_WIDTH * 0.6, 6);
     expect(aabb.height).toBeCloseTo(AIRCRAFT_HEIGHT * 0.7, 6);
+  });
+});
+
+describe('V021-WI-03 Hunter rotated-envelope contact (patch §3)', () => {
+  /** The patch's committed steering angle: the configured nose-down rectangle
+   *  (114 / 192 at area ratio 1.8) is no longer its own collision/visibility
+   *  authority once the Hunter is rotating. */
+  const HEADING_RADIANS = 0.5;
+
+  const CONFIGURED = enemyRenderedBounds(HUNTER_DRONE, VIEWPORT.height);
+  const ENVELOPE = hunterRotatedBounds({
+    width: CONFIGURED.widthPx,
+    height: CONFIGURED.heightPx,
+    headingRadians: HEADING_RADIANS,
+  });
+
+  /** A committing Hunter carrying the v0.2.1 single heading and the complete
+   *  rotated envelope as its authoritative width/height. */
+  function makeRotatedHunter(
+    centerX: number,
+    centerY: number,
+  ): HunterEnemyState {
+    return {
+      id: 0,
+      kind: 'hunter',
+      type: 'hunter-drone',
+      hullIntegrity: HUNTER_DRONE.maximumHullIntegrity,
+      centerX,
+      centerY,
+      width: ENVELOPE.width,
+      height: ENVELOPE.height,
+      entry: 'upper-left',
+      hasEnteredVisibleArea: true,
+      activated: true,
+      ordinal: 0,
+      phase: 'committed',
+      headingRadians: HEADING_RADIANS,
+      visualWidth: CONFIGURED.widthPx,
+      visualHeight: CONFIGURED.heightPx,
+      committedStepsExecuted: 0,
+      steeringEnded: false,
+      approachStepsElapsed: 120,
+    };
+  }
+
+  it('deals kamikaze contact through the rotated envelope, not the configured rectangle', () => {
+    const aircraftBox = aircraftCollisionAabb(
+      640,
+      400,
+      AIRCRAFT_WIDTH,
+      AIRCRAFT_HEIGHT,
+    );
+    expect(ENVELOPE.width).toBeGreaterThan(CONFIGURED.widthPx);
+    // One pixel of envelope-only reach into the Aircraft hitbox: the envelope's
+    // right edge overlaps while the configured rectangle's right edge stops
+    // short, so only the rotated envelope can register this contact.
+    const hunter = makeRotatedHunter(
+      aircraftBox.x - ENVELOPE.width / 2 + 1,
+      400,
+    );
+    const hunterBox = enemyCollisionAabb(hunter);
+    expect(hunterBox.width).toBeCloseTo(ENVELOPE.width, 9);
+    expect(hunterBox.height).toBeCloseTo(ENVELOPE.height, 9);
+    expect(hunter.centerX + CONFIGURED.widthPx / 2).toBeLessThan(aircraftBox.x);
+    expect(hunter.centerX + ENVELOPE.width / 2).toBeGreaterThan(aircraftBox.x);
+
+    const result = resolveAircraftContacts({
+      enemies: [hunter],
+      aircraftCenterX: 640,
+      aircraftCenterY: 400,
+      aircraftWidth: AIRCRAFT_WIDTH,
+      aircraftHeight: AIRCRAFT_HEIGHT,
+      playerHullIntegrity: 100,
+      playerMaximumHullIntegrity: 100,
+      pairContactCooldownSteps: {},
+      contactDamageByType: CONTACT_DAMAGE_BY_TYPE,
+      aircraftDangerFlashStepsRemaining: 0,
+      godModeEnabled: false,
+      playerDefeated: false,
+    });
+    expect(result.playerHullIntegrity).toBe(65);
+    expect(result.enemies).toHaveLength(0);
+    expect(result.destroyedByContact).toEqual([
+      { id: 0, type: 'hunter-drone' },
+    ]);
   });
 });

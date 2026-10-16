@@ -499,6 +499,137 @@ test('a selected Mission 02 starts and resolves through the supported production
   expect(pageErrors).toEqual([]);
 });
 
+/**
+ * V021-WI-02 ordinary-production Mission 03 start/first-authored-group smoke
+ * (patch §2.3, V021-AC-001; route: Verification §18.1).
+ *
+ * What this test owns: on the ORDINARY production artifact, a Mission 03 that
+ * the DISCLOSED local-only unlocked-campaign fixture below makes available
+ * starts through the real mission-start transaction, exposes the authored
+ * `05:20` Countdown, and renders the authored `interception-03-e1` `00:10` and
+ * `00:10.65` first rows as two vertically separated four-column rows of four
+ * recognizable prepared Basic Drone sprites (§2.3 `BR12` = `4B / 4B / 4R`),
+ * with no Debug surface. The fixture unlocks Mission 03 only: it alters no
+ * Combat value, grants no invulnerability, shortens no clock, forces no
+ * terminal, and uses no production hook. The pointer is held at the already
+ * disclosed D04 Aircraft observation point so the aircraft's own automatic fire
+ * cannot erase part of the sample; that supported input changes no spawn,
+ * cadence, clock, or rendering rule.
+ *
+ * What this test does NOT own: the authored rows beyond those two, the Elite
+ * cannon/Core cadence, Success, economy, or a five-minute autoplay. Those are
+ * owned by the deterministic content/application evidence
+ * (`src/content/missions/missions-exact.test.ts`,
+ * `src/application/mission/encounter-resolution.test.ts`,
+ * `src/application/combat/combat-mission-03.test.ts`,
+ * `src/application/combat/combat-elite-runtime.test.ts`) and the real-renderer
+ * evidence (`src/combat-presentation/phaser/combat-scene-elite-visuals.test.ts`).
+ */
+test('a disclosed unlocked-campaign fixture starts Mission 03 on ordinary production and renders the authored 00:10 and 00:10.65 four-Basic rows (V021-AC-001)', async ({
+  page,
+}) => {
+  // The observation waits on the in-fiction Countdown clock, not on wall time:
+  // reaching Countdown `05:07` is about 13 s of mission time, which a starved
+  // machine can stretch to minutes. The budget is wall-clock only - it changes
+  // no spawn, clock, or assertion.
+  test.setTimeout(240_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  // Durable setup through the application's own campaign store: Mission 01/02
+  // completed, Mission 03 unlocked, 42 Credits, full Hull (disclosed fixture).
+  await page.goto('/');
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+  await seedPersistedCampaign(page, d04UnlockedCampaign());
+  await page.reload();
+  await expect(page.getByTestId('operations-screen')).toBeVisible();
+
+  const mission03 = page.getByRole('button', { name: 'Interception 03' });
+  await expect(mission03).toBeEnabled();
+  await mission03.click();
+  const details = page.getByRole('dialog');
+  await expect(
+    details.getByRole('heading', { name: 'Interception 03' }),
+  ).toBeVisible();
+  await expect(details.getByText('16 Credits', { exact: true })).toBeVisible();
+  await details.getByRole('button', { name: 'Start Mission' }).click();
+
+  await expect(page.getByTestId('combat-screen')).toBeVisible();
+  await expect(page.locator('.ds-combat-canvas canvas')).toHaveCount(1, {
+    timeout: 15000,
+  });
+  const countdown = page.locator('.ds-combat-countdown');
+  // The authored Mission 03 final arrival is 05:20 (patch §2.3).
+  await expect(countdown).toHaveText('05:20');
+  await expect(page.locator('.ds-combat-hud')).toHaveCount(1);
+  // Hold the disclosed Aircraft observation point before the authored rows are
+  // created: a parked bottom-left aircraft cannot erase the centre-lane sample.
+  await page.mouse.move(D04_AIRCRAFT_POINT.x, D04_AIRCRAFT_POINT.y);
+  // The durable marker belongs to the exact selected Mission 03 attempt and the
+  // fixture's progression is untouched by the start.
+  const atStart = await readPersistedCampaign(page);
+  expect(atStart.value.missionInProgress?.missionId).toBe('interception-03');
+  expect(atStart.value.credits).toBe(42);
+  expect(atStart.value.completedMissionIds).toEqual([
+    'interception-01',
+    'interception-02',
+  ]);
+  expect(atStart.value.unlockedMissionIds).toEqual([
+    'interception-01',
+    'interception-02',
+    'interception-03',
+  ]);
+
+  // No Debug surface exists in the production artifact.
+  await page.keyboard.press('F1');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(
+    page.getByText(/God Mode|Win Mission|Lose Mission/i),
+  ).toHaveCount(0);
+
+  // The authored `00:10` first row lands immediately after the Countdown leaves
+  // `05:10`, followed by the authored `00:10.65` second row of the same §2.3
+  // `BR12` block (`4B / 4B / 4R`). A freshly created Top row starts inside the
+  // masked top HUD band, so the frame is observed at `05:07`: both authored rows
+  // are then clear of that band (the second becomes measurable about 0.4 s after
+  // `05:08`) and the `00:11.30` four-Ranged rear row is a Ranged, never a
+  // Basic-role, signature. The next Basic row is authored at `00:18` and the
+  // first Hunter wave at `01:35`, so no other Basic and no Hunter can be on
+  // screen in this sample.
+  await waitForCountdown(page, '05:07');
+  const firstGroupFrame = await observeD04CombatFrame(page);
+  const prepared = firstGroupFrame.enemies.filter(isD04PreparedImage);
+  expect(prepared.filter(isD04HunterSignature)).toEqual([]);
+  // Only prepared, complete, Basic-role signatures can describe the authored
+  // first row: a truncated or fallback-rendered Basic is not a recognizable
+  // Basic Drone and therefore cannot satisfy the claim below.
+  const basicRows = groupRenderedBasicRows(
+    prepared.filter(isD04PreparedBasicSignature),
+  );
+  // Exactly the two authored four-Basic rows are on screen: the sample must
+  // reject a partial row, an extra Basic row, and any Basic hidden by the mask.
+  expect(basicRows).toHaveLength(2);
+  // Rows are top to bottom, so the two lowest rows are the two oldest ones.
+  const secondRow = basicRows.at(-2) ?? [];
+  const firstRow = basicRows.at(-1) ?? [];
+  expect(firstRow).toHaveLength(4);
+  expect(secondRow).toHaveLength(4);
+  // Four separate columns: the row's four members must be four distinct
+  // rendered Basics, never one sprite counted four times.
+  expect(new Set(firstRow.map((enemy) => enemy.centerX)).size).toBe(4);
+  expect(new Set(secondRow.map((enemy) => enemy.centerX)).size).toBe(4);
+  // The two rows are vertically separated by more than one Basic silhouette, so
+  // the sample shows two distinct arrived rows and not one merged band.
+  const tallestBasic = Math.max(
+    ...[...firstRow, ...secondRow].map((enemy) => enemy.height),
+  );
+  const rowPitch = (firstRow[0]?.centerY ?? 0) - (secondRow[0]?.centerY ?? 0);
+  expect(rowPitch).toBeGreaterThan(tallestBasic);
+  // The runtime keeps advancing on the ordinary production clock afterwards.
+  await expect(countdown).toHaveText(/^05:0\d$/);
+  expect(pageErrors).toEqual([]);
+});
+
 test('a natural Defeat resolves once and Continue returns to Operations for the next mission (Delivery §7.5, Combat AC-010/028–036, MASTER-AC-005) @release-evidence', async ({
   page,
 }) => {
@@ -1756,6 +1887,17 @@ test('records the uninstrumented Mission 01 regular-workload performance record 
 /** The minimum supported CSS viewport (with the file-wide beforeEach). */
 const D04_VIEWPORT = { width: 1280, height: 600 };
 
+/** Height of the fixed top HUD band that every D04 frame masks (px). */
+const D04_MASKED_TOP_BAND_HEIGHT = 80;
+
+/** One masked screen region that cannot contain measurable craft pixels. */
+interface D04MaskRegion {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 /**
  * Fixed session seed for the bounded D04 production routes (disclosed). The
  * canonical fixed-seed path is the accepted way to make an authored route
@@ -1837,6 +1979,15 @@ interface D04RenderedEnemy {
   readonly distinctColours: number;
   /** Non-background pixels inside the observed bounds. */
   readonly sampledPixels: number;
+  /**
+   * True when the detected silhouette lies fully clear of every masked screen
+   * region and of the canvas bottom edge, so masking or clipping cannot have
+   * truncated its measured bounds. A partially entered or exiting enemy renders
+   * only part of the role and therefore cannot measure complete rendered
+   * bounds; under the v0.2.1 §2.1 Mission 01 density such a partial enemy is
+   * routinely on screen during a one-second sample window.
+   */
+  readonly complete: boolean;
 }
 
 /** Forces the disclosed fixed session seed before the measured page load. */
@@ -1922,19 +2073,27 @@ async function waitForCountdown(
   });
 }
 
-/** A wide, short silhouette: the approved Basic Drone role signature. */
+/**
+ * Role silhouette signatures measured on the rendered Combat canvas at the
+ * minimum supported viewport. Thresholds are re-anchored to the approved
+ * v0.2.1 §3 regular-enemy scale (1.5× width and height): at `1280 × 600` the
+ * observed prepared Basic Drone is `44–48 × 20–24 px`, the Ranged Drone
+ * `48 × 32 px`, and the Hunter Drone about `24 × 36 px`, measured against
+ * `32–36 × 16`, `32 × 24`, and `16 × 24` on the pre-patch revision. The role,
+ * not the absolute size, decides the classification.
+ */
 function isD04BasicSignature(enemy: D04RenderedEnemy): boolean {
-  return enemy.width >= 24 && enemy.height <= 18;
+  return enemy.width >= 40 && enemy.height <= 26;
 }
 
 /** A wide, taller silhouette: the approved Ranged Drone role signature. */
 function isD04RangedSignature(enemy: D04RenderedEnemy): boolean {
-  return enemy.width >= 24 && enemy.height >= 20;
+  return enemy.width >= 40 && enemy.height >= 28;
 }
 
 /** A narrow, tall silhouette: the approved Hunter Drone role signature. */
 function isD04HunterSignature(enemy: D04RenderedEnemy): boolean {
-  return enemy.width <= 20 && enemy.height >= 22;
+  return enemy.width <= 28 && enemy.height >= 30;
 }
 
 /**
@@ -1949,6 +2108,81 @@ function isD04PreparedImage(enemy: D04RenderedEnemy): boolean {
 
 function isD04ProceduralFallback(enemy: D04RenderedEnemy): boolean {
   return enemy.distinctColours <= 8 && enemy.sampledPixels >= 40;
+}
+
+/**
+ * A complete silhouette measured as a Basic role signature whose pixels are a
+ * prepared image. Completeness is required by the role classification itself:
+ * the fixed `80 px` top HUD band masks the upper pixels of a descending enemy,
+ * and the prepared Ranged Drone's complete ink box (`40 × 29` at the approved
+ * v0.2.1 §3 `1.5×` scale) measures as the Basic aspect (`40 × 20`) once the
+ * band truncates it, so a partially entered silhouette cannot identify a role.
+ */
+function isD04PreparedBasicSignature(enemy: D04RenderedEnemy): boolean {
+  return (
+    enemy.complete && isD04PreparedImage(enemy) && isD04BasicSignature(enemy)
+  );
+}
+
+/**
+ * True when a detected silhouette lies fully clear of every masked screen
+ * region and of the canvas bottom edge, so neither masking nor clipping can
+ * have truncated its measured bounds. A one-pixel tolerance is applied to each
+ * masked region so a silhouette that merely touches a mask boundary counts as
+ * truncated.
+ */
+function d04IsCompleteSilhouette(
+  bounds: {
+    readonly left: number;
+    readonly right: number;
+    readonly top: number;
+    readonly bottom: number;
+  },
+  masks: readonly D04MaskRegion[],
+): boolean {
+  if (bounds.top <= 0 || bounds.bottom >= D04_VIEWPORT.height) {
+    return false;
+  }
+  return masks.every(
+    (mask) =>
+      bounds.right <= mask.x ||
+      bounds.left >= mask.x + mask.width ||
+      bounds.bottom <= mask.y - 1 ||
+      bounds.top >= mask.y + mask.height + 1,
+  );
+}
+
+/**
+ * Groups rendered Basic-role signatures into the authored rows of one group.
+ * Members of one authored row are created on the same step and travel at the
+ * same speed, so they share the same centre Y, while consecutive rows are
+ * authored 39 fixed steps (`0.65 s`) apart — about 48 px at the minimum
+ * viewport. The tolerance is far below that pitch, so it separates rows while
+ * absorbing sprite sub-pixel variation, and it can never merge a partial row
+ * with its neighbour. Rows are returned top to bottom.
+ */
+function groupRenderedBasicRows(
+  enemies: readonly D04RenderedEnemy[],
+  tolerancePx = 12,
+): readonly (readonly D04RenderedEnemy[])[] {
+  const sorted = [...enemies].sort(
+    (left, right) => left.centerY - right.centerY,
+  );
+  const rows: D04RenderedEnemy[][] = [];
+  for (const enemy of sorted) {
+    const current = rows.at(-1);
+    const anchor = current?.[0]?.centerY;
+    if (
+      current !== undefined &&
+      anchor !== undefined &&
+      enemy.centerY - anchor <= tolerancePx
+    ) {
+      current.push(enemy);
+    } else {
+      rows.push([enemy]);
+    }
+  }
+  return rows;
 }
 
 /** Writes one D04 production evidence record. */
@@ -2077,10 +2311,16 @@ async function observeD04CombatFrame(page: Page): Promise<{
   });
   const shot = await page.screenshot();
   const raster = decodePng(shot);
-  maskRegions(raster, [
+  const masks: readonly D04MaskRegion[] = [
     ...hudBoxes,
-    { x: 0, y: 0, width: D04_VIEWPORT.width, height: 80 },
-  ]);
+    {
+      x: 0,
+      y: 0,
+      width: D04_VIEWPORT.width,
+      height: D04_MASKED_TOP_BAND_HEIGHT,
+    },
+  ];
+  maskRegions(raster, [...masks]);
   const observation = classifyFrame(raster);
   const enemies = observation.enemies.map((shape): D04RenderedEnemy => {
     const left = Math.max(0, Math.floor(shape.centerX - shape.width / 2));
@@ -2144,6 +2384,15 @@ async function observeD04CombatFrame(page: Page): Promise<{
     }
     const refinedWidth = Number.isFinite(minX) ? maxX - minX + 1 : 0;
     const refinedHeight = Number.isFinite(minY) ? maxY - minY + 1 : 0;
+    const complete = d04IsCompleteSilhouette(
+      {
+        left: Math.max(0, shape.centerX - shape.width / 2),
+        right: shape.centerX + shape.width / 2,
+        top,
+        bottom,
+      },
+      masks,
+    );
     return {
       width: shape.width,
       height: shape.height,
@@ -2155,6 +2404,7 @@ async function observeD04CombatFrame(page: Page): Promise<{
       refinedHeight,
       distinctColours: colours.size,
       sampledPixels,
+      complete,
     };
   });
   return { enemies, shot };
@@ -2227,7 +2477,7 @@ test('V02-WI-07 D04 the ordinary production build enters Interception 01–03 th
   // Ranged or Hunter signature.
   expect(m01BasicWindow.length).toBeGreaterThanOrEqual(2);
   for (const enemy of m01BasicWindow) {
-    expect(enemy.height).toBeLessThanOrEqual(18);
+    expect(isD04BasicSignature(enemy)).toBe(true);
   }
   expect(m01BasicWindow.filter(isD04RangedSignature)).toEqual([]);
   expect(m01BasicWindow.filter(isD04HunterSignature)).toEqual([]);
@@ -2380,7 +2630,8 @@ test('V02-WI-07 D04 a controlled Basic Drone asset failure selects the approved 
   const referenceBasic = referenceFrames
     .flatMap((frame) => frame.enemies)
     .filter(isD04PreparedImage)
-    .filter(isD04BasicSignature);
+    .filter(isD04BasicSignature)
+    .filter((enemy) => enemy.complete);
   expect(referenceBasic.length).toBeGreaterThanOrEqual(2);
   const referenceWidth = Math.max(
     ...referenceBasic.map((enemy) => enemy.refinedWidth),
@@ -2422,7 +2673,16 @@ test('V02-WI-07 D04 a controlled Basic Drone asset failure selects the approved 
   }
   const fallbackEnemies = fallbackFrames.flatMap((frame) => frame.enemies);
   const fallbackBasics = fallbackEnemies.filter(isD04ProceduralFallback);
+  // Only complete silhouettes can measure complete rendered bounds; a partially
+  // entered or exiting enemy is measured as a truncated part of the role.
+  const fallbackCompleteBasics = fallbackBasics.filter(
+    (enemy) => enemy.complete,
+  );
+  const fallbackPartialBasics = fallbackBasics.filter(
+    (enemy) => !enemy.complete,
+  );
   expect(fallbackBasics.length).toBeGreaterThanOrEqual(2);
+  expect(fallbackCompleteBasics.length).toBeGreaterThanOrEqual(2);
   // The failed kind never renders as a prepared image in this session.
   expect(
     fallbackEnemies.filter(
@@ -2432,7 +2692,7 @@ test('V02-WI-07 D04 a controlled Basic Drone asset failure selects the approved 
   // The approved fallback preserves the role's gameplay-scale complete rendered
   // bounds: measured against the ready render of the same authored encounter on
   // the same viewport and session seed.
-  for (const enemy of fallbackBasics) {
+  for (const enemy of fallbackCompleteBasics) {
     expect(Math.abs(enemy.refinedWidth - referenceWidth)).toBeLessThanOrEqual(
       6,
     );
@@ -2458,6 +2718,7 @@ test('V02-WI-07 D04 a controlled Basic Drone asset failure selects the approved 
   }
   const reEntryEnemies = reEntryFrames.flatMap((frame) => frame.enemies);
   const reEntryBasics = reEntryEnemies.filter(isD04ProceduralFallback);
+  const reEntryCompleteBasics = reEntryBasics.filter((enemy) => enemy.complete);
   writeD04Evidence('v02-wi-07-d04-asset-failure.json', {
     scopeId: 'V02-WI-07-D04',
     ...d04CandidateIdentity(),
@@ -2472,7 +2733,10 @@ test('V02-WI-07 D04 a controlled Basic Drone asset failure selects the approved 
       ),
     },
     fallbackBasicBounds: fallbackBasics,
+    fallbackCompleteBasicBounds: fallbackCompleteBasics,
+    fallbackPartialBasicBounds: fallbackPartialBasics,
     reEntryFallbackBounds: reEntryBasics,
+    reEntryCompleteFallbackBounds: reEntryCompleteBasics,
     requestCounts: {
       failedPath: countPathRequests(ledger, '/enemies/basic-drone.png'),
       approvedManifestPaths: Object.fromEntries(
@@ -2486,7 +2750,8 @@ test('V02-WI-07 D04 a controlled Basic Drone asset failure selects the approved 
     pageErrors,
   });
   expect(reEntryBasics.length).toBeGreaterThanOrEqual(2);
-  for (const enemy of reEntryBasics) {
+  expect(reEntryCompleteBasics.length).toBeGreaterThanOrEqual(2);
+  for (const enemy of reEntryCompleteBasics) {
     expect(Math.abs(enemy.refinedWidth - referenceWidth)).toBeLessThanOrEqual(
       6,
     );
@@ -2545,12 +2810,9 @@ test('V02-WI-07 D04 a Basic Drone response that completes after the bounded Boot
   const earlyEnemies = earlyFrames.flatMap((frame) => frame.enemies);
   const earlyFallback = earlyEnemies.filter(isD04ProceduralFallback);
   expect(earlyFallback.length).toBeGreaterThanOrEqual(2);
-  // The failed kind never renders as a prepared image before the late arrival.
-  expect(
-    earlyEnemies.filter(
-      (enemy) => isD04PreparedImage(enemy) && isD04BasicSignature(enemy),
-    ),
-  ).toEqual([]);
+  // The failed kind never renders as a prepared Basic image before the late
+  // arrival. Only complete silhouettes are classified (see the helper).
+  expect(earlyEnemies.filter(isD04PreparedBasicSignature)).toEqual([]);
 
   // The authored `00:55` group is rendered after the late response arrived: the
   // session result is still the approved procedural fallback, because the Boot
@@ -2564,11 +2826,10 @@ test('V02-WI-07 D04 a Basic Drone response that completes after the bounded Boot
   const lateEnemies = lateFrames.flatMap((frame) => frame.enemies);
   const lateFallback = lateEnemies.filter(isD04ProceduralFallback);
   expect(lateFallback.length).toBeGreaterThanOrEqual(1);
-  expect(
-    lateEnemies.filter(
-      (enemy) => isD04PreparedImage(enemy) && isD04BasicSignature(enemy),
-    ),
-  ).toEqual([]);
+  // Still the approved procedural fallback: the late completion cannot swap in
+  // the prepared Basic image. Complete silhouettes only; a truncated prepared
+  // Ranged Drone is measured as the Basic aspect by the masked top band.
+  expect(lateEnemies.filter(isD04PreparedBasicSignature)).toEqual([]);
   // No retry and no second request after the late completion.
   expect(countPathRequests(ledger, '/enemies/basic-drone.png')).toBe(1);
 

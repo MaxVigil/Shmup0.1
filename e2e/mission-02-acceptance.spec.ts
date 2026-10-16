@@ -393,8 +393,11 @@ test('the complete Interception 02 vertical: unlock, Mission 02 start, 04:20 Cou
   );
 
   // The development Spawn Encounter commands address the CURRENT mission: the
-  // Mission 02 e5 Encounter (1 Basic + 1 Ranged + 1 Hunter) materializes through
-  // the same authoritative command that was previously hard-coded to Mission 01.
+  // Mission 02 e5 Encounter materializes through the same authoritative command
+  // that was previously hard-coded to Mission 01. Its approved v0.2.1 §2.2
+  // composition is `RH6-16` + 2×`R4-12` = 56 Basic + 16 Ranged + 4 Hunter; the
+  // live Basic count also carries naturally staged e1 members, so only the two
+  // roles whose content is exclusive to e5 at this mission time are asserted.
   await debug.getByRole('button', { name: 'Spawn E5' }).click();
   await expect
     .poll(async () => (await readFieldRows(debug)).get('Current Encounter'), {
@@ -402,8 +405,8 @@ test('the complete Interception 02 vertical: unlock, Mission 02 start, 04:20 Cou
     })
     .toBe('interception-02-e5');
   const debugRowsAtE5 = await readFieldRows(debug);
-  expect(debugRowsAtE5.get('Active Enemies')).toContain('Ranged 1');
-  expect(debugRowsAtE5.get('Active Enemies')).toContain('Hunter 1');
+  expect(debugRowsAtE5.get('Active Enemies')).toContain('Ranged 16');
+  expect(debugRowsAtE5.get('Active Enemies')).toContain('Hunter 4');
 
   // The frozen simulation payload at the commitment instant (Debug pauses
   // Combat, so no time and therefore no economy advances until Win Mission).

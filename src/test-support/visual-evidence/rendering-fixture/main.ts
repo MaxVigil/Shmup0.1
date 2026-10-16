@@ -155,7 +155,7 @@ function isolateEnemy(
     enemies: [enemy],
     projectiles: [],
     enemyProjectiles: [],
-    destroyedEnemyFlashes: [],
+    destructionShatters: [],
     eliteDeflectionFeedbacks: {},
     activeEnemyFlashStepsRemaining: {},
     ...extra,

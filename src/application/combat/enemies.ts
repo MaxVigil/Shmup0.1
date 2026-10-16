@@ -1,6 +1,6 @@
 import type { EnemyType } from '@domain/index';
 import type { Mulberry32 } from '@domain/random';
-import { ELITE_DRONE, enemyRenderedBounds } from '../content';
+import { ELITE_DRONE, HUNTER_DRONE, enemyRenderedBounds } from '../content';
 
 /**
  * Authoritative v0.2 regular-enemy state (Epic §9, V02-DEC-019, V02-WI-04).
@@ -34,6 +34,16 @@ import { ELITE_DRONE, enemyRenderedBounds } from '../content';
  * boundary, and the attack-timer initialization that boundary requires.
  */
 
+/**
+ * V021-WI-03 (patch §3, V021-AC-003) gives the Hunter ONE authoritative
+ * `headingRadians` that owns both its movement vector and its rendered nose in
+ * Side Entry, Approach, and Committed Attack Run; the presentation rotates by
+ * that value and owns no second heading. `width`/`height` stay the complete
+ * AABB, which for the Hunter is the enclosing rectangle of the configured
+ * rendered rectangle at the current heading (`hunterRotatedBounds`), so spawn
+ * placement, full-bounds activation, collision, escape, and resize keep
+ * deriving from the authoritative rendered envelope. No other role rotates.
+ */
 export type EnemyEntryRegion = 'top' | 'upper-left' | 'upper-right';
 
 /** Elite `Armoured` phase duration: `12 s` = exactly 720 fixed steps (§9.4). */
@@ -57,10 +67,121 @@ export const ELITE_HORIZONTAL_SPEED_VIEWPORT_WIDTH_PER_SECOND = 0.12;
  */
 export const ELITE_MOVEMENT_MIN_INTERVAL_STEPS = 90;
 export const ELITE_MOVEMENT_INTERVAL_DRAW_RANGE = 121;
-/** Fresh cannon timer every newly entered `Armoured` phase: `1.5 s` (§9.4). */
-export const ELITE_CANNON_INTERVAL_STEPS = 90;
-/** Fresh Core timer every newly entered `Vulnerable` phase: `2.5 s` (§9.4). */
-export const ELITE_CORE_INTERVAL_STEPS = 150;
+/**
+ * Fresh cannon timer every newly entered `Armoured` phase: `0.75 s` (§3.1,
+ * V021-DEC-004), so a complete `720`-step Armoured phase fires pairs on
+ * executed steps `45, 90, …, 675` and never on the step-720 boundary.
+ */
+export const ELITE_CANNON_INTERVAL_STEPS = 45;
+/**
+ * Fresh first-Core timer every newly entered `Vulnerable` phase: `0.5 s` (§3.1,
+ * V021-DEC-004). Its six sequential launches are on executed Vulnerable steps
+ * `30, 90, 150, 210, 270, 330`; each later Core repeats after
+ * `ELITE_CORE_INTERVAL_STEPS`.
+ */
+export const ELITE_CORE_FIRST_INTERVAL_STEPS = 30;
+/** Repeat Core timer after a launch inside one `Vulnerable` phase: `1.0 s`
+ *  (§3.1, V021-DEC-004). */
+export const ELITE_CORE_INTERVAL_STEPS = 60;
+
+/**
+ * Hunter committed-steering window (patch §3, V021-AC-003): the first 60
+ * EXECUTED fixed steps of `Committed Attack Run`, counting the commitment step.
+ * Only executed unpaused fixed steps are counted, so pause and hidden-tab time
+ * consume no step of this budget.
+ */
+export const HUNTER_COMMITTED_STEERING_STEPS = 60;
+/**
+ * Maximum committed steer `25°/s` (patch §3), applied along the shortest signed
+ * turn; `25/60°` per executed fixed step at the fixed `1/60 s` rate.
+ */
+export const HUNTER_MAX_STEERING_DEGREES_PER_SECOND = 25;
+
+/**
+ * The Hunter's authoritative heading convention (patch §3): the rendered nose
+ * points along the ACTUAL simulation movement vector, and the configured
+ * unrotated sprite bounds have their nose at `+y` (the prepared artwork faces
+ * down). `headingRadians` is therefore exactly the clockwise screen rotation
+ * (positive `y` down) the presentation applies, and the movement vector it owns
+ * is `(-sin heading, cos heading)`:
+ * - `0` = nose down (travel straight down),
+ * - `-π/2` = nose right (travel right, Upper-Left entry),
+ * - `+π/2` = nose left (travel left, Upper-Right entry).
+ * No separate presentation-owned heading exists.
+ */
+export function hunterTravelVector(headingRadians: number): {
+  readonly x: number;
+  readonly y: number;
+} {
+  return { x: -Math.sin(headingRadians), y: Math.cos(headingRadians) };
+}
+
+/**
+ * The heading whose nose points along `(dx, dy)`: the exact inverse of
+ * `hunterTravelVector`. An exactly opposite target yields `heading ± π` (never a
+ * U-turn authorization on its own — the caller's behind test runs first).
+ */
+export function hunterHeadingToward(dx: number, dy: number): number {
+  return Math.atan2(-dx, dy);
+}
+
+/**
+ * The injected heading of one authored entry region (patch §3): the nose
+ * already points along the entry movement vector, so Side Entry needs no
+ * separate direction. Only the Hunter consumes this mapping.
+ */
+export function hunterEntryHeadingRadians(entry: EnemyEntryRegion): number {
+  if (entry === 'upper-left') {
+    return -Math.PI / 2;
+  }
+  if (entry === 'upper-right') {
+    return Math.PI / 2;
+  }
+  return 0;
+}
+
+/**
+ * The enclosing axis-aligned rectangle of the complete configured rendered
+ * bounds rotated by `headingRadians` about their shared centre (patch §3,
+ * V02-DEC-019). This is the Hunter's authoritative AABB: spawn placement,
+ * full-bounds activation, visibility, collision, and escape always derive from
+ * a rectangle that contains the complete rotated visual at the current scale,
+ * so it updates deterministically with heading and resize.
+ */
+export function hunterRotatedBounds(input: {
+  readonly width: number;
+  readonly height: number;
+  readonly headingRadians: number;
+}): { readonly width: number; readonly height: number } {
+  const cos = Math.abs(Math.cos(input.headingRadians));
+  const sin = Math.abs(Math.sin(input.headingRadians));
+  return {
+    width: input.width * cos + input.height * sin,
+    height: input.width * sin + input.height * cos,
+  };
+}
+
+/**
+ * Maximum committed turn of one executed fixed step: `25°/s` at the fixed step
+ * (`25/60°` per `1/60 s` step, patch §3). The same function serves any step
+ * duration so the cap stays a true per-second rate.
+ */
+export function hunterMaxTurnPerStep(stepSeconds: number): number {
+  return (HUNTER_MAX_STEERING_DEGREES_PER_SECOND * Math.PI * stepSeconds) / 180;
+}
+
+/** The shortest signed difference `to - from`, normalized to `(-π, π]`. */
+function shortestSignedTurn(from: number, to: number): number {
+  const twoPi = Math.PI * 2;
+  const turn = (to - from) % twoPi;
+  if (turn > Math.PI) {
+    return turn - twoPi;
+  }
+  if (turn <= -Math.PI) {
+    return turn + twoPi;
+  }
+  return turn;
+}
 
 /** Fields shared by every regular-enemy state. */
 interface EnemyCommonState {
@@ -117,11 +238,38 @@ export interface RangedEnemyState extends EnemyCommonState {
 export interface HunterEnemyState extends EnemyCommonState {
   readonly kind: 'hunter';
   readonly phase: 'entering' | 'approach' | 'committed';
-  /** Locked unit direction at commitment (never changed afterwards). */
-  readonly committedVx: number;
-  readonly committedVy: number;
+  /**
+   * The ONE authoritative Hunter heading (patch §3, V021-AC-003): the direction
+   * of the Hunter's actual simulation movement, which the presentation rotates
+   * both the prepared image and the procedural fallback by, about the configured
+   * centre. `0` is nose-down because the configured artwork faces down; see
+   * `hunterTravelVector`.
+   */
+  readonly headingRadians: number;
+  /**
+   * Complete CONFIGURED rendered bounds: the unrotated prepared/fallback
+   * rectangle the presentation scales to. `width`/`height` remain the enclosing
+   * rotated AABB (`hunterRotatedBounds`) of exactly this rectangle, so collision,
+   * visibility, activation, spawn placement, and escape can never disagree with
+   * the rendered Hunter.
+   */
+  readonly visualWidth: number;
+  readonly visualHeight: number;
   /** Running fixed steps elapsed since Approach began (Epic §9.3 `2.0 s`). */
   readonly approachStepsElapsed: number;
+  /**
+   * Executed `Committed Attack Run` fixed steps, where the commitment step is
+   * `1`. The `25°/s` steering window covers `1…HUNTER_COMMITTED_STEERING_STEPS`
+   * inclusive; the heading is locked from step `61`.
+   */
+  readonly committedStepsExecuted: number;
+  /**
+   * Permanent latch (patch §3): true once the Aircraft centre was behind the
+   * current travel direction (dot product `<= 0`) at non-zero centre-to-centre
+   * distance. Steering then never resumes for this Hunter. The clause has no
+   * timeout, no reacquisition, and no effect on speed, damage, or escape.
+   */
+  readonly steeringEnded: boolean;
 }
 
 export type CombatEnemy =
@@ -219,6 +367,30 @@ export interface EnemyStepResult {
 }
 
 /**
+ * The complete AABB one authored placement is expressed in. Every role but the
+ * Hunter uses its configured rendered bounds unchanged; the Hunter's is the
+ * enclosing rectangle of those bounds at its injected entry heading (patch §3,
+ * V021-AC-003), so the nearest edge of the AABB the simulation owns still
+ * touches the selected boundary (V02-DEC-018) while the complete rotated visual
+ * starts fully beyond it.
+ */
+export function spawnBoundsForEntry(input: {
+  readonly type: EnemyType;
+  readonly width: number;
+  readonly height: number;
+  readonly entry: EnemyEntryRegion;
+}): { readonly width: number; readonly height: number } {
+  if (input.type !== 'hunter-drone') {
+    return { width: input.width, height: input.height };
+  }
+  return hunterRotatedBounds({
+    width: input.width,
+    height: input.height,
+    headingRadians: hunterEntryHeadingRadians(input.entry),
+  });
+}
+
+/**
  * Common creation helper for the authored-staging spawn (V02-DEC-018): the
  * nearest edge of the complete bounds touches the selected boundary and the
  * non-entry axis is placed from the normalized authored fraction.
@@ -244,15 +416,21 @@ export function spawnEnemyFromPlacement(input: {
   readonly viewportHeight: number;
   readonly ordinal: number;
 }): CombatEnemy {
-  const halfWidth = input.width / 2;
-  const halfHeight = input.height / 2;
   if (input.placement.kind === 'top') {
+    const placed = spawnBoundsForEntry({
+      type: input.type,
+      width: input.width,
+      height: input.height,
+      entry: 'top',
+    });
+    const halfWidth = placed.width / 2;
+    const halfHeight = placed.height / 2;
     // Project the already-authored normalized fraction inside the current
     // engagement band (V02-AC-004); the centre is clamped so the complete
     // bounds stay inside the band horizontally.
-    const boundsMinX = input.boundsMinX ?? input.width / 2;
+    const boundsMinX = input.boundsMinX ?? placed.width / 2;
     const boundsMaxX =
-      input.boundsMaxX ?? input.viewportWidth - input.width / 2;
+      input.boundsMaxX ?? input.viewportWidth - placed.width / 2;
     const raw =
       boundsMinX +
       input.placement.engagementBandFraction * (boundsMaxX - boundsMinX);
@@ -269,6 +447,12 @@ export function spawnEnemyFromPlacement(input: {
       ordinal: input.ordinal,
     });
   }
+  const placed = spawnBoundsForEntry({
+    type: input.type,
+    width: input.width,
+    height: input.height,
+    entry: input.placement.side,
+  });
   const centerY = input.placement.yViewportFraction * input.viewportHeight;
   return createEnemyState({
     id: input.id,
@@ -276,8 +460,8 @@ export function spawnEnemyFromPlacement(input: {
     hullIntegrity: input.hullIntegrity,
     centerX:
       input.placement.side === 'upper-left'
-        ? -halfWidth
-        : input.viewportWidth + halfWidth,
+        ? -placed.width / 2
+        : input.viewportWidth + placed.width / 2,
     centerY,
     width: input.width,
     height: input.height,
@@ -317,13 +501,27 @@ function createEnemyState(input: {
     return { ...common, kind: 'ranged', firingStepsRemaining: 0 };
   }
   if (input.type === 'hunter-drone') {
+    // V021-WI-03 (patch §3): the Hunter is created already pointing along its
+    // entry movement vector, and its authoritative AABB is the enclosing
+    // rectangle of its configured rendered bounds at that heading.
+    const envelope = spawnBoundsForEntry({
+      type: input.type,
+      width: input.width,
+      height: input.height,
+      entry: input.entry,
+    });
     return {
       ...common,
       kind: 'hunter',
       phase: 'entering',
-      committedVx: 0,
-      committedVy: 0,
+      headingRadians: hunterEntryHeadingRadians(input.entry),
+      visualWidth: input.width,
+      visualHeight: input.height,
+      width: envelope.width,
+      height: envelope.height,
       approachStepsElapsed: 0,
+      committedStepsExecuted: 0,
+      steeringEnded: false,
     };
   }
   // V02-WI-06 E01: explicit rejection instead of a regular-role fallthrough.
@@ -344,10 +542,12 @@ function createEnemyState(input: {
  * One deterministic fixed-step movement (Epic §9.1–9.3):
  * - Basic/Ranged: side entries travel horizontally inward at the role movement
  *   speed until fully inside, then travel straight down at that speed.
- * - Hunter: horizontal Side Entry at the approach speed until fully inside;
- *   then `Approach` steers directly toward the Aircraft's current centre at
- *   `18% VH/s` (no predictive lead); the first of vertical distance `≤ 35% VH`
- *   or `2.0 s` since Approach began locks the direction at `26% VH/s`.
+ * - Hunter: horizontal Side Entry at the approach speed until fully inside
+ *   (its injected heading already points along that movement); then `Approach`
+ *   steers directly toward the Aircraft's current centre at `18% VH/s` (no
+ *   predictive lead); the first of vertical distance `≤ 35% VH` or `2.0 s`
+ *   since Approach began commits the run at `26% VH/s` and opens the bounded
+ *   `25°/s` steering window (patch §3).
  * A side/top entry can never escape during its initial entry. An enemy that
  * has entered and now fully exits any boundary is returned as `null` (Escaped).
  * The Elite is routed to `stepElite` (V02-WI-06 E01/E02): it is never activated
@@ -423,8 +623,112 @@ function stepRegular(
   };
 }
 
-/** Hunter state machine (Epic §9.3, V02-AC-007): entering → approach →
- *  committed. */
+/**
+ * The complete rotated AABB of `enemy` at `headingRadians` (patch §3): the
+ * single place a Hunter heading change updates its authoritative gameplay
+ * rectangle, so collision, visibility, activation, and escape always see the
+ * rectangle that encloses the rotated visual.
+ */
+function hunterStateAtHeading(
+  enemy: HunterEnemyState,
+  headingRadians: number,
+): HunterEnemyState {
+  const envelope = hunterRotatedBounds({
+    width: enemy.visualWidth,
+    height: enemy.visualHeight,
+    headingRadians,
+  });
+  return {
+    ...enemy,
+    headingRadians,
+    width: envelope.width,
+    height: envelope.height,
+  };
+}
+
+/**
+ * One Hunter movement step (patch §3): the authoritative heading owns the
+ * movement vector, the rotated AABB, and therefore the rendered nose. Nothing
+ * else can change a Hunter's direction, so a renderer cannot steer gameplay.
+ */
+function moveHunterToHeading(
+  enemy: HunterEnemyState,
+  headingRadians: number,
+  speedPx: number,
+  input: EnemyStepInput,
+): HunterEnemyState {
+  const travel = hunterTravelVector(headingRadians);
+  const next = hunterStateAtHeading(enemy, headingRadians);
+  return {
+    ...next,
+    hasEnteredVisibleArea:
+      next.hasEnteredVisibleArea ||
+      isEnemyAnyPortionVisible(
+        enemy,
+        input.viewportWidth,
+        input.viewportHeight,
+      ),
+    centerX: enemy.centerX + travel.x * speedPx * input.stepSeconds,
+    centerY: enemy.centerY + travel.y * speedPx * input.stepSeconds,
+  };
+}
+
+/**
+ * One executed `Committed Attack Run` fixed step (patch §3, V021-AC-003).
+ *
+ * The commitment step is step `1` of the 60-executed-step steering window.
+ * While the window is open the heading turns toward the Aircraft's CURRENT
+ * centre along the shortest signed turn by at most `25°/s`, never as a U-turn.
+ * At non-zero centre-to-centre distance an Aircraft centre behind the current
+ * travel vector — dot product `<= 0` — permanently ends steering for this
+ * Hunter. At EXACTLY zero distance the heading is retained for that step
+ * WITHOUT setting that latch, so a later non-zero target remains eligible
+ * inside the window (Product Owner decision, 2026-10-07); `steeringEnded`, not
+ * a heading that happens to point behind, is the latch. After 60 executed
+ * committed steps the heading is locked. No predictive lead, reversal,
+ * reacquisition, speed change, or extra phase, and paused/hidden time executes
+ * no step and therefore consumes none of the window.
+ */
+function stepCommittedHunter(
+  enemy: HunterEnemyState,
+  input: EnemyStepInput,
+): HunterEnemyState {
+  const committedStepsExecuted = enemy.committedStepsExecuted + 1;
+  let headingRadians = enemy.headingRadians;
+  let steeringEnded = enemy.steeringEnded;
+  const steeringWindowOpen =
+    !steeringEnded && committedStepsExecuted <= HUNTER_COMMITTED_STEERING_STEPS;
+  if (steeringWindowOpen) {
+    const dx = input.aircraftCenterX - enemy.centerX;
+    const dy = input.aircraftCenterY - enemy.centerY;
+    if (Math.hypot(dx, dy) === 0) {
+      // Zero distance: retain the heading for this step and keep the window
+      // open (never the permanent behind latch).
+      steeringEnded = false;
+    } else {
+      const travel = hunterTravelVector(enemy.headingRadians);
+      if (travel.x * dx + travel.y * dy <= 0) {
+        steeringEnded = true;
+      } else {
+        const maxTurn = hunterMaxTurnPerStep(input.stepSeconds);
+        const turn = shortestSignedTurn(
+          enemy.headingRadians,
+          hunterHeadingToward(dx, dy),
+        );
+        headingRadians = enemy.headingRadians + clamp(turn, -maxTurn, maxTurn);
+      }
+    }
+  }
+  return moveHunterToHeading(
+    { ...enemy, committedStepsExecuted, steeringEnded },
+    headingRadians,
+    input.committedSpeedPx,
+    input,
+  );
+}
+
+/** Hunter state machine (Epic §9.3, V02-AC-007; V021-WI-03 patch §3):
+ *  entering → approach → committed. */
 function stepHunter(
   enemy: HunterEnemyState,
   input: EnemyStepInput,
@@ -449,17 +753,17 @@ function stepHunter(
         approachStepsElapsed: 0,
       };
     }
-    const direction = enemy.entry === 'upper-left' ? 1 : -1;
-    const movedX =
-      enemy.centerX + direction * input.movementSpeedPx * input.stepSeconds;
     // V02-WI-04 C01: Approach begins on the exact step the MOVED complete
     // bounds first become fully inside — the previous code checked only the
     // pre-move position and stalled one step after crossing the boundary.
-    const moved: HunterEnemyState = {
-      ...enemy,
-      centerX: movedX,
-      hasEnteredVisibleArea: hasEntered(enemy),
-    };
+    // V021-WI-03 (patch §3): Side Entry holds its injected heading, so the nose
+    // already points along the entry movement vector at the unchanged speed.
+    const moved = moveHunterToHeading(
+      enemy,
+      enemy.headingRadians,
+      input.movementSpeedPx,
+      input,
+    );
     if (
       isEnemyFullyInsideViewport(
         moved,
@@ -479,57 +783,41 @@ function stepHunter(
     const dx = input.aircraftCenterX - enemy.centerX;
     const dy = input.aircraftCenterY - enemy.centerY;
     const distance = Math.hypot(dx, dy);
-    const unitX = distance > 0 ? dx / distance : 0;
-    const unitY = distance > 0 ? dy / distance : 1;
     const approachStepsElapsed = enemy.approachStepsElapsed + 1;
     const verticalDistance = Math.abs(enemy.centerY - input.aircraftCenterY);
     const commits =
       verticalDistance <= 0.35 * input.viewportHeight ||
       approachStepsElapsed >= Math.round(2.0 / input.stepSeconds);
+    // Approach keeps its v0.2 contract (Epic §9.3): it points straight at the
+    // Aircraft's CURRENT centre with no predictive lead and no turn limit; only
+    // the rendered nose is new in v0.2.1 (patch §3).
+    const headingRadians =
+      distance > 0 ? hunterHeadingToward(dx, dy) : enemy.headingRadians;
     if (commits) {
-      // V02-WI-04 C01: the locked 26% VH/s committed speed applies on the
-      // FIRST commitment step (the previous code moved this step at the 18%
-      // approach speed and only switched speed on the following step).
-      const nextX =
-        enemy.centerX + unitX * input.committedSpeedPx * input.stepSeconds;
-      const nextY =
-        enemy.centerY + unitY * input.committedSpeedPx * input.stepSeconds;
-      // Direction is locked at the first commit condition; later Aircraft
-      // movement does not bend the attack run.
-      return {
-        ...enemy,
-        hasEnteredVisibleArea: hasEntered(enemy),
-        phase: 'committed',
-        committedVx: unitX,
-        committedVy: unitY,
-        approachStepsElapsed,
-        centerX: nextX,
-        centerY: nextY,
-      };
+      // V02-WI-04 C01: the committed 26% VH/s speed applies on the FIRST
+      // commitment step, which is also step 1 of the 60-step steering window.
+      return stepCommittedHunter(
+        {
+          ...enemy,
+          hasEnteredVisibleArea: hasEntered(enemy),
+          phase: 'committed',
+          headingRadians,
+          approachStepsElapsed,
+        },
+        input,
+      );
     }
-    const nextX =
-      enemy.centerX + unitX * input.movementSpeedPx * input.stepSeconds;
-    const nextY =
-      enemy.centerY + unitY * input.movementSpeedPx * input.stepSeconds;
-    return {
-      ...enemy,
-      hasEnteredVisibleArea: hasEntered(enemy),
-      approachStepsElapsed,
-      centerX: nextX,
-      centerY: nextY,
-    };
+    const moved = moveHunterToHeading(
+      { ...enemy, headingRadians, approachStepsElapsed },
+      headingRadians,
+      input.movementSpeedPx,
+      input,
+    );
+    return { ...moved, hasEnteredVisibleArea: hasEntered(enemy) };
   }
-  // Committed Attack Run: fixed direction at the committed speed.
-  return {
-    ...enemy,
-    hasEnteredVisibleArea: hasEntered(enemy),
-    centerX:
-      enemy.centerX +
-      enemy.committedVx * input.committedSpeedPx * input.stepSeconds,
-    centerY:
-      enemy.centerY +
-      enemy.committedVy * input.committedSpeedPx * input.stepSeconds,
-  };
+  // Committed Attack Run: heading-held movement at the committed speed, with the
+  // bounded steering window owned by `stepCommittedHunter`.
+  return stepCommittedHunter(enemy, input);
 }
 
 /** Applies the permanent full-bounds activation latch for the three regular
@@ -666,7 +954,7 @@ export function createEliteAtAnchor(
  * Explicit idempotent Elite activation transition (Epic §9.4, V02-AC-009,
  * V02-DEC-033). `stepElite` invokes it on the exact fixed step the Elite centre
  * first reaches the `50% VW, 20% VH` anchor; the Elite enters `Armoured` and
- * its phase timer and fresh `90`-step cannon timer start once in that same
+ * its phase timer and fresh `45`-step cannon timer start once in that same
  * authoritative simulation step. The caller may supply the movement decision
  * drawn in that same step (direction first, then interval); without one the
  * Elite owns no horizontal decision and therefore does not move horizontally.
@@ -759,7 +1047,7 @@ function stepElite(
  * Canonical "the Elite has reached its fixed anchor" activation owner (Epic
  * §9.4, V02-AC-009): the centre snaps exactly to `50% VW, 20% VH`, the visible
  * latch is set, and the explicit idempotent `activateElite` transition starts
- * the Armoured phase, its fresh `90`-step cannon timer, and (when the caller
+ * the Armoured phase, its fresh `45`-step cannon timer, and (when the caller
  * supplies one) the movement decision drawn in that same fixed step.
  *
  * `stepEnteringElite` calls it on the exact anchor-reaching step. The
@@ -868,8 +1156,8 @@ function stepActiveEliteMovement(
  * `360` executed fixed steps, then the cycle repeats; every boundary transition
  * happens on exactly one step and the new phase starts from its exact full
  * duration, so the cycle cannot drift. The newly entered phase initializes its
- * own fresh attack timer (`90` cannon / `150` Core), which is not decremented on
- * the transition step.
+ * own fresh attack timer (`45` cannon pair / `30` first Core), which is not
+ * decremented on the transition step.
  */
 function stepElitePhaseBoundary(
   elite: EliteEnemyState,
@@ -896,9 +1184,9 @@ function stepElitePhaseBoundary(
  * The single authoritative Elite phase-transition owner (Epic §9.4,
  * V02-AC-009/§17). Entering an active phase reinitializes that phase's exact
  * full duration (`Armoured 720` / `Vulnerable 360`), its fresh attack timer
- * (`90` cannon / `150` Core), and its complete rendered bounds, and clamps the
- * new geometry inside the viewport while preserving the drawn horizontal
- * decision, its remaining interval, and the RNG state.
+ * (`45` cannon pair / `30` first Core), and its complete rendered bounds, and
+ * clamps the new geometry inside the viewport while preserving the drawn
+ * horizontal decision, its remaining interval, and the RNG state.
  *
  * `stepElitePhaseBoundary` calls it on every natural boundary, and the
  * development Debug `Elite: Armoured` / `Elite: Vulnerable` commands reuse the
@@ -933,7 +1221,7 @@ export function enterElitePhase(
       attackStepsRemaining:
         phase === 'armoured'
           ? ELITE_CANNON_INTERVAL_STEPS
-          : ELITE_CORE_INTERVAL_STEPS,
+          : ELITE_CORE_FIRST_INTERVAL_STEPS,
       width: bounds.width,
       height: bounds.height,
     },
@@ -970,6 +1258,37 @@ function clampEliteHorizontally(
     return { ...elite, centerX: minX, horizontalDirection: 1 };
   }
   return elite;
+}
+
+/**
+ * Accepted viewport-resize reprojection for one Hunter (patch §3, V021-AC-003,
+ * V02-DEC-018): the complete CONFIGURED rendered bounds are re-resolved at the
+ * new short side from the single content geometry owner, the authoritative AABB
+ * becomes their enclosing rectangle at the UNCHANGED heading, and the caller's
+ * proportionally reprojected centre is kept. Heading, phase, executed committed
+ * step count, the steering latch, entry data, RNG, and every other geometry rule
+ * are untouched, so a resize can neither re-aim nor restart a Hunter and the
+ * AABB always equals the rotated rendered rectangle at the new scale.
+ */
+export function reprojectHunterForViewport(
+  hunter: HunterEnemyState,
+  input: {
+    readonly centerX: number;
+    readonly centerY: number;
+    readonly shortSidePx: number;
+  },
+): HunterEnemyState {
+  const configured = enemyRenderedBounds(HUNTER_DRONE, input.shortSidePx);
+  return hunterStateAtHeading(
+    {
+      ...hunter,
+      visualWidth: configured.widthPx,
+      visualHeight: configured.heightPx,
+      centerX: input.centerX,
+      centerY: input.centerY,
+    },
+    hunter.headingRadians,
+  );
 }
 
 /**

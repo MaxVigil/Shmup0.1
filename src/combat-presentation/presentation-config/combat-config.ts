@@ -43,6 +43,13 @@ export interface CombatGeometry {
   readonly enemyFlashColor: string;
   /** Approved danger flash for the player aircraft after valid damage (S11). */
   readonly aircraftFlashColor: string;
+  /**
+   * V021-WI-05 destruction-shatter tokens (patch §4.1, V021-DEC-005): tapered
+   * fragments and the expanding broken ring(s) use `danger`, while the small
+   * two-step four-point glint and the fragment highlights use `text-primary`.
+   */
+  readonly shatterFragmentColor: string;
+  readonly shatterHighlightColor: string;
 }
 
 /**
@@ -92,6 +99,8 @@ export function resolveCombatGeometry(viewport: {
     eliteDeflectionSizeRatio: 0.012,
     enemyFlashColor: readColorToken('--color-text-primary', '#f1f5f7'),
     aircraftFlashColor: readColorToken('--color-danger', '#d96767'),
+    shatterFragmentColor: readColorToken('--color-danger', '#d96767'),
+    shatterHighlightColor: readColorToken('--color-text-primary', '#f1f5f7'),
   };
 }
 

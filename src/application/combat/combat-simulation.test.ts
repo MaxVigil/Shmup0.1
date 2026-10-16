@@ -1,4 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import {
+  BASIC_DRONE,
+  HUNTER_DRONE,
+  RANGED_DRONE,
+  enemyRenderedBounds,
+} from '@application/content';
 import { MACHINE_GUN, PLAYER_PROJECTILE } from '@content/weapons';
 import type { WeaponDefinition } from '@content/weapons';
 import { CONTENT_CATALOGUE } from '@test-support/content';
@@ -22,6 +28,10 @@ import {
   MAX_STEPS_PER_FRAME,
   stepCombatSimulation,
   submitCombatCommand,
+  SUCCESS_FADE_STEPS,
+  terminalFadeComplete,
+  terminalFadeOpacity,
+  TERMINAL_FADE_STEPS,
 } from './combat-simulation';
 import type { CombatSimulationState } from './combat-simulation';
 import type { CombatEnemy } from './enemies';
@@ -433,6 +443,68 @@ describe('mode exclusivity (AC-006)', () => {
         resized.aircraft.centerX + resized.aircraftWidth / 2,
       ).toBeLessThanOrEqual(640 - 18);
     });
+
+    it('keeps the authoritative regular AABB equal to the shared content geometry at 1.5× the v0.2 bounds, before and after resize (V021-AC-002)', () => {
+      const state = createState('keyboard');
+      // 1280 × 600: the authoritative AABB is the shared content contract
+      // (V02-DEC-019) at the v0.2.1 §3 first candidate (2.25× the v0.2 area).
+      expect(state.enemyBoundsByType['basic-drone']).toEqual({
+        width: enemyRenderedBounds(BASIC_DRONE, 600).widthPx,
+        height: enemyRenderedBounds(BASIC_DRONE, 600).heightPx,
+      });
+      expect(state.enemyBoundsByType['ranged-drone']).toEqual({
+        width: enemyRenderedBounds(RANGED_DRONE, 600).widthPx,
+        height: enemyRenderedBounds(RANGED_DRONE, 600).heightPx,
+      });
+      expect(state.enemyBoundsByType['hunter-drone']).toEqual({
+        width: enemyRenderedBounds(HUNTER_DRONE, 600).widthPx,
+        height: enemyRenderedBounds(HUNTER_DRONE, 600).heightPx,
+      });
+      const area = (type: 'basic-drone' | 'ranged-drone' | 'hunter-drone') =>
+        state.enemyBoundsByType[type].width *
+        state.enemyBoundsByType[type].height;
+      expect(state.enemyBoundsByType['basic-drone'].width).toBeCloseTo(
+        49.635503,
+        5,
+      );
+      expect(state.enemyBoundsByType['basic-drone'].height).toBeCloseTo(
+        26.110343,
+        5,
+      );
+      expect(area('basic-drone')).toBeCloseTo(2.25 * (0.04 * 600) ** 2, 9);
+      expect(area('ranged-drone')).toBeCloseTo(2.7 * (0.04 * 600) ** 2, 9);
+      expect(area('hunter-drone')).toBeCloseTo(1.8 * (0.04 * 600) ** 2, 9);
+      // 1500 × 800: the authoritative AABB follows the new short side (800).
+      const resized = resize(state, 1500, 800);
+      expect(resized.enemyBoundsByType['basic-drone']).toEqual({
+        width: enemyRenderedBounds(BASIC_DRONE, 800).widthPx,
+        height: enemyRenderedBounds(BASIC_DRONE, 800).heightPx,
+      });
+      expect(resized.enemyBoundsByType['basic-drone'].width).toBeCloseTo(
+        66.180671,
+        5,
+      );
+      expect(resized.enemyBoundsByType['hunter-drone'].height).toBeCloseTo(
+        55.716576,
+        5,
+      );
+      // Every role scales linearly with the short side, so the resize keeps the
+      // exact 1.5× width/height relationship to the v0.2 bounds.
+      for (const type of [
+        'basic-drone',
+        'ranged-drone',
+        'hunter-drone',
+      ] as const) {
+        expect(resized.enemyBoundsByType[type].width).toBeCloseTo(
+          state.enemyBoundsByType[type].width * (800 / 600),
+          9,
+        );
+        expect(resized.enemyBoundsByType[type].height).toBeCloseTo(
+          state.enemyBoundsByType[type].height * (800 / 600),
+          9,
+        );
+      }
+    });
   });
 
   describe('runtime cleanup (S08)', () => {
@@ -785,6 +857,142 @@ describe('v0.2 Success exit ordering and timing (Epic §13.3, V02-WI-04 C01)', (
     ).toBeLessThanOrEqual(0);
   });
 });
+describe('V021-WI-04-B committed terminal fade (patch §4, V021-AC-005, V021-DEC-001)', () => {
+  it('runs no fade at all for an uncommitted terminal of any kind', () => {
+    // Success (frozen uncommitted), Defeat (frozen uncommitted), and the
+    // zero-step Evacuated terminal: none may fade or complete before the
+    // exact-attempt campaign write authorizes them.
+    const successRuntime = createTestCombatRuntime();
+    successRuntime.submitDebug({ type: 'combat-debug/win-mission' });
+    expect(successRuntime.getState().terminalResult).toEqual({
+      kind: 'success',
+    });
+    expect(terminalFadeOpacity(successRuntime.getState())).toBe(1);
+    expect(terminalFadeComplete(successRuntime.getState())).toBe(false);
+    successRuntime.advance(5);
+    expect(terminalFadeOpacity(successRuntime.getState())).toBe(1);
+    expect(terminalFadeComplete(successRuntime.getState())).toBe(false);
+    // The Evacuation-scoped selector stays a strict no-op for every other kind.
+    expect(evacuationEnemyOpacity(successRuntime.getState())).toBe(1);
+
+    const defeatRuntime = createTestCombatRuntime();
+    defeatRuntime.submitDebug({ type: 'combat-debug/lose-mission' });
+    expect(defeatRuntime.getState().terminalResult).toEqual({ kind: 'defeat' });
+    expect(defeatRuntime.getState().defeatFadeStepsRemaining).toBe(
+      TERMINAL_FADE_STEPS,
+    );
+    defeatRuntime.advance(5);
+    expect(defeatRuntime.getState().defeatFadeStepsRemaining).toBe(
+      TERMINAL_FADE_STEPS,
+    );
+    expect(terminalFadeOpacity(defeatRuntime.getState())).toBe(1);
+    expect(evacuationEnemyOpacity(defeatRuntime.getState())).toBe(1);
+
+    const fresh = createState();
+    const zeroStep = { ...fresh, evacuationStepsRemaining: 1 };
+    const frozen = stepCombatSimulation(zeroStep, FIXED_STEP_SECONDS);
+    expect(frozen.terminalResult).toEqual({ kind: 'evacuated' });
+    expect(terminalFadeOpacity(frozen)).toBe(1);
+    expect(terminalFadeComplete(frozen)).toBe(false);
+    expect(evacuationEnemyOpacity(frozen)).toBe(1);
+  });
+
+  it('a committed Defeat fades exactly 30 steps with a stationary Aircraft and no exit phase', () => {
+    const runtime = createTestCombatRuntime();
+    runtime.submitDebug({ type: 'combat-debug/lose-mission' });
+    // Defeat shares the exact 0.5 s terminal window with the accepted exit
+    // centring, but it never centres and never flies up (V021-DEC-001).
+    expect(TERMINAL_FADE_STEPS).toBe(EXIT_CENTRE_STEPS);
+    const frozen = runtime.getState();
+    const startX = frozen.aircraft.centerX;
+    const startY = frozen.aircraft.centerY;
+    runtime.authorizeCommittedExit();
+    let state = runtime.getState();
+    expect(state.exitPhase).toBe('none');
+    // The authorization itself consumes no step: the fade starts at full
+    // opacity and is not yet complete.
+    expect(terminalFadeOpacity(state)).toBe(1);
+    expect(terminalFadeComplete(state)).toBe(false);
+    for (let index = 1; index <= TERMINAL_FADE_STEPS; index += 1) {
+      state = runtime.advance(FIXED_STEP_SECONDS);
+      expect(state.exitPhase).toBe('none');
+      expect(state.defeatFadeStepsRemaining).toBe(TERMINAL_FADE_STEPS - index);
+      expect(terminalFadeOpacity(state)).toBeCloseTo(
+        (TERMINAL_FADE_STEPS - index) / TERMINAL_FADE_STEPS,
+        6,
+      );
+      expect(terminalFadeComplete(state)).toBe(index === TERMINAL_FADE_STEPS);
+      // No Aircraft movement, no centre, no flight: the fade never touches it.
+      expect(state.aircraft.centerX).toBe(startX);
+      expect(state.aircraft.centerY).toBe(startY);
+    }
+    expect(terminalFadeOpacity(state)).toBe(0);
+    // Complete and permanently inert: later frames and a repeated authorize
+    // can neither restart nor advance the finished fade.
+    runtime.authorizeCommittedExit();
+    const after = runtime.advance(60);
+    expect(after).toBe(state);
+    expect(terminalFadeComplete(after)).toBe(true);
+    expect(after.aircraft.centerX).toBe(startX);
+    expect(after.aircraft.centerY).toBe(startY);
+  });
+
+  it('a committed Success fades inside the 15-step window concurrent with the 30-step centring', () => {
+    const runtime = createTestCombatRuntime();
+    runtime.submitDebug({ type: 'combat-debug/win-mission' });
+    expect(SUCCESS_FADE_STEPS).toBeLessThan(TERMINAL_FADE_STEPS);
+    runtime.authorizeCommittedExit();
+    let state = runtime.getState();
+    expect(state.exitPhase).toBe('centre');
+    expect(state.exitCentreStepsRemaining).toBe(TERMINAL_FADE_STEPS);
+    expect(terminalFadeOpacity(state)).toBe(1);
+    expect(terminalFadeComplete(state)).toBe(false);
+    for (let index = 1; index <= EXIT_CENTRE_STEPS; index += 1) {
+      state = runtime.advance(FIXED_STEP_SECONDS);
+      const centreStepsRemaining = EXIT_CENTRE_STEPS - index;
+      const fadeStepsRemaining = Math.min(
+        SUCCESS_FADE_STEPS,
+        centreStepsRemaining - (TERMINAL_FADE_STEPS - SUCCESS_FADE_STEPS),
+      );
+      expect(state.exitCentreStepsRemaining).toBe(centreStepsRemaining);
+      expect(terminalFadeOpacity(state)).toBeCloseTo(
+        Math.min(1, Math.max(0, fadeStepsRemaining / SUCCESS_FADE_STEPS)),
+        6,
+      );
+      expect(terminalFadeComplete(state)).toBe(fadeStepsRemaining <= 0);
+    }
+    // The fade is zero while the shared 30-step centring still owns the exit:
+    // Success never shortens the accepted centre phase.
+    expect(state.exitCentreStepsRemaining).toBe(0);
+    expect(terminalFadeOpacity(state)).toBe(0);
+    expect(terminalFadeComplete(state)).toBe(true);
+    // The Evacuation-only selector remains 1 for a Success terminal.
+    expect(evacuationEnemyOpacity(state)).toBe(1);
+  });
+
+  it('a committed Evacuated maps the one shared scalar across all 30 centre steps', () => {
+    const fresh = createState();
+    const zeroStep = {
+      ...fresh,
+      evacuationStepsRemaining: 1,
+      enemies: [basicAt(fresh, 640, 150)],
+    };
+    const frozen = stepCombatSimulation(zeroStep, FIXED_STEP_SECONDS);
+    expect(frozen.terminalResult).toEqual({ kind: 'evacuated' });
+    let state = { ...frozen, exitAuthorized: true };
+    for (let index = 1; index <= EXIT_CENTRE_STEPS; index += 1) {
+      state = stepCombatSimulation(state, FIXED_STEP_SECONDS);
+      const expected = (EXIT_CENTRE_STEPS - index) / EXIT_CENTRE_STEPS;
+      expect(terminalFadeOpacity(state)).toBeCloseTo(expected, 6);
+      // The accepted Evacuation selector is exactly this shared scalar.
+      expect(evacuationEnemyOpacity(state)).toBe(terminalFadeOpacity(state));
+      expect(terminalFadeComplete(state)).toBe(index === EXIT_CENTRE_STEPS);
+    }
+    expect(state.exitCentreStepsRemaining).toBe(0);
+    expect(terminalFadeOpacity(state)).toBe(0);
+  });
+});
+
 /** V02-WI-05 E02 crafted active Basic fixture at an explicit centre (complete
  *  rendered bounds from the authoritative state; already entered/activated). */
 function basicAt(
@@ -1312,21 +1520,49 @@ describe('V02-WI-05 E02 C01 committed-exit resize continuity (Epic §13.3–13.4
 });
 
 describe('V02-WI-05 E02 C01 authorizeCommittedExit guard (Epic §13.3–13.5)', () => {
-  it('never authorizes the exit before a terminal or for a frozen Defeat', () => {
+  it('never authorizes the continuation before a terminal, and a committed Defeat fades without any exit', () => {
     const runtime = createTestCombatRuntime();
     // Premature: no terminal exists yet — the commit gate must hold.
     runtime.authorizeCommittedExit();
     expect(runtime.getState().exitAuthorized).toBe(false);
     expect(runtime.getState().exitPhase).toBe('none');
-    // A frozen Defeat has no exit sequence; authorization stays inert.
+    // A frozen Defeat is uncommitted: it records the exact 30-step fade window
+    // but nothing may fade and the Aircraft stays exactly where it was.
     runtime.submitDebug({ type: 'combat-debug/lose-mission' });
     expect(runtime.getState().terminalResult).toEqual({ kind: 'defeat' });
+    expect(runtime.getState().defeatFadeStepsRemaining).toBe(
+      TERMINAL_FADE_STEPS,
+    );
+    expect(terminalFadeOpacity(runtime.getState())).toBe(1);
+    expect(terminalFadeComplete(runtime.getState())).toBe(false);
+    const frozen = runtime.getState().aircraft;
+    for (let frame = 0; frame < 8; frame += 1) {
+      runtime.advance(60);
+    }
+    expect(runtime.getState().defeatFadeStepsRemaining).toBe(
+      TERMINAL_FADE_STEPS,
+    );
+    expect(runtime.getState().aircraft).toEqual(frozen);
+    // V021-WI-04-B (patch §4, V021-AC-005): the committed Defeat authorizes
+    // ONLY its own fade — the Aircraft never centres and never flies up, and
+    // the shared exit phase stays `none` for the whole progression.
     runtime.authorizeCommittedExit();
-    expect(runtime.getState().exitAuthorized).toBe(false);
+    expect(runtime.getState().exitAuthorized).toBe(true);
     expect(runtime.getState().exitPhase).toBe('none');
-    // Frames after the Defeat still never animate an exit.
-    runtime.advance(60);
-    expect(runtime.getState().aircraft.centerY).toBe(480);
+    for (let frame = 0; frame < 8; frame += 1) {
+      runtime.advance(60);
+    }
+    expect(runtime.getState().defeatFadeStepsRemaining).toBe(0);
+    expect(runtime.getState().exitPhase).toBe('none');
+    expect(runtime.getState().aircraft).toEqual(frozen);
+    expect(terminalFadeComplete(runtime.getState())).toBe(true);
+    // A repeated authorization can never restart the completed fade.
+    runtime.authorizeCommittedExit();
+    for (let frame = 0; frame < 8; frame += 1) {
+      runtime.advance(60);
+    }
+    expect(runtime.getState().defeatFadeStepsRemaining).toBe(0);
+    expect(runtime.getState().aircraft).toEqual(frozen);
   });
 
   it('authorizes exactly once for a frozen committed Success terminal', () => {

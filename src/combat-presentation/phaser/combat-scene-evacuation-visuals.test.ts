@@ -3,9 +3,13 @@ import type { PreparedRuntimeAsset } from '@application/ports';
 import {
   EXIT_CENTRE_STEPS,
   FIXED_STEP_SECONDS,
+  applyDebugCommand,
   rangedProjectileGeometry,
+  spawnProjectile,
   spawnRangedProjectile,
   stepCombatSimulation,
+  TERMINAL_FADE_STEPS,
+  DESTRUCTION_SHATTER_REGULAR_STEPS,
   type CombatSimulationState,
   type CombatEnemy,
   type EnemyProjectile,
@@ -20,7 +24,7 @@ import type { CombatSceneContext } from './combat-scene';
  * genuine Phaser CANVAS game boots the REAL `CombatScene` under jsdom, driven
  * by the authoritative simulation snapshots through the exact production
  * `CombatSceneContext`. The assertions inspect the scene's real GameObjects —
- * prepared/fallback enemy images/graphics and enemy-projectile rectangles —
+ * prepared/fallback enemy images/graphics and enemy-projectile circles —
  * proving they receive the simulation-owned opacity scalar, are destroyed at
  * exactly zero after the 30 centre steps, and are never recreated during later
  * fly-up frames while the frozen simulation entities still exist. jsdom cannot
@@ -257,7 +261,7 @@ interface CombatSceneHarness {
   readonly game: InstanceType<PhaserModule['Game']>;
   readonly scene: Phaser.Scene & {
     enemyVisuals: Map<number, Phaser.GameObjects.GameObject>;
-    enemyProjectileVisuals: Map<number, Phaser.GameObjects.Rectangle>;
+    enemyProjectileVisuals: Map<number, Phaser.GameObjects.Graphics>;
     enemyTextureStates: Map<string, 'decoding' | 'ready' | 'fallback'>;
     enemyTextureDecodes: Map<string, HTMLImageElement>;
     simState: CombatSimulationState;
@@ -380,7 +384,7 @@ describe('real CombatScene Evacuation fade (V02-WI-05 E02 C01)', () => {
     let state = { ...holder.state, exitAuthorized: true };
     holder.state = state;
     let lastEnemyVisual: Phaser.GameObjects.GameObject | undefined;
-    let lastProjectileVisual: Phaser.GameObjects.Rectangle | undefined;
+    let lastProjectileVisual: Phaser.GameObjects.Graphics | undefined;
     for (let step = 1; step <= EXIT_CENTRE_STEPS; step += 1) {
       lastEnemyVisual = scene.enemyVisuals.get(enemyId);
       lastProjectileVisual = scene.enemyProjectileVisuals.get(projectileId);
@@ -873,5 +877,186 @@ describe('real CombatScene Evacuation Countdown replacement (V02-WI-05 E03)', ()
     }
     expect(harness.holder.state.evacuationStepsRemaining).toBe(240);
     expect(harness.holder.state.terminalResult).toBeNull();
+  });
+});
+
+/**
+ * V021-WI-04-B (patch §4, V021-AC-005, V021-DEC-001) real-renderer evidence for
+ * the committed **Defeat/Game Over** terminal: the same genuine Phaser CANVAS
+ * scene is driven with a frozen Defeat snapshot and every named fade surface
+ * (regular enemy, enemy projectile, player projectile, transient hit/deflection
+ * feedback) is asserted, together with the exact `30`-step boundary, exact-zero
+ * removal, and the explicit exclusions (Aircraft, background, HUD) that must NOT
+ * fade.
+ */
+type FadingSceneSurface = CombatSceneHarness['scene'] & {
+  projectileVisuals: Map<number, Phaser.GameObjects.Graphics>;
+  destructionShatterVisuals: Map<number, Phaser.GameObjects.Graphics>;
+  eliteDeflectionVisuals: Map<number, Phaser.GameObjects.Graphics>;
+  fallbackGraphics: Phaser.GameObjects.Graphics | null;
+};
+
+/** The real Defeat freeze plus every named non-Aircraft fade surface. */
+function frozenDefeatState(): CombatSimulationState {
+  const fresh = createTestCombatState({ mode: 'keyboard' });
+  const defeated = applyDebugCommand(fresh, {
+    type: 'combat-debug/lose-mission',
+  });
+  const enemy = basicAt(defeated, defeated.viewportWidth * 0.3, 150);
+  const enemyProjectile = rangedProjectileAbove(defeated);
+  const playerProjectile = spawnProjectile(
+    400,
+    1,
+    defeated.aircraft.centerX,
+    defeated.aircraft.centerY - defeated.aircraftHeight / 2,
+    {
+      width: defeated.projectileWidth,
+      height: defeated.projectileHeight,
+    },
+  );
+  return {
+    ...defeated,
+    enemies: [enemy],
+    enemyProjectiles: [enemyProjectile],
+    projectiles: [playerProjectile],
+    destructionShatters: [
+      {
+        enemyId: 77,
+        centerX: defeated.viewportWidth * 0.4,
+        centerY: 200,
+        size: 12,
+        variant: 'regular',
+        totalSteps: DESTRUCTION_SHATTER_REGULAR_STEPS,
+        ageSteps: 0,
+      },
+    ],
+    eliteDeflectionFeedbacks: {
+      88: {
+        enemyId: 88,
+        impactCenterX: defeated.viewportWidth * 0.6,
+        impactCenterY: 240,
+        stepsRemaining: 3,
+      },
+    },
+  };
+}
+
+describe('real CombatScene committed Defeat fade (V021-WI-04-B, V021-AC-005)', () => {
+  it('fades every named non-Aircraft surface over exactly 30 steps and never the Aircraft, background or HUD', async () => {
+    const harness = await bootRealCombatScene([], frozenDefeatState());
+    activeCleanups.push(harness);
+    const scene = harness.scene as FadingSceneSurface;
+    expect(harness.holder.state.terminalResult).toEqual({ kind: 'defeat' });
+    expect(harness.holder.state.defeatFadeStepsRemaining).toBe(
+      TERMINAL_FADE_STEPS,
+    );
+    const enemyId = harness.holder.state.enemies[0]!.id;
+    const enemyProjectileId = harness.holder.state.enemyProjectiles[0]!.id;
+    const playerProjectileId = harness.holder.state.projectiles[0]!.id;
+    const shatterEnemyId = harness.holder.state.destructionShatters[0]!.enemyId;
+    const deflectionId = 88;
+    const camera = scene.cameras.main as unknown as {
+      backgroundColor: { rgba: number };
+    };
+    const backgroundBefore = camera.backgroundColor.rgba;
+    const aircraftX = scene.fallbackGraphics?.x;
+    const aircraftY = scene.fallbackGraphics?.y;
+
+    // Pre-commit freeze: every named surface exists at full opacity, including
+    // the V021-WI-05 destruction shatter created by the destruction step.
+    scene.update(0, 16.7);
+    expect(scene.enemyVisuals.has(enemyId)).toBe(true);
+    expect(scene.enemyProjectileVisuals.has(enemyProjectileId)).toBe(true);
+    expect(scene.projectileVisuals.has(playerProjectileId)).toBe(true);
+    expect(scene.destructionShatterVisuals.has(shatterEnemyId)).toBe(true);
+    expect(scene.eliteDeflectionVisuals.has(deflectionId)).toBe(true);
+    expect(alphaOf(scene, enemyId)).toBeCloseTo(1, 6);
+    expect(
+      scene.enemyProjectileVisuals.get(enemyProjectileId)!.alpha,
+    ).toBeCloseTo(1, 6);
+    expect(scene.projectileVisuals.get(playerProjectileId)!.alpha).toBeCloseTo(
+      1,
+      6,
+    );
+    expect(
+      scene.destructionShatterVisuals.get(shatterEnemyId)!.alpha,
+    ).toBeCloseTo(1, 6);
+    expect(scene.eliteDeflectionVisuals.get(deflectionId)!.alpha).toBeCloseTo(
+      1,
+      6,
+    );
+
+    // Authorize the committed write: the Defeat fade runs the exact 30 steps
+    // with a stationary Aircraft and no exit phase at all.
+    let state = { ...harness.holder.state, exitAuthorized: true };
+    harness.holder.state = state;
+    for (let step = 1; step <= TERMINAL_FADE_STEPS; step += 1) {
+      state = stepCombatSimulation(state, FIXED_STEP_SECONDS);
+      harness.holder.state = state;
+      scene.update(0, 16.7);
+      expect(state.exitPhase).toBe('none');
+      const expected = (TERMINAL_FADE_STEPS - step) / TERMINAL_FADE_STEPS;
+      if (step < TERMINAL_FADE_STEPS) {
+        expect(alphaOf(scene, enemyId)).toBeCloseTo(expected, 6);
+        expect(
+          scene.enemyProjectileVisuals.get(enemyProjectileId)!.alpha,
+        ).toBeCloseTo(expected, 6);
+        expect(
+          scene.projectileVisuals.get(playerProjectileId)!.alpha,
+        ).toBeCloseTo(expected, 6);
+        // V021-WI-05 (patch §4.1): the destruction shatter is a named fade
+        // surface whose surface alpha is the committed terminal scalar, and it
+        // additionally expires through its OWN exact 12 executed steps — the
+        // committed fade only multiplies its opacity while it is still alive.
+        if (step < DESTRUCTION_SHATTER_REGULAR_STEPS) {
+          expect(
+            scene.destructionShatterVisuals.get(shatterEnemyId)!.alpha,
+          ).toBeCloseTo(expected, 6);
+        } else {
+          expect(scene.destructionShatterVisuals.has(shatterEnemyId)).toBe(
+            false,
+          );
+        }
+        expect(
+          scene.eliteDeflectionVisuals.get(deflectionId)!.alpha,
+        ).toBeCloseTo(expected, 6);
+      }
+    }
+    // Exact zero: every faded surface is removed. The enemy, enemy-projectile,
+    // player-projectile and Elite-deflection records are still frozen at their
+    // pre-fade values, while the V021-WI-05 destruction shatter has already
+    // expired through its own exact 12 executed terminal steps (patch §4.1) —
+    // the committed fade multiplied its opacity but never extended its life.
+    expect(state.defeatFadeStepsRemaining).toBe(0);
+    expect(state.enemies).toHaveLength(1);
+    expect(state.enemyProjectiles).toHaveLength(1);
+    expect(state.projectiles).toHaveLength(1);
+    expect(state.destructionShatters).toHaveLength(0);
+    expect(state.eliteDeflectionFeedbacks[deflectionId]).toBeDefined();
+    expect(scene.enemyVisuals.size).toBe(0);
+    expect(scene.enemyProjectileVisuals.size).toBe(0);
+    expect(scene.projectileVisuals.size).toBe(0);
+    expect(scene.destructionShatterVisuals.size).toBe(0);
+    expect(scene.eliteDeflectionVisuals.size).toBe(0);
+    // Aircraft: never faded, never centred, never moved upward.
+    expect(scene.fallbackGraphics).not.toBeNull();
+    expect(scene.fallbackGraphics!.alpha).toBeCloseTo(1, 6);
+    expect(scene.fallbackGraphics!.x).toBe(aircraftX);
+    expect(scene.fallbackGraphics!.y).toBe(aircraftY);
+    // Background camera colour is not a fade surface either.
+    expect(camera.backgroundColor.rgba).toBe(backgroundBefore);
+
+    // Later frames on the same frozen Defeat snapshot must never recreate a
+    // faded surface (the Game Over presentation is a separate owner).
+    for (let frame = 0; frame < 20; frame += 1) {
+      harness.holder.state = stepCombatSimulation(state, FIXED_STEP_SECONDS);
+      scene.update(0, 16.7);
+      expect(scene.enemyVisuals.size).toBe(0);
+      expect(scene.enemyProjectileVisuals.size).toBe(0);
+      expect(scene.projectileVisuals.size).toBe(0);
+      expect(scene.destructionShatterVisuals.size).toBe(0);
+      expect(scene.eliteDeflectionVisuals.size).toBe(0);
+    }
+    expect(scene.fallbackGraphics!.alpha).toBeCloseTo(1, 6);
   });
 });

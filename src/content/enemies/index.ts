@@ -9,6 +9,14 @@ import type { EnemyType } from '@domain/model';
  * rendered bounds for spawn placement, activation, collision, and escape.
  * Ranged and Hunter consume the independent per-role firing/attack rules in
  * `src/application/combat/enemies.ts`; the values below are read-only content.
+ *
+ * v0.2.1 patch §3
+ * (`SHMUP_V0.2.1_COMBAT_PATCH_SPECIFICATION`): this file remains the single
+ * regular-enemy geometry owner. The first approved candidate multiplies the
+ * complete rendered width and height of Basic/Ranged/Hunter by `1.5` (area by
+ * `2.25`), so the area-ratio fields below move `1 → 2.25`, `1.2 → 2.7`,
+ * `0.8 → 1.8`; prepared sprites and procedural fallbacks share the same
+ * configured bounds and the Elite geometry is unchanged.
  */
 export interface EnemyDefinition {
   readonly type: EnemyType;
@@ -47,7 +55,9 @@ export const BASIC_DRONE: EnemyDefinition = {
   contactDamage: 15,
   playerDestructionReward: 1,
   escapePenalty: 1,
-  visualFootprintAreaRatio: 1,
+  // v0.2.1 patch §3 first candidate: v0.2 `1` × 1.5² complete-area multiplier
+  // (1.5× width and 1.5× height at every supported viewport).
+  visualFootprintAreaRatio: 2.25,
   visualAspectRatio: 192 / 101,
 };
 
@@ -60,7 +70,8 @@ export const RANGED_DRONE: EnemyDefinition = {
   contactDamage: 15,
   playerDestructionReward: 2,
   escapePenalty: 2,
-  visualFootprintAreaRatio: 1.2,
+  // v0.2.1 patch §3 first candidate: v0.2 `1.2` × 1.5².
+  visualFootprintAreaRatio: 2.7,
   visualAspectRatio: 224 / 163,
 };
 
@@ -73,7 +84,8 @@ export const HUNTER_DRONE: EnemyDefinition = {
   contactDamage: 35,
   playerDestructionReward: 2,
   escapePenalty: 2,
-  visualFootprintAreaRatio: 0.8,
+  // v0.2.1 patch §3 first candidate: v0.2 `0.8` × 1.5².
+  visualFootprintAreaRatio: 1.8,
   visualAspectRatio: 114 / 192,
 };
 

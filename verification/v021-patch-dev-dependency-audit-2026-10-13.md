@@ -1,0 +1,30 @@
+# v0.2.1 local patch — development-dependency audit
+
+**State:** factual audit only; Product Owner decision pending. Checked 2026-10-13 on `feat/v02-1`, HEAD `87842417305ddbc1cd63fc5ec2c5d023e2250556`, unchanged `package-lock.json` SHA-256 `f3b4f2cd47595be3a21572519e5da2bdfe078a9d9099fb5e288dc45fcc5a1cc7`. No dependency, lockfile or product-code change was made.
+
+`npm audit` exits `1`: 22 affected package entries (17 high, 5 moderate, no critical) **propagate from three distinct root advisories**, not 22 independent defects. `npm audit --omit=dev` exits `0`: zero reported runtime-install vulnerabilities. This does not call the whole-tree audit passing or certify an external build.
+
+| Root advisory                                                                                                        | Installed path and affected version                                                     | Published fix and local exposure assessment                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`GHSA-vfj7-8cjw-p6xm`](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), high, stack-exhaustion DoS               | `stylelint@17.14.1 → micromatch@4.0.8 → braces@3.0.3`                                   | The advisory lists **no patched braces version**; npm registry's current braces version is `3.0.3`. Current lint uses a fixed local CSS glob, not untrusted user-supplied brace patterns. Risk is dev-tool availability if hostile patterns reach this chain. The v0.2.0 `V02-DEC-037` exception covers only that earlier local candidate; it does not transfer to v0.2.1.                                                                                              |
+| [`GHSA-68fv-2mgg-jv7q`](https://github.com/advisories/GHSA-68fv-2mgg-jv7q), high, indexed-source-map event-loop DoS  | `postcss@8.5.26` and `jsdom@30.0.1 → css-tree@3.2.1` both resolve `source-map-js@1.2.1` | Patched `source-map-js@1.2.2` is published and falls inside both declared `^1.2.1` ranges. Current use is build/test tooling over local source; no production-install path was found. Untrusted source maps fed to a developer/CI process would be the relevant exposure. npm's `fixAvailable: false` metadata conflicts with the published compatible version, so actual lockfile resolution and gates must be checked in a separately authorized repair, not assumed. |
+| [`GHSA-rj75-hqrm-r3gf`](https://github.com/advisories/GHSA-rj75-hqrm-r3gf), moderate, selector-parser CPU exhaustion | `stylelint@17.14.1` and its selector helpers resolve `postcss-selector-parser@7.1.5`    | Patched `7.1.6` is published and falls inside stylelint's declared `^7.1.4` range. The upstream advisory says ordinary build-time parsing of trusted CSS is not affected; untrusted attacker-supplied selectors entering a synchronous parser are the relevant exposure. npm reports `fixAvailable: false`, so a proposed lockfile-only refresh still needs to be tested, not presumed green.                                                                           |
+
+**Recommended bounded decision:** authorize a separate dev-only lockfile refresh for the two published compatible patches (`source-map-js@1.2.2`, `postcss-selector-parser@7.1.6`), with `package.json` and runtime dependencies unchanged, followed by `npm ci`, both audits and the risk-linked code/build gates on the new fingerprint. Then decide whether to grant a **named, local v0.2.1-only** exception for the still-unpatched `braces` advisory. Do not run broad `npm audit fix` blindly, approve all 22 reported entries as one blanket exception, or describe a non-zero whole-tree audit as passed. If a targeted refresh proves incompatible, return the measured failure for a new decision.
+
+This audit is a dependency/security choice separate from the accepted V021-DEC-006 verification-route amendment. Unrelated mechanics work can proceed; final local patch acceptance cannot claim the security preflight closed until the Product Owner chooses and the chosen action is verified.
+
+**2026-10-14 update (new candidate, not a rewrite of the audit above):** The
+approved lockfile-only refresh now installs `source-map-js@1.2.2` and
+`postcss-selector-parser@7.1.6` (`package-lock.json` SHA-256
+`ac38c20203b529c9d713f0ebdd010066c9ed372cc44475e79bedc63cb30f81a0`);
+`npm ci`, runtime audit and the corrected `npm run verify` gate pass. A fresh
+`npm audit --json` exits `1`: seven high affected entries, all propagated from
+the single `GHSA-vfj7-8cjw-p6xm` advisory; `fixAvailable` is false for
+`braces`, `micromatch`, `stylelint` and `stylelint-config-standard` in this
+installed path. `npm audit --omit=dev --json` exits `0` with zero findings;
+`npm ls braces --all` confirms only `stylelint@17.14.1 > micromatch@4.0.8 >
+braces@3.0.3`. The Product Owner has now approved the bounded local-only
+`V021-DEC-007` exception; it requires independent amendment review and a
+repeat of the audits on the final patch candidate. The earlier 2026-10-13
+recommendation was the decision path at that time, not the current status.

@@ -6,7 +6,11 @@ import {
   MISSIONS,
   enemyRenderedBounds,
 } from '@application/content';
-import { createTestCombatState, TEST_MISSION_SEED } from '@test-support/domain';
+import {
+  createTestCombatRuntime,
+  createTestCombatState,
+  TEST_MISSION_SEED,
+} from '@test-support/domain';
 import {
   activateElite,
   createEliteForEntry,
@@ -17,11 +21,13 @@ import {
   ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
   ELITE_ARMOURED_PHASE_STEPS,
   ELITE_CANNON_INTERVAL_STEPS,
+  ELITE_CORE_FIRST_INTERVAL_STEPS,
   ELITE_CORE_INTERVAL_STEPS,
   ELITE_ENTRY_SPEED_VIEWPORT_HEIGHT_PER_SECOND,
   ELITE_HORIZONTAL_SPEED_VIEWPORT_WIDTH_PER_SECOND,
   ELITE_MOVEMENT_INTERVAL_DRAW_RANGE,
   ELITE_MOVEMENT_MIN_INTERVAL_STEPS,
+  ELITE_PHASE_CYCLE_STEPS,
   ELITE_VULNERABLE_PHASE_STEPS,
 } from './enemies';
 import type { CombatEnemy, EliteEnemyState, EnemyStepInput } from './enemies';
@@ -46,6 +52,7 @@ import {
 import type { EnemyProjectileInstance } from './projectiles';
 import { resolveEnemyProjectileCollisions } from './collision';
 import {
+  EXIT_CENTRE_STEPS,
   stepCombatSimulation,
   submitCombatCommand,
   FIXED_STEP_SECONDS,
@@ -237,8 +244,10 @@ function projectilesOfKind(
   );
 }
 
-/** A canonical activated Elite already inside the Vulnerable phase with its
- *  full Core timer, ready for Core cadence/cap/lifetime coverage. */
+/** A canonical activated Elite already inside the Vulnerable phase with its full
+ *  repeat Core timer (patch §3.1, V021-DEC-004: the first Core of a phase fires
+ *  after 30 steps, every later one after 60), ready for Core cadence/cap/
+ *  lifetime coverage. */
 function vulnerableElite(
   stream: Mulberry32 = movementStream(),
 ): EliteEnemyState {
@@ -624,7 +633,10 @@ describe('Elite phase-geometry and resize reprojection (Epic §9.4)', () => {
     expect(transitioned.movementDecisionStepsRemaining).toBe(
       ORDINAL_0_FIRST_DECISION[1] - 1,
     );
-    expect(transitioned.attackStepsRemaining).toBe(ELITE_CORE_INTERVAL_STEPS);
+    // The new Vulnerable phase starts its own fresh 30-step first-Core timer.
+    expect(transitioned.attackStepsRemaining).toBe(
+      ELITE_CORE_FIRST_INTERVAL_STEPS,
+    );
     // The preserved stream still yields the identical next decision.
     const decided = stepEliteExact(
       transitioned,
@@ -845,6 +857,48 @@ describe('Elite Armoured cannon pair (Epic §9.4, V02-AC-010, V02-DEC-033)', () 
     expect(hit.playerHullIntegrity).toBe(90);
     expect(hit.hitCount).toBe(1);
   });
+
+  it('fires fifteen cannon pairs on executed steps 45, 90, …, 675 and never on the step-720 boundary (patch §3.1, V021-DEC-004)', () => {
+    const stream = movementStream();
+    let current = pipelineState(
+      activatedElite(stream),
+      stream,
+      pinnedAircraft(AIRCRAFT_HOLD.x, AIRCRAFT_HOLD.y),
+    );
+    const pairSteps: number[] = [];
+    for (let step = 1; step <= ELITE_ARMOURED_PHASE_STEPS; step += 1) {
+      const before = current.nextEnemyProjectileId;
+      const eliteBefore = eliteFrom(current.enemies).attackStepsRemaining;
+      const phaseBefore = eliteFrom(current.enemies).phase;
+      current = stepPipeline(current, 1);
+      const elite = eliteFrom(current.enemies);
+      const created = current.nextEnemyProjectileId - before;
+      if (step < ELITE_ARMOURED_PHASE_STEPS) {
+        expect(elite.phase).toBe('armoured');
+        // Exactly one cannon pair per reset step; no other enemy projectile is
+        // created inside the complete Armoured phase.
+        if (elite.attackStepsRemaining > eliteBefore) {
+          pairSteps.push(step);
+          expect(created).toBe(2);
+        } else {
+          expect(created).toBe(0);
+        }
+      } else {
+        // The phase-boundary step suppresses any old-phase shot and enters the
+        // Vulnerable phase with its own fresh timers.
+        expect(phaseBefore).toBe('armoured');
+        expect(elite.phase).toBe('vulnerable');
+        expect(created).toBe(0);
+        expect(elite.attackStepsRemaining).toBe(
+          ELITE_CORE_FIRST_INTERVAL_STEPS,
+        );
+      }
+    }
+    expect(pairSteps).toEqual([
+      45, 90, 135, 180, 225, 270, 315, 360, 405, 450, 495, 540, 585, 630, 675,
+    ]);
+    expect(pairSteps).toHaveLength(15);
+  });
 });
 
 describe('Elite Vulnerable homing Core (Epic §9.4, V02-AC-010, V02-DEC-033)', () => {
@@ -1031,7 +1085,7 @@ describe('Elite Vulnerable homing Core (Epic §9.4, V02-AC-010, V02-DEC-033)', (
     expect(hit.hitCount).toBe(1);
   });
 
-  it('launches the first Core only after the complete 150-step interval from the exact muzzle', () => {
+  it('launches a Core only after the complete 60-step repeat interval from the exact muzzle', () => {
     const stream = movementStream();
     const aircraft = { x: 900, y: 480 };
     const state = pipelineState(
@@ -1076,7 +1130,7 @@ describe('Elite Vulnerable homing Core (Epic §9.4, V02-AC-010, V02-DEC-033)', (
     );
     expect(core.remainingLifetimeSteps).toBe(ELITE_CORE_LIFETIME_STEPS - 1);
     expect(ELITE_CORE_LIFETIME_STEPS).toBe(360);
-    // The launch resets the complete 150-step Core timer.
+    // The launch resets the complete 60-step repeat Core timer.
     expect(elite.attackStepsRemaining).toBe(ELITE_CORE_INTERVAL_STEPS);
   });
 });
@@ -1097,7 +1151,9 @@ describe('Elite attack ordering, Core cap, lifetime, and cleanup (Epic §9.4)', 
     expect(transitioned.phase).toBe('vulnerable');
     expect(transitioned.phaseStepsElapsed).toBe(0);
     expect(transitioned.phaseStepsRemaining).toBe(ELITE_VULNERABLE_PHASE_STEPS);
-    expect(transitioned.attackStepsRemaining).toBe(ELITE_CORE_INTERVAL_STEPS);
+    expect(transitioned.attackStepsRemaining).toBe(
+      ELITE_CORE_FIRST_INTERVAL_STEPS,
+    );
     // In the real pipeline the next executed step is the new timer's first
     // decrement and still fires nothing; the boundary step fired nothing.
     const transitionedState = stepPipeline(
@@ -1110,12 +1166,12 @@ describe('Elite attack ordering, Core cap, lifetime, and cleanup (Epic §9.4)', 
     );
     expect(eliteFrom(transitionedState.enemies).phase).toBe('vulnerable');
     expect(eliteFrom(transitionedState.enemies).attackStepsRemaining).toBe(
-      ELITE_CORE_INTERVAL_STEPS,
+      ELITE_CORE_FIRST_INTERVAL_STEPS,
     );
     expect(projectilesOfKind(transitionedState, 'elite-core')).toHaveLength(0);
     const afterOne = stepPipeline(transitionedState, 1);
     expect(eliteFrom(afterOne.enemies).attackStepsRemaining).toBe(
-      ELITE_CORE_INTERVAL_STEPS - 1,
+      ELITE_CORE_FIRST_INTERVAL_STEPS - 1,
     );
     expect(projectilesOfKind(afterOne, 'elite-core')).toHaveLength(0);
 
@@ -1160,7 +1216,7 @@ describe('Elite attack ordering, Core cap, lifetime, and cleanup (Epic §9.4)', 
     const transitioned = stepPipeline(state, 1);
     const elite = eliteFrom(transitioned.enemies);
     expect(elite.phase).toBe('vulnerable');
-    expect(elite.attackStepsRemaining).toBe(ELITE_CORE_INTERVAL_STEPS);
+    expect(elite.attackStepsRemaining).toBe(ELITE_CORE_FIRST_INTERVAL_STEPS);
     // The already launched cannon survives the boundary untouched and advances
     // exactly one step along its fixed trajectory.
     const kept = projectilesOfKind(transitioned, 'elite-cannon');
@@ -1172,36 +1228,151 @@ describe('Elite attack ordering, Core cap, lifetime, and cleanup (Epic §9.4)', 
     expect(projectilesOfKind(transitioned, 'elite-core')).toHaveLength(0);
   });
 
-  it('holds a due Core launch at zero while two Cores are active and releases it with capacity', () => {
+  it('holds a due Core launch at zero while six Cores are active and releases it with capacity', () => {
     const stream = movementStream();
     const geometry = eliteCoreProjectileGeometry(SHORT_SIDE);
-    const expiring: readonly EnemyProjectileInstance[] = [
-      {
-        ...spawnEliteHomingCore(100, 200, 80, 40, 1200, 560, 72, geometry),
+    // The active-Core cap is six (patch §3.1, V021-DEC-004): one Vulnerable
+    // phase's six sequential launches fit inside the phase when none is
+    // destroyed, so a due seventh launch must hold.
+    const expiring: readonly EnemyProjectileInstance[] = [0, 1, 2, 3, 4, 5].map(
+      (index) => ({
+        ...spawnEliteHomingCore(
+          100 + index,
+          200,
+          80,
+          40,
+          1200,
+          560,
+          72,
+          geometry,
+        ),
         remainingLifetimeSteps: 1,
-      },
-      {
-        ...spawnEliteHomingCore(101, 200, 80, 40, 1200, 560, 72, geometry),
-        remainingLifetimeSteps: 1,
-      },
-    ];
+      }),
+    );
     const state = pipelineState(
       { ...vulnerableElite(stream), attackStepsRemaining: 1 },
       stream,
       { ...pinnedAircraft(900, 480), enemyProjectiles: [...expiring] },
     );
-    // The launch is due, the cap holds it at zero, and no third Core exists;
-    // the two expired Cores leave the viewport-free state in this same step.
+    // The launch is due, the six-active-Core cap holds it at zero, and no
+    // seventh Core exists; the six expired Cores leave the active set in this
+    // same step.
     const held = stepPipeline(state, 1);
     expect(projectilesOfKind(held, 'elite-core')).toHaveLength(0);
     expect(eliteFrom(held.enemies).attackStepsRemaining).toBe(0);
     // The first later Vulnerable step with capacity launches one Core and
-    // resets the complete 150-step timer.
+    // resets the complete 60-step repeat timer.
     const released = stepPipeline(held, 1);
     expect(projectilesOfKind(released, 'elite-core')).toHaveLength(1);
     expect(eliteFrom(released.enemies).attackStepsRemaining).toBe(
       ELITE_CORE_INTERVAL_STEPS,
     );
+  });
+
+  it('launches exactly six Cores on executed Vulnerable steps 30, 90, 150, 210, 270, 330 and none on the step-360 boundary (patch §3.1, V021-DEC-004)', () => {
+    const stream = movementStream();
+    let current = pipelineState(
+      activatedElite(stream),
+      stream,
+      pinnedAircraft(AIRCRAFT_HOLD.x, AIRCRAFT_HOLD.y),
+    );
+    // Enter Vulnerable through the real Armoured boundary: the entry starts the
+    // fresh 30-step first-Core timer that this test measures.
+    for (let step = 0; step < ELITE_ARMOURED_PHASE_STEPS; step += 1) {
+      current = stepPipeline(current, 1);
+    }
+    expect(eliteFrom(current.enemies).phase).toBe('vulnerable');
+    expect(eliteFrom(current.enemies).attackStepsRemaining).toBe(
+      ELITE_CORE_FIRST_INTERVAL_STEPS,
+    );
+    const launchSteps: number[] = [];
+    const liveCores: number[] = [];
+    for (let step = 1; step <= ELITE_VULNERABLE_PHASE_STEPS - 1; step += 1) {
+      const before = current.nextEnemyProjectileId;
+      current = stepPipeline(current, 1);
+      const created = current.nextEnemyProjectileId - before;
+      if (created === 1) {
+        launchSteps.push(step);
+        liveCores.push(projectilesOfKind(current, 'elite-core').length);
+      } else {
+        expect(created).toBe(0);
+      }
+    }
+    expect(launchSteps).toEqual([30, 90, 150, 210, 270, 330]);
+    // The six launches fill the six-active-Core cap.
+    expect(liveCores).toEqual([1, 2, 3, 4, 5, 6]);
+    // The pinned Aircraft absorbs the first (30-step) Core inside the phase, so
+    // five Cores remain live at the phase end.
+    expect(projectilesOfKind(current, 'elite-core')).toHaveLength(5);
+    // 330 resets the repeat timer; 29 executed steps later it holds at 31.
+    expect(eliteFrom(current.enemies).attackStepsRemaining).toBe(31);
+    // The step-360 boundary fires nothing and returns to Armoured with the
+    // complete cannon timer.
+    const beforeBoundary = current.nextEnemyProjectileId;
+    const boundary = stepPipeline(current, 1);
+    expect(boundary.nextEnemyProjectileId).toBe(beforeBoundary);
+    expect(eliteFrom(boundary.enemies).phase).toBe('armoured');
+    expect(eliteFrom(boundary.enemies).attackStepsRemaining).toBe(
+      ELITE_CANNON_INTERVAL_STEPS,
+    );
+  });
+
+  it('freezes the Elite attack timers across Pause and a committed terminal without creating a projectile (patch §3.1, V021-DEC-004)', () => {
+    const runtime = createTestCombatRuntime({ missionId: 'interception-03' });
+    runtime.submitDebug({
+      type: 'combat-debug/spawn-enemy',
+      enemyType: 'elite-drone',
+    });
+    runtime.submitDebug({
+      type: 'combat-debug/set-elite-phase',
+      phase: 'vulnerable',
+    });
+    const active = runtime.getState();
+    const elite = eliteFrom(active.enemies);
+    expect(elite.phase).toBe('vulnerable');
+    expect(elite.attackStepsRemaining).toBe(ELITE_CORE_FIRST_INTERVAL_STEPS);
+
+    // Pause freezes the exact state object: no fixed step, no timer decrement,
+    // and no launch.
+    runtime.setPaused(true);
+    const pausedBase = runtime.getState();
+    const paused = runtime.advance(10);
+    expect(paused).toBe(pausedBase);
+    expect(eliteFrom(paused.enemies).attackStepsRemaining).toBe(
+      ELITE_CORE_FIRST_INTERVAL_STEPS,
+    );
+    expect(projectilesOfKind(paused, 'elite-core')).toHaveLength(0);
+    runtime.setPaused(false);
+
+    // The first Core still launches exactly 30 EXECUTED steps after the phase
+    // entry: paused time consumed no step of the fresh timer.
+    let launched = runtime.getState();
+    let executed = 0;
+    while (
+      projectilesOfKind(launched, 'elite-core').length === 0 &&
+      executed < 60
+    ) {
+      launched = runtime.advance(FIXED_STEP_SECONDS);
+      executed += 1;
+    }
+    expect(executed).toBe(ELITE_CORE_FIRST_INTERVAL_STEPS);
+    expect(projectilesOfKind(launched, 'elite-core')).toHaveLength(1);
+
+    // A committed terminal freezes the same timers: the fade window never
+    // creates a Core or a cannon.
+    runtime.submitDebug({ type: 'combat-debug/evacuate-mission' });
+    const terminal = runtime.getState();
+    expect(terminal.terminalResult).toEqual({ kind: 'evacuated' });
+    const frozen = runtime.advance(5);
+    expect(frozen).toBe(terminal);
+    runtime.authorizeCommittedExit();
+    const projectileIdBeforeFade = terminal.nextEnemyProjectileId;
+    let faded = terminal;
+    for (let index = 0; index < EXIT_CENTRE_STEPS + 30; index += 1) {
+      faded = runtime.advance(FIXED_STEP_SECONDS);
+    }
+    expect(faded.nextEnemyProjectileId).toBe(projectileIdBeforeFade);
+    expect(faded.terminalResult).toEqual({ kind: 'evacuated' });
   });
 
   it('leaves no Elite entity, local record, reward, or projectile behind after destruction and cleanup', () => {
@@ -1309,6 +1480,150 @@ describe('Elite attack ordering, Core cap, lifetime, and cleanup (Epic §9.4)', 
     expect(projectilesOfKind(current, 'elite-core')).toHaveLength(0);
     expect(current.playerHullIntegrity).toBe(100);
     expect(current.aircraftDangerFlashStepsRemaining).toBe(0);
+  });
+});
+
+/**
+ * V021-WI-02-C01 S2 finding 1: the first-cycle cases above prove the fresh
+ * 45-step cannon-pair cadence and the fresh `30`-step first-Core / `60`-step
+ * repeat cadence for the FIRST entry of each phase only. This bounded
+ * counter-case advances the same real fixed-step owners through a complete
+ * `1080`-step Armoured/Vulnerable cycle into the SECOND Armoured and SECOND
+ * Vulnerable phases and measures the executed-step cadence again, so a
+ * regression that initializes the new timer only on first entry — or leaks an
+ * old-phase timer across a boundary — cannot pass.
+ */
+describe('Elite repeated Armoured/Vulnerable cycle cadence (patch §3.1, V021-DEC-004)', () => {
+  it('re-initializes the fresh 45-step cannon pair cadence on the second Armoured phase and the fresh 30/60-step Core cadence on the second Vulnerable phase', () => {
+    const stream = movementStream();
+    let current: CombatSimulationState = pipelineState(
+      activatedElite(stream),
+      stream,
+      {
+        ...pinnedAircraft(AIRCRAFT_HOLD.x, AIRCRAFT_HOLD.y),
+        // The bounded run executes 2160 fixed steps with the Aircraft pinned
+        // inside the Elite's Core path. God Mode only keeps that absorption from
+        // ending the run in Defeat: it changes no attack timer, no projectile,
+        // no phase transition, and no cadence fact measured here.
+        godModeEnabled: true,
+      },
+    );
+    const eliteState = () => eliteFrom(current.enemies);
+    /** Runs one complete phase window and returns the enemy projectiles created
+     *  on each of its executed steps. */
+    const recordPhase = (steps: number): readonly number[] => {
+      const created: number[] = [];
+      for (let index = 0; index < steps; index += 1) {
+        const projectileIdBefore = current.nextEnemyProjectileId;
+        current = stepPipeline(current, 1);
+        created.push(current.nextEnemyProjectileId - projectileIdBefore);
+      }
+      return created;
+    };
+    const firedSteps = (created: readonly number[]): readonly number[] =>
+      created.flatMap((count, index) => (count > 0 ? [index + 1] : []));
+    const expectOnlyCreated = (
+      created: readonly number[],
+      allowed: readonly number[],
+    ): void => {
+      expect(created.filter((count) => !allowed.includes(count))).toEqual([]);
+    };
+
+    // The canonical §3.1 executed-step cadence of one complete phase.
+    const CANNON_PAIR_STEPS = [
+      45, 90, 135, 180, 225, 270, 315, 360, 405, 450, 495, 540, 585, 630, 675,
+    ] as const;
+    const CORE_LAUNCH_STEPS = [30, 90, 150, 210, 270, 330] as const;
+
+    // Phase 1 — the activation-entry Armoured phase, and phase 2 — the FIRST
+    // Vulnerable entry through the real 720-step boundary. These two windows
+    // restate the accepted first-entry cadence inside the repeated-cycle run.
+    const armouredFirstEntry = recordPhase(ELITE_ARMOURED_PHASE_STEPS);
+    expect(firedSteps(armouredFirstEntry)).toEqual(CANNON_PAIR_STEPS);
+    expectOnlyCreated(armouredFirstEntry, [0, 2]);
+    expect(eliteState().phase).toBe('vulnerable');
+    expect(eliteState().attackStepsRemaining).toBe(
+      ELITE_CORE_FIRST_INTERVAL_STEPS,
+    );
+    const vulnerableFirstEntry = recordPhase(ELITE_VULNERABLE_PHASE_STEPS);
+    expect(firedSteps(vulnerableFirstEntry)).toEqual(CORE_LAUNCH_STEPS);
+    expectOnlyCreated(vulnerableFirstEntry, [0, 1]);
+    // The same first-entry exit state as the accepted first-cycle case: the
+    // pinned Aircraft absorbed the first Core inside the phase, so five Cores
+    // remain live at its end.
+    expect(projectilesOfKind(current, 'elite-core')).toHaveLength(5);
+
+    // Phase 3 - the SECOND Armoured entry (re-entry). Its fresh 45-step cannon
+    // timer must build the complete 15-pair cadence again, with no shot before
+    // its 45th executed step and none on its 720-step boundary.
+    expect(eliteState().phase).toBe('armoured');
+    expect(eliteState().attackStepsRemaining).toBe(ELITE_CANNON_INTERVAL_STEPS);
+    const armouredSecondEntry = recordPhase(ELITE_ARMOURED_PHASE_STEPS);
+    expect(firedSteps(armouredSecondEntry)).toEqual(CANNON_PAIR_STEPS);
+    expectOnlyCreated(armouredSecondEntry, [0, 2]);
+    // No early re-entry shot: the first 44 re-entered Armoured steps create
+    // nothing at all.
+    expect(
+      armouredSecondEntry.slice(0, ELITE_CANNON_INTERVAL_STEPS - 1),
+    ).toEqual(new Array<number>(ELITE_CANNON_INTERVAL_STEPS - 1).fill(0));
+    // Absolute timeline: the second Armoured phase starts at executed step 1080.
+    expect(
+      firedSteps(armouredSecondEntry).map(
+        (step) => step + ELITE_PHASE_CYCLE_STEPS,
+      ),
+    ).toEqual([
+      1125, 1170, 1215, 1260, 1305, 1350, 1395, 1440, 1485, 1530, 1575, 1620,
+      1665, 1710, 1755,
+    ]);
+    // A launched projectile keeps its lifecycle across the phase change: the
+    // pair fired on the last Armoured executed step (675) is still in flight on
+    // the boundary step, and the boundary created no new projectile.
+    const survivingCannonIds = projectilesOfKind(current, 'elite-cannon')
+      .map((projectile) => projectile.id)
+      .sort((left, right) => right - left);
+    expect(survivingCannonIds.slice(0, 2)).toEqual([
+      current.nextEnemyProjectileId - 1,
+      current.nextEnemyProjectileId - 2,
+    ]);
+    expect(eliteState().phase).toBe('vulnerable');
+    expect(eliteState().attackStepsRemaining).toBe(
+      ELITE_CORE_FIRST_INTERVAL_STEPS,
+    );
+
+    // Phase 4 - the SECOND Vulnerable entry (re-entry). The fresh 30-step
+    // first-Core timer and the 60-step repeat timer must launch the same six
+    // Cores on the same executed steps, and the 360-step boundary must fire
+    // nothing.
+    // The 359 executed steps of the re-entered Vulnerable phase before its
+    // boundary step; the boundary step is measured separately below.
+    const vulnerableSecondEntry = recordPhase(ELITE_VULNERABLE_PHASE_STEPS - 1);
+    expect(firedSteps(vulnerableSecondEntry)).toEqual(CORE_LAUNCH_STEPS);
+    expectOnlyCreated(vulnerableSecondEntry, [0, 1]);
+    // No first-Core leak: nothing launches on the first 29 re-entered steps.
+    expect(
+      vulnerableSecondEntry.slice(0, ELITE_CORE_FIRST_INTERVAL_STEPS - 1),
+    ).toEqual(new Array<number>(ELITE_CORE_FIRST_INTERVAL_STEPS - 1).fill(0));
+    // Absolute timeline: the second Vulnerable phase starts at executed step
+    // 1800, so the six launches land on executed steps 1830 ... 2130.
+    expect(
+      firedSteps(vulnerableSecondEntry).map(
+        (step) =>
+          step + (2 * ELITE_PHASE_CYCLE_STEPS - ELITE_VULNERABLE_PHASE_STEPS),
+      ),
+    ).toEqual([1830, 1890, 1950, 2010, 2070, 2130]);
+    // The 330-step launch reset the complete 60-step repeat timer: 29 executed
+    // steps later (the last Vulnerable step) it holds at 31, exactly like the
+    // accepted first-entry case.
+    expect(eliteState().attackStepsRemaining).toBe(31);
+    // All six re-entered launches are still in flight at the phase end: the cap
+    // was filled exactly (never exceeded) and this re-entered geometry kept the
+    // converging Cores clear of the pinned Aircraft over the remaining 29 steps.
+    expect(projectilesOfKind(current, 'elite-core')).toHaveLength(6);
+    // The 360-step boundary step fires nothing and returns to Armoured with its
+    // complete fresh cannon timer.
+    expect(recordPhase(1)).toEqual([0]);
+    expect(eliteState().phase).toBe('armoured');
+    expect(eliteState().attackStepsRemaining).toBe(ELITE_CANNON_INTERVAL_STEPS);
   });
 });
 

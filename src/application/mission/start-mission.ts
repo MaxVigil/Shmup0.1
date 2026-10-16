@@ -72,9 +72,10 @@ export async function startMission(
   if (!session.unlockedMissionIds.includes(missionId)) {
     return { kind: 'rejected', reason: 'mission-not-available' };
   }
-  // V02-WI-04/WI-05/WI-06 bounded staging: every authored mission carries its
-  // exact Arrival Groups (V02-DEC-021 Mission 01, V02-DEC-026 Mission 02,
-  // V02-DEC-032 Mission 03) and may start. The gate still rejects a mission
+  // V02-WI-04/WI-05/V021-WI-02 bounded staging: every authored mission carries
+  // its exact Arrival Groups (V02-DEC-021 Mission 01, V02-DEC-026 Mission 02,
+  // V021-DEC-003 Mission 03, which preserved V02-DEC-032's Elite-only arrival)
+  // and may start. The gate still rejects a mission
   // whose runtime plan is incomplete before any mission-start transaction, so
   // the runtime can never infer or invent geometry for a partially authored
   // mission; the production content validator enforces the same completeness.

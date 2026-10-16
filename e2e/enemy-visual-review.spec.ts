@@ -231,11 +231,17 @@ test('the fixture renders all five sprites and exact procedural fallbacks at the
     hunterFallback!.width * 0.5,
   );
 
-  // Approved relative gameplay-scale footprints (Epic §16.2–16.3).
-  expect(areas['elite-drone-armoured']!).toBeGreaterThan(
-    areas['ranged-drone']!,
+  // Approved relative gameplay-scale footprints. v0.2.1 §3 multiplies the
+  // complete rendered width AND height of the three regular roles by 1.5, so
+  // their content area ratios become Basic 2.25, Ranged 2.7, and Hunter 1.8,
+  // while the Elite Armoured/Vulnerable geometry and image bytes stay unchanged
+  // at 2.45. The approved footprint order is therefore Ranged > Elite Armoured
+  // > Basic > Hunter; this supersedes the v0.2 Epic §16.2–16.3 order, in which
+  // the unscaled Elite out-sized every regular role.
+  expect(areas['ranged-drone']!).toBeGreaterThan(
+    areas['elite-drone-armoured']!,
   );
-  expect(areas['ranged-drone']!).toBeGreaterThan(areas['basic-drone']!);
+  expect(areas['elite-drone-armoured']!).toBeGreaterThan(areas['basic-drone']!);
   expect(areas['basic-drone']!).toBeGreaterThan(areas['hunter-drone']!);
   expect(areas['elite-drone-vulnerable']!).toBeGreaterThanOrEqual(
     areas['elite-drone-armoured']! * 0.9,

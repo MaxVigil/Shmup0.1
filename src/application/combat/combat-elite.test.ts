@@ -15,7 +15,7 @@ import {
   ELITE_ANCHOR_VIEWPORT_FRACTION_Y,
   ELITE_ARMOURED_PHASE_STEPS,
   ELITE_CANNON_INTERVAL_STEPS,
-  ELITE_CORE_INTERVAL_STEPS,
+  ELITE_CORE_FIRST_INTERVAL_STEPS,
   ELITE_ENTRY_SPEED_VIEWPORT_HEIGHT_PER_SECOND,
   ELITE_PHASE_CYCLE_STEPS,
   ELITE_VULNERABLE_PHASE_STEPS,
@@ -23,6 +23,7 @@ import {
 import type { CombatEnemy, EliteEnemyState, EnemyStepInput } from './enemies';
 import {
   AIRCRAFT_DAMAGE_FLASH_STEPS,
+  DESTRUCTION_SHATTER_ELITE_STEPS,
   ELITE_CONTACT_DAMAGE,
   ENEMY_HIT_FLASH_STEPS,
   PAIR_CONTACT_COOLDOWN_STEPS,
@@ -441,7 +442,7 @@ describe('Elite player-projectile resolution (Epic §9.4/§10/§11)', () => {
     const result = resolveHits([elite], [projectile]);
     expect(result.projectiles).toHaveLength(0);
     expect(result.destroyedEnemies).toHaveLength(0);
-    expect(result.destroyedEnemyFlashes).toHaveLength(0);
+    expect(result.destructionShatters).toHaveLength(0);
     expect(result.enemies).toHaveLength(1);
     const after = eliteFrom(result.enemies);
     expect(after.hullIntegrity).toBe(60);
@@ -616,7 +617,20 @@ describe('Elite player-projectile resolution (Epic §9.4/§10/§11)', () => {
     expect(result.destroyedEnemies).toEqual([
       { id: ELITE_ID, type: 'elite-drone' },
     ]);
-    expect(result.destroyedEnemyFlashes).toHaveLength(1);
+    // V021-WI-05 E01 (patch §4.1): the Elite's ONE shatter carries the Elite
+    // variant with its exact 15-step lifetime, its creation-step centre and the
+    // Elite's complete current rendered dimension.
+    expect(result.destructionShatters).toEqual([
+      {
+        enemyId: ELITE_ID,
+        centerX: vulnerable.centerX,
+        centerY: vulnerable.centerY,
+        size: Math.max(vulnerable.width, vulnerable.height),
+        variant: 'elite',
+        totalSteps: DESTRUCTION_SHATTER_ELITE_STEPS,
+        ageSteps: 0,
+      },
+    ]);
     // Destruction is terminal and idempotent: the later same-step projectile
     // flies free instead of damaging or rewarding the destroyed Elite again.
     expect(result.projectiles.map((projectile) => projectile.id)).toEqual([60]);
@@ -649,7 +663,7 @@ describe('Elite player-projectile resolution (Epic §9.4/§10/§11)', () => {
     );
     const result = resolveHits([vulnerable], lethal);
     expect(result.destroyedEnemies).toHaveLength(1);
-    expect(result.destroyedEnemyFlashes).toHaveLength(1);
+    expect(result.destructionShatters).toHaveLength(1);
     expect(result.enemies).toHaveLength(0);
     expect(result.destroyedEnemies[0]?.type).toBe('elite-drone');
     // The 30 projectiles after destruction neither hit nor reward the Elite.
@@ -721,7 +735,7 @@ describe('Elite Aircraft contact (Epic §11.3, V02-DEC-033)', () => {
     expect(PAIR_CONTACT_COOLDOWN_STEPS).toBe(45);
     // No destruction, no reward/count, and no Elite Hull change.
     expect(result.destroyedByContact).toHaveLength(0);
-    expect(result.destroyedEnemyFlashes).toHaveLength(0);
+    expect(result.destructionShatters).toHaveLength(0);
     expect(result.enemies).toHaveLength(1);
     expect(eliteFrom(result.enemies).hullIntegrity).toBe(60);
   });
@@ -734,7 +748,7 @@ describe('Elite Aircraft contact (Epic §11.3, V02-DEC-033)', () => {
     expect(result.aircraftDangerFlashStepsRemaining).toBe(0);
     expect(result.pairContactCooldownSteps).toEqual({});
     expect(result.destroyedByContact).toHaveLength(0);
-    expect(result.destroyedEnemyFlashes).toHaveLength(0);
+    expect(result.destructionShatters).toHaveLength(0);
     expect(result.enemies).toHaveLength(1);
     expect(eliteFrom(result.enemies).hullIntegrity).toBe(60);
   });
@@ -778,10 +792,14 @@ describe('Elite Aircraft contact (Epic §11.3, V02-DEC-033)', () => {
     const activated = activate();
     const base = createTestCombatState();
     // Place the Elite exactly on the Aircraft hold pose so the pair overlaps.
+    // Its cannon timer is held far out because the patch §3.1 cadence fires the
+    // first Armoured pair on the 45th executed step, which would otherwise add
+    // cannon damage inside this 46-step pair-contact window.
     const overlapping: EliteEnemyState = {
       ...activated,
       centerX: base.aircraft.centerX,
       centerY: base.aircraft.centerY,
+      attackStepsRemaining: 1000,
     };
     const state: CombatSimulationState = {
       ...base,
@@ -1165,7 +1183,9 @@ describe('Extracted canonical Elite owners reused by the development Debug surfa
     expect(viaOwner.phase).toBe('vulnerable');
     expect(viaOwner.phaseStepsElapsed).toBe(0);
     expect(viaOwner.phaseStepsRemaining).toBe(ELITE_VULNERABLE_PHASE_STEPS);
-    expect(viaOwner.attackStepsRemaining).toBe(ELITE_CORE_INTERVAL_STEPS);
+    // A newly entered Vulnerable phase owns the fresh 30-step first-Core timer
+    // (patch §3.1, V021-DEC-004).
+    expect(viaOwner.attackStepsRemaining).toBe(ELITE_CORE_FIRST_INTERVAL_STEPS);
     // The drawn decision and its remaining interval survive the transition.
     const decided = activateElite(createElite(), {
       direction: 1,

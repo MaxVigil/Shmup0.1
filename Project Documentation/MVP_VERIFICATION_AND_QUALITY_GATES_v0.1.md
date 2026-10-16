@@ -242,6 +242,10 @@ For a Combat-heavy Epic that changes enemy types or their runtime behaviour:
 
 The existing accepted S14 proxy is historical performance evidence, not a substitute for the pre-change baseline when the new Epic's representative workload differs.
 
+**Narrow prospective v0.2.1 local-patch exception (V021-DEC-006, as simplified by Product Owner-approved V021-DEC-008 on 2026-10-15; independent amendment review accepted in `verification/v021-simple-performance-route-amendment-review.md`):** use the three substantive checks in §18.1: `npm run verify`, the existing `npm run verify:smoke` and one six-second **ordinary-production** Mission 01 performance spot check at `1366×768`. The exact supported-input/early-formation setup is in patch specification §7/V021-DEC-008. Record source/build/browser identity, raw frame intervals, sustained FPS and minimum one-second-window FPS (both unchanged `>=50`), available frame-time distribution, page/console errors, screenshots at start/middle/end and post-Combat cleanup. Existing long-task and asset budgets remain binding. The three screenshots and active Combat/HUD establish the actual scene observed; this method makes no worst-case or combined-Elite claim.
+
+The former formal combined-stress bucket, per-executed-step work/provenance fields, mandatory six-Core/20-step overlap, in-bucket lethal shatter, separate feasibility preflight and new mutation package are **superseded as local patch gates**. Their archived contracts, accepted C01 foundation and failed records retain their historical meaning. Existing mechanic, collision, attack, terminal/persistence and destruction regressions remain mandatory; no accepted test is weakened to simulate a pass. Preserve the single failed/invalid raw sample and stop; no retry-until-pass. This is a bounded non-reference local observation without a matched baseline, full mission traversal, physical-device certification or external-release claim. Other Epics do not inherit this exception.
+
 A sustained regression against an approved budget blocks additional dependent feature accumulation until it is understood and resolved or explicitly accepted by the Product Owner.
 
 Local-only `S14` acceptance uses the available production-build proxy evidence when the approved physical device is unavailable. This evidence must identify the environment and must not claim physical-device certification. The later physical gate uses the hardware, browsers, viewport, workload, and fields defined by the product and Delivery specifications and must pass before the first external playtest or any minimum-system-requirement claim.
@@ -563,6 +567,162 @@ verification. R2/R3 integrated product changes still require the integration gat
 Never omit a mandatory AC/manual/physical check merely because the shorter lane
 passes, and never retrospectively route around an observed failure.
 
+**2026-10-07 Product Owner decision — provisional v0.2.1 WI-01 only:** The
+Mission 01/02 density Work Item is a local tuning checkpoint, not the frozen
+integrated patch or a release build. Its current acceptance route is `npm run
+verify` plus `npm run verify:smoke`, the existing shortest relevant
+start/spawn/terminal/persistence assertions at their authoritative owners, and
+the labelled Product Owner playtest; see the patch specification §7. The
+failed C02 `verify:isolated` attempt remains failed evidence. The historical
+v0.2 Pass-B and three-mission D04 `@release-evidence` cases are excluded from
+the WI-01 claim, not reclassified as passing or deleted. Dense-workload FPS,
+the current-build long asset journey and full patch integration remain
+unverified until patch stabilization selects proportionate methods and runs
+its approved gates. This exception does not automatically apply to other Work
+Items, migrations, release claims or physical-device obligations.
+
+**2026-10-07 Product Owner decision — v0.2.1 WI-03 only:** The bounded Hunter
+guidance/orientation Work Item is another local implementation checkpoint, not
+the frozen integrated patch or a release build. Its required route is `npm run
+verify`, a focused development-browser check of real Hunter movement and
+prepared/fallback rotation at the minimum viewport, and `npm run verify:smoke`
+on ordinary production. Deterministic fixed-step tests must cover the 60-step
+turn limit, behind/zero-distance precedence, authoritative rotated bounds,
+resize, contact and escape. Record a proportionate six-Hunter hot-path check;
+do not present it as integrated FPS evidence. This approval does not mark the
+failed C02 `verify:isolated` attempt or the four historical `@release-evidence`
+cases as passing, and does not authorize editing, skipping or weakening them.
+Current-build dense-overlap FPS, long asset traversal and full patch integration
+remain unverified until patch stabilization approves and runs representative
+methods. This route does not apply to WI-02, WI-04, a patch milestone, a test
+build, dependencies, security, or physical-device obligations.
+
+**2026-10-10 Product Owner decision — v0.2.1 WI-02-only local route;
+independently reviewed and accepted:** WI-02 implements only the exact
+Mission 03 authored schedule and Elite attack cadence in patch specification
+§§2.3 and 3.1. It is a bounded local checkpoint, not the frozen integrated
+patch or a release build. Before an implementation handoff, a different
+qualified reviewer must check this prospective route against Governance §15.2,
+the patch ACs and the existing browser claims. On one frozen WI-02 candidate,
+require `npm run context:validate`, `npm run verify`, focused deterministic
+tests of every ordered Mission 03 group/member/placement and no phantom
+seeded-side draws, a focused representative real spawn/placement assertion at
+the content/application boundary including fixed-side Hunter placement,
+exact first/last role and `05:19.30`/`05:20` boundaries,
+and Elite first/sixth shots, 45-step cannon cadence, phase boundaries, active
+cap, pause/terminal freeze and repeated phases. Require a focused development
+browser or real-renderer check of the six-Hunter arrangement and Elite attack
+visuals, and a short ordinary-production Mission 03 Start/first-authored-
+group smoke with a disclosed valid local-only unlocked-campaign fixture; the
+fixture may unlock Mission 03 but may not alter Combat, grant invulnerability,
+shorten its clock or force a terminal. Run `npm run verify:smoke` and
+`npm run handoff:validate`; any failed focused check blocks WI-02. Record a
+proportionate local six-Hunter/Ranged and Elite hot-path observation without
+calling it integrated FPS. No full five-minute autoplay is required to prove
+the authored table or attack timers. The four historical `@release-evidence`
+failures remain failed and in their original suite; this route does not
+reclassify them as passes or authorize weakening/skipping them. Full
+`verify:isolated`, representative current-build dense-overlap FPS, long asset
+traversal and patch-level integration remain unverified until stabilization.
+This route does not cover WI-05 destruction VFX, a patch milestone, test build,
+dependency/security change or physical-device certification. The read-only
+review verdict is `verification/v021-wi-02-route-amendment-acceptance.md`;
+it authorizes this route, not acceptance of WI-02's implementation.
+
+**2026-10-08 Product Owner decision — v0.2.1 WI-04 only; independently reviewed
+and accepted:** WI-04 is split into two local, independently reviewable
+checkpoints in patch specification §7: A changes projectile silhouettes in the
+existing Phaser presentation owner; B changes the post-commit terminal fade
+and application-owned browser-safety continuation. Each checkpoint runs
+`npm run context:validate`, `npm run verify`, risk-linked focused development
+browser/real-renderer checks, `npm run verify:smoke` on the ordinary production
+artifact, and `npm run handoff:validate` on its own unchanged candidate. A must
+capture minimum-viewport pixels distinguishing both player-weapon teardrops
+and both non-Core enemy circles from the old rectangles and superseded
+ellipses, in prepared and fallback enemy contexts, with a human visual review
+before acceptance. The 2026-10-09 V021-DEC-002 change here updates the
+shape-specific evidence target only; the commands, exclusions and patch-level
+non-waiver below are unchanged. The previous independent verdict covered the
+ellipse target, not this amendment: a different agent must inspect this exact
+wording and its test adequacy before the circle correction can be accepted.
+
+B must prove exact Success/Evacuated/Defeat fixed-step fade boundaries and frozen
+payload, all named visual surfaces and exclusions, Save Error/Conflict/retry,
+focus-loss/hidden-tab Resume-only continuation, resize, duplicate/stale events,
+Result/Game Over timing and cleanup in deterministic tests; focused browser
+checks must exercise all three committed terminal paths and the Defeat
+browser-safety path. B also runs a short ordinary-production natural Defeat
+check in addition to `verify:smoke`'s existing Evacuation route and records a
+proportionate local fade-cost observation on a representative dense frozen
+snapshot, without claiming integrated FPS. A failed
+relevant focused check blocks its checkpoint; no full-mission autoplay is used
+as a substitute. The four historical `@release-evidence` cases remain in their
+original suite, never reclassified as passes, skipped within that suite, or
+weakened. The known Mission 01 regular-workload and three-mission asset
+failures, full `verify:isolated`, current-build dense-overlap FPS and long
+asset traversal are deferred to patch stabilization, where the integrated
+candidate receives a new approved representative method and full patch-level
+review. This WI-04-only local route does not apply to WI-02, a patch milestone,
+test build, dependency/security change or physical-device certification; it
+grants no release claim. The read-only independent review verdict is recorded
+in `verification/v021-wi-04-route-amendment-acceptance.md`; it does not accept
+either WI-04 implementation checkpoint.
+
+**2026-10-13 Product Owner decision — v0.2.1 local patch stabilization only
+(V021-DEC-006; independent amendment review accepted 2026-10-13; performance method prospectively amended by V021-DEC-008, independently reviewed and accepted 2026-10-15):**
+The current Mission 03 candidate is accepted by Product Owner judgment without
+another full manual playthrough; this is not a claim that its feel, every wave
+or balance was observed. Exact current authored data remains checked at the deterministic
+content/application owner, not by a timed browser census. For the frozen local
+patch candidate, the minimum integration route is:
+
+1. `npm run context:validate`; inspect the exact dirty-tree baseline and
+   preserve all accepted Work Items and historical evidence.
+2. `npm ci`; run `npm audit --omit=dev` and record the full `npm audit` outcome.
+   Runtime vulnerabilities block. A non-zero dev-only full audit is never
+   called passing and needs a separately recorded Product Owner repair or
+   patch-specific exception before final patch acceptance; the v0.2.0
+   exception does not transfer automatically. The Product Owner's new
+   `V021-DEC-007` names only the residual dev-only `braces` advisory and is
+   effective only after independent amendment review, exact-path/current-audit
+   confirmation and a zero-finding runtime audit. The complete audit remains
+   non-zero and must be reported as failed/excepted, not passed. Unrelated
+   mechanics checks may proceed while review is pending.
+3. `npm run verify` on the final unchanged code candidate. It retains all
+   format, lint, type, deterministic/unit and build checks, including exact
+   current content, Elite phase/attack, Hunter, collision, terminal and
+   persistence regressions. Reuse independently accepted WI-01–05 focused
+   browser evidence when its relevant source has not changed; add and run a
+   focused regression only for a newly discovered critical gap.
+4. `npm run verify:smoke` once on the ordinary production build. Its existing
+   compact project must still cover Boot, selected Mission Start, a real
+   authored spawn, the available short terminal/result/persistence paths,
+   asset-request/fallback boundaries and cleanup. Do not add a full-mission
+   autoplay or browser assertions for every wave count/time merely to restate
+   deterministic content tests. A discovered missing critical boundary must
+   be added narrowly before claiming coverage.
+5. `npm run evidence:patch-dense` once: a thin dedicated case on the ordinary production build, using the six-second Mission 01 setup in V021-DEC-008 and unchanged absolute budgets. Keep raw intervals, three screenshots, identity, errors and cleanup in one small result record before asserting. No separate preflight command, application recorder/bridge, chosen step bucket, owner-provenance proof, counter matrix, matched baseline or six-record chain is required. Add a small focused regression only if a new timing calculation needs it; reuse existing reliable measurement code where practical.
+
+6. `npm run handoff:validate`; independently review the final source
+   fingerprint, source-qualified AC/negative-requirement matrix, every failed
+   or omitted claim, and the Product Owner's recorded manual decisions.
+
+**2026-10-16 execution record:** The final technical local-integration verdict is `verification/v021-final-local-integration-review.md`, bound to `8784241/7cb6cd22`. Code, short smoke and the simplified performance check passed; the current runtime audit is clean and the whole-tree audit remains failed/excepted only under V021-DEC-007. Complete-patch Product Owner acceptance and all Git/external authority remain separate. This record changes no gate or requirement.
+
+**2026-10-17 Product Owner decision:** Maksym accepted the complete local v0.2.1 patch at `8784241/7cb6cd22` with the existing V021-DEC-007 exception; see `verification/v021-local-product-acceptance.md`. The 2026-10-16 audit outcomes and technical-review limits remain unchanged. Physical-device validation and Git/external actions are not authorized by this acceptance.
+
+For this **local patch acceptance only**, this route replaces
+`verify:isolated`/`verify:all` and the four long `@release-evidence` cases as
+mandatory gates. Those commands/cases retain their original membership and
+their earlier failed records; do not delete, skip inside the original suite,
+weaken, relabel or report them as passing. A passing compact route proves only
+its named claims. No full-mission automatic traversal, new Mission 03 human
+playthrough or old six-record performance chain is required. The route does
+not apply to an external release/test-build handoff, platform/physical-device
+certification, a dependency contract change, or another Epic. The existing
+asset-size, FPS, terminal/persistence, security and cleanup thresholds are not
+relaxed; anything not covered remains explicitly unverified.
+
 `verify:smoke` builds ordinary production and runs its production project except
 four explicitly tagged `@release-evidence` cases: natural Defeat, repeated
 Defeat/Game Over soak, Mission 01 regular-workload timing, and three-mission asset
@@ -576,6 +736,22 @@ The bounded tooling introduction requires `verify`, direct runner/validator
 counter-tests, all-project discovery, actual base-copy preflight and a short
 ordinary-production boundary smoke. It does not regenerate accepted performance
 numbers: measurement formulas, workloads, thresholds and product code are unchanged.
+
+**2026-10-13 readiness record — V021-PATCH-DEP-01-C01 test-gate repair:**
+The approved two-entry dev-only lockfile refresh is installed, but its required
+`verify` gate timed out twice in the Mission 02/03 and real-Phaser Elite unit
+suites; those suites passed in targeted serial diagnostics. Root cause is not
+yet established, so ambient load alone is not an accepted explanation. The
+observable outcome for this bounded R2 verification-reliability correction is
+a passing unchanged-candidate `verify` run under the normal test command while
+retaining the existing assertions and their fail-sensitivity. Only the three
+affected test files and their direct test-local helpers may be repaired after
+diagnosis; no product source, content, dependency, global timeout/worker
+configuration, test skip, weakened assertion, or retry-until-pass policy is
+authorized. A focused normal-mode diagnostic and one final `verify` run make
+the route feasible; if a wider owner is demonstrably necessary, the correction
+blocks for a new decision. This does not resolve the separate unpatched
+dev-only `braces` advisory or accept the dependency change or patch.
 
 ### 18.2 Isolated attempt output and execution
 

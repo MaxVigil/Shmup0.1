@@ -402,3 +402,17 @@ authorizes no dependency addition, removal or upgrade, commit, push, deployment 
 publication. The exception must be reevaluated before any external playtest or
 minimum-system-requirement claim and whenever a patched release or a materially
 changed advisory state appears.
+
+**STATUS (2026-10-14, v0.2.1 dev-toolchain candidate and separate Product Owner
+decision):** the compatible lockfile-only updates `source-map-js@1.2.2` and
+`postcss-selector-parser@7.1.6` resolved their two independently audited
+dev-tool advisories without changing `package.json` or runtime dependencies.
+The exact current dependency path is still `stylelint@17.14.1 >
+micromatch@4.0.8 > braces@3.0.3`. A fresh whole-tree `npm audit` exits `1`
+with seven propagated high-severity entries from only
+`GHSA-vfj7-8cjw-p6xm`; `npm audit --omit=dev` exits `0` with zero findings.
+The Product Owner approved a **new, v0.2.1-only local exception** in patch
+specification `V021-DEC-007`, subject to independent amendment review and
+final-candidate revalidation. The historical `V02-DEC-037` remains limited
+to v0.2.0. No audit pass, external-build approval, new dependency change or
+patch acceptance is claimed here.

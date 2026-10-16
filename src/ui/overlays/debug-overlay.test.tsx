@@ -83,6 +83,9 @@ const BASE_OBSERVABILITY: CombatObservability = {
   },
   pendingCombatRewards: 9,
   pendingEscapePenalties: 2,
+  // V021-WI-04-B: this Debug fixture represents ordinary Combat with no
+  // terminal result, so its committed terminal-fade facts are absent.
+  terminal: null,
 };
 
 afterEach(() => {

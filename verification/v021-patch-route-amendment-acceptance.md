@@ -1,0 +1,11 @@
+# V021-DEC-006 — independent verification-amendment review
+
+**Decision:** accepted for the prospective local v0.2.1 patch-stabilization route only (2026-10-13). This does not accept the integrated patch, a security exception, external release, or a physical-device claim.
+
+The Product Owner approved replacing the long historical mission autoplay and six-record performance chain with the bounded route in Verification §18.1. A different reviewer independently inspected the proposed changes to `AGENTS.md`, the patch specification, Verification §§11/18.1, and the documentation index against the existing governance and acceptance contracts.
+
+The first review found an S2 false-green risk: one frame of dense overlap could satisfy the six-second sample. The correction requires one predeclared complete measured second with at least 50 executed fixed steps; six Hunters, at least one Ranged enemy and an active Elite coexist at every such step, with actual work and shatter in the bucket. Re-review found a second S2: one Elite cannon shot could leave the new six-Core load unmeasured. The final correction requires six Cores launched by the unchanged Elite attack owner to remain concurrently active for at least 20 consecutive steps in that same bucket, proven by raw per-step facts. An evidence-only feasibility preflight and scan proving no scenario hook in the ordinary production artifact are mandatory.
+
+The independent final re-review found **no remaining S0–S2 amendment blocker**. It confirmed that this route makes only an absolute local-budget claim, does not claim a natural Mission 03 combined workload or observed Mission 03 balance, does not recast failed `@release-evidence` cases as passing, and leaves the separate dev-dependency audit decision open. The old `m03-e8` evidence setup cannot satisfy the new combined state because it clears regular arrivals; patch stabilization needs a new bounded evidence-only setup. This review is of the verification contract, not of that future implementation.
+
+**Next authority boundary:** the current `npm audit` dev-only findings require a separate Product Owner decision after exact audit. No dependency edit or security exception follows from this acceptance.

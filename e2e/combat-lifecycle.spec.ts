@@ -298,12 +298,15 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
   await dialog.getByRole('button', { name: 'Spawn Basic' }).click();
   await expect(activeRow).toContainText('Basic 1');
 
-  // Spawn E1 materializes the authored opening Encounter (4 Basics, V02-WI-04)
-  // and is inert when repeated (the Encounter is already spawned).
+  // Spawn E1 materializes the authored opening Encounter — 92 Basic enemies
+  // under the approved v0.2.1 §2.1 Interception 01 composition (e1 = `B16`,
+  // 4×`B12`, `B16`, `B12`; every row of that Encounter is Basic-only) — so the
+  // live total is 1 Debug-spawned Basic + 92 = 93. Repeating the command is
+  // inert because the Encounter already spawned.
   await dialog.getByRole('button', { name: 'Spawn E1' }).click();
-  await expect(activeRow).toContainText('Basic 5');
+  await expect(activeRow).toContainText('Basic 93');
   await dialog.getByRole('button', { name: 'Spawn E1' }).click();
-  await expect(activeRow).toContainText('Basic 5');
+  await expect(activeRow).toContainText('Basic 93');
 
   // V02-WI-07 D01: one deterministic spawn action per approved enemy type. The
   // Debug Elite is created at its fixed anchor and its phase read model and
@@ -345,7 +348,9 @@ test('development F1 opens Debug, its actions mutate the paused simulation, and 
   await expect(dialog.getByRole('button', { name: 'Spawn E5' })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Spawn E6' })).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Spawn E2' }).click();
-  await expect(activeRow).toContainText('Basic 7');
+  // The approved v0.2.1 §2.1 e2 composition is 5×`BR12` + `B12` = 62 Basic
+  // (plus 10 Ranged), so the live Basic total is the still-alive 93 + 62 = 155.
+  await expect(activeRow).toContainText('Basic 155');
 
   // The v0.2 observability contract is complete: both destruction CAUSES and the
   // escaped counts render by role beside the committed economy.

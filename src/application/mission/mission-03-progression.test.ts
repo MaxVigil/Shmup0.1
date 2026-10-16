@@ -25,7 +25,7 @@ import type { MissionSnapshot } from './snapshot';
  * `max(0, rewards − penalties) + 16`, marks Mission 03 completed, unlocks no
  * further content, clears the durable marker exactly once, and stays replayable
  * with a fresh identity and no duplicate completion. The committed canonical
- * maximum payout of `51` Credits is verified end to end without any
+ * maximum payout of `752` Credits is verified end to end without any
  * Mission-03-specific UI or persistence logic.
  */
 const MISSION_01 = 'interception-01';
@@ -66,14 +66,15 @@ const MISSION_02_ECONOMY: SuccessEconomyRelay = {
   },
 };
 
-/** The canonical Mission 03 maximum: 35 combat rewards and the 16 completion. */
+/** The canonical Mission 03 maximum: 736 combat rewards (376 Basic + 128 Ranged
+ *  × 2 + 48 Hunter × 2 + the Elite's 8) and the 16 completion reward. */
 const MISSION_03_MAXIMUM_ECONOMY: SuccessEconomyRelay = {
   combatRewards: INTERCEPTION_03.maximumCombatReward,
   escapePenalties: 0,
   destroyedCounts: {
-    'basic-drone': 13,
-    'ranged-drone': 4,
-    'hunter-drone': 3,
+    'basic-drone': 376,
+    'ranged-drone': 128,
+    'hunter-drone': 48,
     'elite-drone': 1,
   },
   escapedCounts: {
@@ -226,14 +227,14 @@ describe('Mission 03 economy and progression through the real transaction (Epic 
     });
   });
 
-  it('a committed Mission 03 Success applies the canonical maximum 35 + 16 = 51, completes Mission 03, unlocks nothing, and clears the marker exactly once', async () => {
+  it('a committed Mission 03 Success applies the canonical maximum 736 + 16 = 752, completes Mission 03, unlocks nothing, and clears the marker exactly once', async () => {
     const app = createInitializedTestApplication();
     await completeMissions01And02(app);
     const snapshot = await startAccepted(app, MISSION_03);
     const creditsBefore = app.store.getState()!.credits;
     expect(creditsBefore).toBe(42);
-    expect(INTERCEPTION_03.maximumCombatReward).toBe(35);
-    expect(INTERCEPTION_03.maximumSuccessPayout).toBe(51);
+    expect(INTERCEPTION_03.maximumCombatReward).toBe(736);
+    expect(INTERCEPTION_03.maximumSuccessPayout).toBe(752);
 
     const result = await commitSuccess(
       app,
@@ -247,9 +248,9 @@ describe('Mission 03 economy and progression through the real transaction (Epic 
       creditsAfter: creditsBefore + INTERCEPTION_03.maximumSuccessPayout,
       hullIntegrityAfter: 55,
       creditsEarned: INTERCEPTION_03.maximumSuccessPayout,
-      combatRewards: 35,
+      combatRewards: 736,
       escapePenalties: 0,
-      netCombatReward: 35,
+      netCombatReward: 736,
       completionReward: 16,
       newlyUnlockedMissionId: null,
       unlockedMissionIdsAfter: [MISSION_01, MISSION_02, MISSION_03],
@@ -270,7 +271,7 @@ describe('Mission 03 economy and progression through the real transaction (Epic 
     // One coherent durable transaction: marker cleared, payout applied,
     // Mission 03 completed, and no further unlock.
     expect(app.campaignStore.current?.missionInProgress).toBeNull();
-    expect(app.campaignStore.current?.credits).toBe(93);
+    expect(app.campaignStore.current?.credits).toBe(794);
     expect(app.campaignStore.current?.hullIntegrity).toBe(55);
     expect(app.campaignStore.current?.completedMissionIds).toEqual([
       MISSION_01,
@@ -315,7 +316,7 @@ describe('Mission 03 economy and progression through the real transaction (Epic 
     const first = await startAccepted(app, MISSION_03);
     await commitSuccess(app, first, MISSION_03_MAXIMUM_ECONOMY, 55);
     const creditsAfterFirst = app.campaignStore.current?.credits;
-    expect(creditsAfterFirst).toBe(93);
+    expect(creditsAfterFirst).toBe(794);
 
     const replay = await startAccepted(app, MISSION_03);
     expect(replay).toMatchObject({

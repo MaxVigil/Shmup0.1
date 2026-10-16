@@ -15,7 +15,21 @@ import type { Page } from '@playwright/test';
 const MINIMUM_VIEWPORT = { width: 1280, height: 600 };
 const CONTACT_SESSION_SEED = 40;
 const DESTRUCTION_SESSION_SEED = 86;
-const FLASH_RUN_THRESHOLD = 15; // 24 px drone flash vs 9 px projectile
+/** The longest near-white run and the near-white area the superseded 100 ms
+ *  square produced: it was a `size × size` block (≈50 × 50 px, ~2500 px) at the
+ *  destruction centre, while the approved glint and slim fragment highlights
+ *  measure ~17 px and a few hundred px. Both limits therefore prove the block is
+ *  gone without constraining the approved burst. */
+const PROJECTILE_WHITE_RUN_LIMIT = 40;
+const PROJECTILE_WHITE_AREA_LIMIT = 1000;
+/** A burst frame shows a `danger` span of at least this many pixels on one row:
+ *  the destroyed Basic Drone's broken ring reaches far beyond its own ~50 px
+ *  footprint, while a Ranged projectile is a `7.2 px` circle. */
+const DESTRUCTION_BURST_EXTENT = 30;
+/** The longest continuous burst run the sampled frames may show: the regular
+ *  effect lasts 12 executed steps (0.2 s) and the Elite 15 (0.25 s), so a burst
+ *  that persisted across the window would prove a leaked surface. */
+const DESTRUCTION_BURST_STREAK_LIMIT = 40;
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize(MINIMUM_VIEWPORT);
@@ -67,28 +81,62 @@ function readHullBar(
   });
 }
 
-/** V02-WI-04 C01: in-page rAF-rate flash sampler. Reads the composited Combat
- *  canvas through `toDataURL` every frame (no slow Playwright screenshot
- *  round-trip), so the one-time deterministic 6-step (100 ms) near-white
- *  destruction flash cannot straddle the sampling cadence. The scan is bounded
- *  to the upper half — the deterministic enemy entry/destruction zone (Combat
- *  §7.4, AC-073): top entries descend at 0.12 × viewport-height per second and
- *  side entries spawn within the upper half, so every destroyed-drone flash
- *  occurs there. Returns the longest near-white vertical run seen (feedback vs
- *  projectiles: a drone flash is a 24+ px square, a projectile 9 px tall).
+/** One in-page destruction-feedback observation window. */
+interface DestructionFeedbackSample {
+  /** Longest near-white vertical run seen: the approved glint/highlights span
+   *  ~17 px, while the superseded white square was a `size × size` block
+   *  (≈50 px tall on a current Basic Drone). */
+  readonly maxWhitishRun: number;
+  /** Near-white pixels in the scanned half: the superseded square alone covered
+   *  ~2500 px, while the approved glint and slim highlights cover a few hundred. */
+  readonly maxWhitishPixels: number;
+  /** Widest single-row `danger` span seen: the V021-WI-05 broken ring/fragments
+   *  reach far beyond the destroyed drone's own footprint, while a Ranged
+   *  projectile is only a `7.2 px` circle. */
+  readonly maxDangerExtent: number;
+  /** Frames that showed a burst, and the longest unbroken burst streak. */
+  readonly burstFrames: number;
+  readonly longestBurstStreak: number;
+}
+
+/**
+ * V02-WI-04 C01 / V021-WI-05: in-page rAF-rate destruction-feedback sampler.
+ * Reads the composited Combat canvas through `toDataURL` every frame (no slow
+ * Playwright screenshot round-trip), so the one-time short destruction effect
+ * cannot straddle the sampling cadence. The scan is bounded to the upper half —
+ * the deterministic enemy entry/destruction zone (Combat §7.4, AC-073): top
+ * entries descend at `0.12 × viewport-height` per second and side entries spawn
+ * within the upper half, so every destruction occurs there.
+ *
+ * Two facts are measured per frame: the longest near-white vertical run (the
+ * superseded white square would dominate it at 24+ px) and the widest
+ * `danger`-coloured horizontal span on one row (the approved V021-WI-05 broken
+ * ring and fragments reach ~70 px on a destroyed Basic Drone, whereas an enemy
+ * body is grey, a Ranged projectile is a `7.2 px` circle, and the aircraft
+ * damage flash is below this scanned half).
  */
-function scanCanvasForFlash(page: Page, windowMs: number): Promise<number> {
+function scanCanvasForDestructionFeedback(
+  page: Page,
+  windowMs: number,
+): Promise<DestructionFeedbackSample> {
   return page.evaluate(
-    (durationMs) =>
-      new Promise<number>((resolve) => {
+    (options) =>
+      new Promise<DestructionFeedbackSample>((resolve) => {
+        const result = {
+          maxWhitishRun: 0,
+          maxWhitishPixels: 0,
+          maxDangerExtent: 0,
+          burstFrames: 0,
+          longestBurstStreak: 0,
+        };
         const canvas = document.querySelector<HTMLCanvasElement>(
           '.ds-combat-canvas canvas',
         );
         if (canvas === null) {
-          resolve(0);
+          resolve(result);
           return;
         }
-        let maxRun = 0;
+        let streak = 0;
         const start = performance.now();
         const halfHeight = Math.floor(canvas.height / 2);
         const sample = (): void => {
@@ -101,7 +149,7 @@ function scanCanvasForFlash(page: Page, windowMs: number): Promise<number> {
                 willReadFrequently: true,
               });
               if (ctx === null) {
-                resolve(maxRun);
+                resolve(result);
                 return;
               }
               ctx.canvas.width = canvas.width;
@@ -113,7 +161,9 @@ function scanCanvasForFlash(page: Page, windowMs: number): Promise<number> {
                 canvas.width,
                 halfHeight,
               ).data;
-              for (let x = 0; x < canvas.width; x += 2) {
+              let frameExtent = 0;
+              let whitishPixels = 0;
+              for (let x = 0; x < canvas.width; x += 1) {
                 let run = 0;
                 for (let y = 0; y < halfHeight; y += 1) {
                   const i = (y * canvas.width + x) * 4;
@@ -122,32 +172,71 @@ function scanCanvasForFlash(page: Page, windowMs: number): Promise<number> {
                     Math.abs(data[i + 1] - 245) <= 3 &&
                     Math.abs(data[i + 2] - 247) <= 3;
                   if (nearWhite) {
+                    whitishPixels += 1;
                     run += 1;
-                    if (run > maxRun) {
-                      maxRun = run;
+                    if (run > result.maxWhitishRun) {
+                      result.maxWhitishRun = run;
                     }
                   } else {
                     run = 0;
                   }
                 }
               }
-              if (performance.now() - start < durationMs) {
+              if (whitishPixels > result.maxWhitishPixels) {
+                result.maxWhitishPixels = whitishPixels;
+              }
+              for (let y = 0; y < halfHeight; y += 1) {
+                let minX = -1;
+                let maxX = -1;
+                for (let x = 0; x < canvas.width; x += 1) {
+                  const i = (y * canvas.width + x) * 4;
+                  const red = data[i];
+                  const green = data[i + 1];
+                  const blue = data[i + 2];
+                  // The approved `danger` shatter composited over the dark
+                  // canvas at any opacity above ~40%.
+                  const dangerish =
+                    red >= 60 && red - green >= 40 && red - blue >= 38;
+                  if (dangerish) {
+                    if (minX < 0) {
+                      minX = x;
+                    }
+                    maxX = x;
+                  }
+                }
+                if (minX >= 0 && maxX - minX > frameExtent) {
+                  frameExtent = maxX - minX;
+                }
+              }
+              if (frameExtent > result.maxDangerExtent) {
+                result.maxDangerExtent = frameExtent;
+              }
+              if (frameExtent >= options.burstExtent) {
+                result.burstFrames += 1;
+                streak += 1;
+                if (streak > result.longestBurstStreak) {
+                  result.longestBurstStreak = streak;
+                }
+              } else {
+                streak = 0;
+              }
+              if (performance.now() - start < options.durationMs) {
                 requestAnimationFrame(sample);
               } else {
-                resolve(maxRun);
+                resolve(result);
               }
             });
           } catch {
-            if (performance.now() - start < durationMs) {
+            if (performance.now() - start < options.durationMs) {
               requestAnimationFrame(sample);
             } else {
-              resolve(maxRun);
+              resolve(result);
             }
           }
         };
         requestAnimationFrame(sample);
       }),
-    windowMs,
+    { durationMs: windowMs, burstExtent: DESTRUCTION_BURST_EXTENT },
   );
 }
 
@@ -207,7 +296,7 @@ test('authoritative Hull updates the visible/accessible Bar and the v0.2 CRITICA
   expect(pageErrors).toEqual([]);
 });
 
-test('enemy damage/destruction feedback renders and cleans up (AC-024, AC-058)', async ({
+test('enemy damage/destruction feedback renders and cleans up (patch §4.1, AC-024, AC-058)', async ({
   page,
 }) => {
   const pageErrors: string[] = [];
@@ -218,10 +307,10 @@ test('enemy damage/destruction feedback renders and cleans up (AC-024, AC-058)',
   // V02-WI-04 C01: authored staging replaces the legacy natural early-
   // destruction seed; the dev-only Debug Spawn Basic materializes one authored
   // Basic Drone per click at the engagement-band centre directly in the
-  // automatic Machine Gun column. The in-page rAF-rate sampler reads the
-  // composited canvas every frame, so the one-time deterministic 6-step
-  // (100 ms) #f1f5f7 destruction flash (Combat §8.5.1) cannot be missed by a
-  // slower screenshot cadence (the review-failure root cause).
+  // automatic Machine Gun column. V021-WI-05 (patch §4.1, V021-DEC-005)
+  // replaced the 100 ms white square with the procedural shatter, so the
+  // in-page rAF-rate sampler now reads both the absence of that block and the
+  // presence of the danger-coloured burst that reaches beyond the drone.
   await page.keyboard.press('F1');
   await page.getByRole('button', { name: 'Spawn Basic' }).click();
   await page.getByRole('button', { name: 'Spawn Basic' }).click();
@@ -230,13 +319,27 @@ test('enemy damage/destruction feedback renders and cleans up (AC-024, AC-058)',
 
   // The destruction happens ~1-2 s after the spawn; a 12 s in-page window is
   // deterministic for the auto-fire column.
-  const flashRun = await scanCanvasForFlash(page, 12000);
-  expect(flashRun).toBeGreaterThanOrEqual(FLASH_RUN_THRESHOLD);
+  const burst = await scanCanvasForDestructionFeedback(page, 12000);
+  expect(burst.maxDangerExtent).toBeGreaterThanOrEqual(
+    DESTRUCTION_BURST_EXTENT,
+  );
+  expect(burst.burstFrames).toBeGreaterThan(0);
+  // The effect is transient, never a leaked surface.
+  expect(burst.longestBurstStreak).toBeLessThanOrEqual(
+    DESTRUCTION_BURST_STREAK_LIMIT,
+  );
+  // No white block: neither the longest near-white run nor the near-white area
+  // approaches the superseded `size × size` square.
+  expect(burst.maxWhitishRun).toBeLessThan(PROJECTILE_WHITE_RUN_LIMIT);
+  expect(burst.maxWhitishPixels).toBeLessThan(PROJECTILE_WHITE_AREA_LIMIT);
 
-  // The flash expires and the destroyed drones do not return: the long white
-  // run disappears again.
-  const laterRun = await scanCanvasForFlash(page, 4000);
-  expect(laterRun).toBeLessThan(FLASH_RUN_THRESHOLD);
+  // A later window shows the destroyed drones' bursts are gone.
+  const later = await scanCanvasForDestructionFeedback(page, 4000);
+  expect(later.longestBurstStreak).toBeLessThanOrEqual(
+    DESTRUCTION_BURST_STREAK_LIMIT,
+  );
+  expect(later.maxWhitishRun).toBeLessThan(PROJECTILE_WHITE_RUN_LIMIT);
+  expect(later.maxWhitishPixels).toBeLessThan(PROJECTILE_WHITE_AREA_LIMIT);
 
   expect(pageErrors).toEqual([]);
 });

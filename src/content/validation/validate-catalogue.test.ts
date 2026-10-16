@@ -85,8 +85,10 @@ describe('validateCatalogue', () => {
   it('rejects encounters not strictly ordered by Mission Clock time', () => {
     const invalidMission: MissionDefinition = {
       ...INTERCEPTION_01,
+      // e1 now starts at 00:04 (§2.1), so an equal 00:04 on e2 is not strictly
+      // ordered and must still be rejected.
       encounters: INTERCEPTION_01.encounters.map((encounter, index) =>
-        index === 1 ? { ...encounter, timeSeconds: 10 } : encounter,
+        index === 1 ? { ...encounter, timeSeconds: 4 } : encounter,
       ),
     };
     const issues = validateCatalogue(
@@ -460,7 +462,7 @@ describe('validateCatalogue', () => {
     ).toBe(true);
   });
 
-  it('rejects a Mission 03 Arrival Group whose placement drifts from V02-DEC-032', () => {
+  it('rejects a Mission 03 Arrival Group whose placement drifts from the V021-DEC-003 canonical Elite group', () => {
     const invalidMission: MissionDefinition = {
       ...INTERCEPTION_03,
       encounters: INTERCEPTION_03.encounters.map((encounter, index) =>

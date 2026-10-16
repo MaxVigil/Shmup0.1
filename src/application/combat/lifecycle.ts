@@ -66,6 +66,20 @@ export interface CombatLifecycleState {
    */
   readonly terminalSavePending: boolean;
   /**
+   * V021-WI-04-B committed-fade-pending flag (patch §4, V021-AC-005,
+   * V021-DEC-001). Set by the Combat entry the instant a committed
+   * Defeat/Game Over authorizes its `30`-step terminal fade and cleared when
+   * the mission resolves (the lifecycle resets with the presented result) or
+   * when the terminal write resolves as failed/inert without a fade. It exists
+   * so a focus-loss or hidden-tab safety event during that fade freezes the
+   * REMAINING fade steps behind the existing Resume-only
+   * `terminal-exit-pause` instead of an ordinary Pause: focus return never
+   * resumes automatically and only an explicit `Resume` continues the
+   * remaining fade. While it is set, Evacuation is not offered and no
+   * gameplay/terminal state may be re-entered.
+   */
+  readonly terminalFadePending: boolean;
+  /**
    * V02-WI-05 E01: the exact origin of the currently open Evacuation
    * Confirmation Overlay (`running`/`pause`), or `none` while it is closed.
    * Meaningful only while `overlay === 'evacuation-confirmation'`; Cancel and
@@ -91,6 +105,7 @@ export const IDLE_COMBAT_LIFECYCLE: CombatLifecycleState = Object.freeze({
   debugRestoreOrigin: 'none',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  terminalFadePending: false,
   evacuationConfirmationOrigin: 'none',
   evacuationCommitted: false,
 });
@@ -102,6 +117,7 @@ export const RUNNING_COMBAT_LIFECYCLE: CombatLifecycleState = Object.freeze({
   debugRestoreOrigin: 'none',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  terminalFadePending: false,
   evacuationConfirmationOrigin: 'none',
   evacuationCommitted: false,
 });
@@ -142,6 +158,9 @@ export function evacuationAvailability(
   if (
     state.evacuationCommitted ||
     state.terminalSavePending ||
+    // V021-WI-04-B: a committed Defeat/Game Over fade is already running; the
+    // terminal outcome is fixed and cannot be replaced by Evacuation.
+    state.terminalFadePending ||
     state.overlay === 'save-error' ||
     state.overlay === 'save-conflict' ||
     state.overlay === 'terminal-exit-pause' ||
@@ -238,6 +257,14 @@ export type CombatLifecycleAction =
       readonly type: 'combat-terminal/pending';
       readonly missionInstanceOrdinal: number;
     }
+  // V021-WI-04-B (patch §4, V021-AC-005): the exact-attempt terminal write
+  // committed for a Defeat/Game Over and authorized its `30`-step fade. While
+  // this fact is set, a browser-safety event freezes the remaining fade behind
+  // the Resume-only terminal-exit Pause.
+  | {
+      readonly type: 'combat-terminal/fade-pending';
+      readonly missionInstanceOrdinal: number;
+    }
   // V02-DEC-031 Mission Start Recovery Error: the mission-start persistence
   // write succeeded but Combat owner initialization failed, and the exact
   // originating-marker cleanup could not be committed safely (thrown/rejected
@@ -283,6 +310,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          terminalFadePending: state.terminalFadePending,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -299,6 +327,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          terminalFadePending: state.terminalFadePending,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -315,6 +344,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: false,
+          terminalFadePending: false,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -329,6 +359,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          terminalFadePending: state.terminalFadePending,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -347,6 +378,7 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: true,
             terminalSavePending: state.terminalSavePending,
+            terminalFadePending: state.terminalFadePending,
             evacuationConfirmationOrigin: 'none',
             evacuationCommitted: state.evacuationCommitted,
           }
@@ -356,6 +388,7 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: false,
             terminalSavePending: state.terminalSavePending,
+            terminalFadePending: state.terminalFadePending,
             evacuationConfirmationOrigin: 'none',
             evacuationCommitted: state.evacuationCommitted,
           };
@@ -369,6 +402,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'running',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          terminalFadePending: state.terminalFadePending,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -394,6 +428,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: true,
           terminalSavePending: state.terminalSavePending,
+          terminalFadePending: state.terminalFadePending,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -405,6 +440,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: state.terminalSavePending,
+          terminalFadePending: state.terminalFadePending,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -416,6 +452,7 @@ export function combatLifecycleReducer(
         debugRestoreOrigin: 'none',
         browserSafetyLatched: false,
         terminalSavePending: state.terminalSavePending,
+        terminalFadePending: state.terminalFadePending,
         evacuationConfirmationOrigin: 'none',
         evacuationCommitted: state.evacuationCommitted,
       };
@@ -445,6 +482,7 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: state.browserSafetyLatched,
             terminalSavePending: false,
+            terminalFadePending: false,
             evacuationConfirmationOrigin: 'none',
             evacuationCommitted: state.evacuationCommitted,
           };
@@ -482,6 +520,7 @@ export function combatLifecycleReducer(
         // clears the latch; Retry Save and focus restoration are not Resume.
         browserSafetyLatched: state.browserSafetyLatched,
         terminalSavePending: false,
+        terminalFadePending: false,
         evacuationConfirmationOrigin: 'none',
         evacuationCommitted: state.evacuationCommitted,
       };
@@ -511,6 +550,7 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: true,
             terminalSavePending: false,
+            terminalFadePending: false,
             evacuationConfirmationOrigin: 'none',
             evacuationCommitted: state.evacuationCommitted,
           };
@@ -528,6 +568,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: true,
           terminalSavePending: false,
+          terminalFadePending: false,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -538,6 +579,7 @@ export function combatLifecycleReducer(
         debugRestoreOrigin: 'none',
         browserSafetyLatched: false,
         terminalSavePending: false,
+        terminalFadePending: false,
         evacuationConfirmationOrigin: 'none',
         evacuationCommitted: state.evacuationCommitted,
       };
@@ -563,6 +605,29 @@ export function combatLifecycleReducer(
           ? state
           : { ...state, browserSafetyLatched: true };
       }
+      if (
+        state.running &&
+        state.overlay === 'none' &&
+        state.terminalFadePending
+      ) {
+        // V021-WI-04-B (patch §4, V021-AC-005, V021-DEC-001): a focus-loss or
+        // hidden-tab event while a committed Defeat/Game Over fade is running
+        // freezes the REMAINING fade steps behind the existing Resume-only
+        // terminal-exit Pause instead of an ordinary Pause. Return of focus
+        // never resumes automatically; only the explicit `Resume` continues the
+        // remaining running fade steps and then presents the immutable
+        // Result/Game Over exactly once.
+        return {
+          running: false,
+          overlay: 'terminal-exit-pause',
+          debugRestoreOrigin: 'none',
+          browserSafetyLatched: true,
+          terminalSavePending: false,
+          terminalFadePending: true,
+          evacuationConfirmationOrigin: 'none',
+          evacuationCommitted: state.evacuationCommitted,
+        };
+      }
       if (state.running && state.overlay === 'none') {
         return {
           running: false,
@@ -570,6 +635,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: true,
           terminalSavePending: state.terminalSavePending,
+          terminalFadePending: state.terminalFadePending,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -583,7 +649,7 @@ export function combatLifecycleReducer(
       }
       if (
         state.overlay === 'pause' &&
-        state.terminalSavePending &&
+        (state.terminalSavePending || state.terminalFadePending) &&
         !state.browserSafetyLatched
       ) {
         return { ...state, browserSafetyLatched: true };
@@ -602,6 +668,34 @@ export function combatLifecycleReducer(
       return state.terminalSavePending
         ? state
         : { ...state, terminalSavePending: true };
+    case 'combat-terminal/fade-pending':
+      // V021-WI-04-B (patch §4, V021-AC-005, V021-DEC-001): dispatched by the
+      // Combat entry exactly once, when the committed Defeat/Game Over outcome
+      // authorized its `30`-step fade (the write has resolved, so the
+      // pending-write flag clears here). Idempotent: a repeated/racing relay
+      // never re-arms or restarts the fade. It is a no-op behind the blocking
+      // Save Conflict, the Resume-only terminal-exit Pause (which already owns
+      // the frozen fade), the Mission Start Recovery Error, or an open
+      // Evacuation Confirmation, none of which may be replaced by a late
+      // terminal relay.
+      if (
+        state.overlay === 'save-conflict' ||
+        state.overlay === 'terminal-exit-pause' ||
+        state.overlay === 'mission-start-recovery-error' ||
+        state.overlay === 'evacuation-confirmation'
+      ) {
+        return state;
+      }
+      // Idempotent by identity: an already-armed committed fade is never
+      // re-armed (a repeated/racing relay must not create a new lifecycle state).
+      if (!state.terminalSavePending && state.terminalFadePending) {
+        return state;
+      }
+      return {
+        ...state,
+        terminalSavePending: false,
+        terminalFadePending: true,
+      };
     case 'combat-start/recovery-error':
       // V02-DEC-031 Mission Start Recovery Error: entered only after Combat
       // owner initialization failed AND the exact originating-marker cleanup
@@ -629,6 +723,7 @@ export function combatLifecycleReducer(
         debugRestoreOrigin: 'none',
         browserSafetyLatched: state.browserSafetyLatched,
         terminalSavePending: false,
+        terminalFadePending: false,
         evacuationConfirmationOrigin: 'none',
         evacuationCommitted: state.evacuationCommitted,
       };
@@ -654,6 +749,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: false,
           terminalSavePending: false,
+          terminalFadePending: false,
           evacuationConfirmationOrigin: 'running',
           evacuationCommitted: false,
         };
@@ -685,6 +781,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: state.browserSafetyLatched,
           terminalSavePending: false,
+          terminalFadePending: false,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: state.evacuationCommitted,
         };
@@ -699,6 +796,7 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: true,
             terminalSavePending: false,
+            terminalFadePending: false,
             evacuationConfirmationOrigin: 'none',
             evacuationCommitted: state.evacuationCommitted,
           }
@@ -708,6 +806,7 @@ export function combatLifecycleReducer(
             debugRestoreOrigin: 'none',
             browserSafetyLatched: false,
             terminalSavePending: false,
+            terminalFadePending: false,
             evacuationConfirmationOrigin: 'none',
             evacuationCommitted: state.evacuationCommitted,
           };
@@ -735,6 +834,7 @@ export function combatLifecycleReducer(
           debugRestoreOrigin: 'none',
           browserSafetyLatched: true,
           terminalSavePending: false,
+          terminalFadePending: false,
           evacuationConfirmationOrigin: 'none',
           evacuationCommitted: true,
         };
@@ -745,6 +845,7 @@ export function combatLifecycleReducer(
         debugRestoreOrigin: 'none',
         browserSafetyLatched: false,
         terminalSavePending: false,
+        terminalFadePending: false,
         evacuationConfirmationOrigin: 'none',
         evacuationCommitted: true,
       };

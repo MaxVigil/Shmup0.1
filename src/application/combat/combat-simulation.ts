@@ -46,6 +46,7 @@ import {
   createEliteForEntry,
   enterElitePhase,
   reprojectEliteForViewport,
+  reprojectHunterForViewport,
   spawnEnemyFromPlacement,
   stepEnemy,
   ELITE_ANCHOR_VIEWPORT_FRACTION_X,
@@ -60,7 +61,7 @@ import {
   resolveEnemyProjectileCollisions,
   resolveProjectileCollisions,
   ELITE_CONTACT_DAMAGE,
-  type DestroyedEnemyFlash,
+  type DestructionShatter,
   type DestroyedEnemyInfo,
   type EliteDeflectionFeedback,
   type EliteDeflectionFeedbacks,
@@ -77,12 +78,16 @@ import {
 import {
   EVIDENCE_COUNTERS_ENABLED,
   EVIDENCE_SCENARIOS_ENABLED,
+  DENSE_WORKLOAD_MIN_HUNTERS,
+  DENSE_WORKLOAD_MIN_RANGED,
+  DENSE_WORKLOAD_OWNER_WORK_ENABLED,
   createCollisionEvidenceSink,
   createCombatEvidenceAccumulator,
 } from './evidence';
 import type {
   CombatEvidenceAccumulator,
   CollisionEvidenceSink,
+  DenseWorkloadOwnerWorkRecorder,
 } from './evidence';
 
 /**
@@ -180,12 +185,27 @@ const CRITICAL_HULL_MESSAGE_STEPS = Math.round(2.0 / FIXED_STEP_SECONDS);
 /** Shared committed terminal-exit centre phase: exactly `0.5 s` = 30 fixed steps
  *  for both Success (v0.2 §13.3) and Evacuation (v0.2 §13.4, V02-DEC-028). */
 export const EXIT_CENTRE_STEPS = Math.round(0.5 / FIXED_STEP_SECONDS);
+
+/**
+ * V021-WI-04-B simulation-owned committed terminal fade (patch §4,
+ * V021-AC-005, V021-DEC-001): after the exact-attempt terminal write has
+ * committed, every frozen non-Aircraft Combat surface fades to zero opacity.
+ * `SUCCESS_FADE_STEPS` is the exact `0.25 s` Success window, concurrent with
+ * the existing `30`-step Aircraft centring; `TERMINAL_FADE_STEPS` is the
+ * existing `0.5 s` window shared by Evacuated and Defeat/Game Over. One
+ * scalar owns the progression — the renderer never owns a timer, tween, or
+ * fade mutation.
+ */
+export const SUCCESS_FADE_STEPS = Math.round(0.25 / FIXED_STEP_SECONDS);
+export const TERMINAL_FADE_STEPS = EXIT_CENTRE_STEPS;
 const HUNTER_CONTACT_DAMAGE = 35;
 const RANGED_FIRST_SHOT_STEPS = 180;
 const RANGED_MIN_INTERVAL_STEPS = 60;
 const RANGED_MAX_INTERVAL_STEPS = 180;
-/** At most `2` Elite homing Cores may be active at the same time (Epic §9.4). */
-const ELITE_CORE_MAX_ACTIVE = 2;
+/** At most `6` Elite homing Cores may be active at the same time (patch §3.1,
+ *  V021-DEC-004): the phase's six sequential launches fit inside one 360-step
+ *  `Vulnerable` phase when none is destroyed. */
+const ELITE_CORE_MAX_ACTIVE = 6;
 /** The one authored Mission 03 Elite Encounter (Epic §8.3.1). Used only by the
  *  compile-time-gated E04-C02 Elite workload preparation so the Elite workload
  *  begins at the authored Elite creation step. */
@@ -270,7 +290,17 @@ export interface CombatSimulationState {
    * authoritative gameplay data only — E01 never renders them.
    */
   readonly eliteDeflectionFeedbacks: EliteDeflectionFeedbacks;
-  readonly destroyedEnemyFlashes: readonly DestroyedEnemyFlash[];
+  /**
+   * V021-WI-05 E01 authoritative hitbox-free destruction-shatter records (patch
+   * §4.1, V021-DEC-005): at most one per true destruction, aged exactly once per
+   * executed fixed step — including a committed terminal's own fixed fade steps,
+   * because the patch allows visual-only shatter ageing to continue while
+   * gameplay stays frozen — and removed by their own expiry or by terminal zero
+   * opacity. A removed effect is never re-created by resize or a later frame.
+   * These records are presentation-only: no hitbox, reward, count, mission
+   * outcome, RNG, or terminal timing reads them.
+   */
+  readonly destructionShatters: readonly DestructionShatter[];
   readonly aircraftDangerFlashStepsRemaining: number;
   // --- Critical Hull (v0.2 §15.3) ---
   readonly criticalHullMessageTriggered: boolean;
@@ -289,6 +319,17 @@ export interface CombatSimulationState {
    *  (set through the runtime seam). A failed/inert write keeps the frozen
    *  terminal and never advances fade, centring, or flight. */
   readonly exitAuthorized: boolean;
+  /**
+   * V021-WI-04-B (patch §4, V021-AC-005): remaining fixed `1/60 s` steps of the
+   * committed Defeat/Game Over terminal fade — `TERMINAL_FADE_STEPS` at the
+   * Defeat freeze and `0` once its last step has run. Defeat owns no
+   * centring/flight phase, so its fade carries this dedicated counter while
+   * committed Success/Evacuated derive their fade from the shared
+   * `exitCentreStepsRemaining` phase. It stays at its full value while the
+   * terminal write is uncommitted, so no fade can start before the
+   * exact-attempt commit (`exitAuthorized`).
+   */
+  readonly defeatFadeStepsRemaining: number;
   /** V02-WI-05 E02: remaining fixed `1/60 s` steps of the irreversible
    *  `300`-step Evacuation commitment, `0` when `beginEvacuation` has not been
    *  accepted (and `0` again once the exact zero step resolved `Evacuated`).
@@ -297,6 +338,14 @@ export interface CombatSimulationState {
   /** V02-WI-04 C03 evidence-only observed per-step maxima (Pass A). `null`
    *  (and the entire field) is compile-time absent from the ordinary build. */
   readonly evidence: CombatEvidenceAccumulator | null;
+  /**
+   * V021-PATCH-STAB-01 C01 evidence-only dense owner-work recorder (Verification
+   * §11 local-patch exception, V021-AC-006). `null` until the dense
+   * combined-stress setup arms it; the field and every read of it fold away in
+   * the ordinary production build, where `DENSE_WORKLOAD_OWNER_WORK_ENABLED` is
+   * the constant `false`.
+   */
+  readonly denseWorkloadOwnerWork?: DenseWorkloadOwnerWorkRecorder | null;
 }
 
 export interface CombatBoundsSize {
@@ -488,7 +537,7 @@ export function createCombatSimulation(
     godModeEnabled: false,
     activeEnemyFlashStepsRemaining: {},
     eliteDeflectionFeedbacks: {},
-    destroyedEnemyFlashes: [],
+    destructionShatters: [],
     aircraftDangerFlashStepsRemaining: 0,
     criticalHullMessageTriggered: criticalTriggered,
     criticalHullMessageStepsRemaining: criticalTriggered
@@ -498,6 +547,7 @@ export function createCombatSimulation(
     exitPhase: 'none',
     exitCentreStepsRemaining: 0,
     exitAuthorized: false,
+    defeatFadeStepsRemaining: 0,
     evacuationStepsRemaining: 0,
     // V02-WI-04 C03/C04: the observed per-step maxima accumulator exists only
     // in builds with the counters capability enabled; other builds carry
@@ -505,6 +555,9 @@ export function createCombatSimulation(
     evidence: EVIDENCE_COUNTERS_ENABLED
       ? createCombatEvidenceAccumulator(input.missionSeed)
       : null,
+    // V021-PATCH-STAB-01 C01: no dense owner-work recorder is armed until the
+    // evidence-only combined-stress setup explicitly arms one.
+    denseWorkloadOwnerWork: null,
   };
 }
 
@@ -766,13 +819,16 @@ export function stepCombatSimulation(
     return state;
   }
   if (state.terminalResult !== null) {
-    // Epic §13.3–13.5 / V02-WI-05 E02: after a terminal result, gameplay stops.
-    // A committed Success or Evacuation continues only its immutable
-    // deterministic centre-and-up exit sequence; Defeat freezes and its
-    // commitment/presentation is owned by the application terminal-save
-    // boundary (Epic §13.5, §13.7).
+    // Epic §13.3–13.5 / V02-WI-05 E02 / V021-WI-04-B: after a terminal result,
+    // gameplay stops. A committed Success or Evacuation continues only its
+    // immutable deterministic centre-and-up exit sequence, whose first 15
+    // (Success) or all 30 (Evacuated) steps are also the committed fade; a
+    // committed Defeat/Game Over keeps its stationary Aircraft and runs only
+    // its own 30-step fade before the Result/Game Over presentation. Every
+    // terminal's commitment/presentation boundary stays application-owned
+    // (Epic §13.5, §13.7).
     return state.terminalResult.kind === 'defeat'
-      ? state
+      ? stepDefeatFade(state)
       : stepCommittedExit(state, stepSeconds);
   }
   // V02-WI-04 C03/C04: one fresh evidence sink per executed step, present only
@@ -781,6 +837,13 @@ export function stepCombatSimulation(
   const evidenceSink = EVIDENCE_COUNTERS_ENABLED
     ? createCollisionEvidenceSink()
     : null;
+  // V021-PATCH-STAB-01 C01 evidence-only dense owner-work framing (scenarios or
+  // development only). The recorder read and both framing calls are dead code in
+  // the ordinary production build, where the gate is the constant `false`.
+  const denseOwnerWork = denseOwnerWorkOf(state);
+  if (denseOwnerWork !== null) {
+    denseOwnerWork.beginStep(state.missionStepCount);
+  }
   const begun = beginStepCounters(state);
   const moved =
     begun.mode === 'keyboard'
@@ -789,6 +852,12 @@ export function stepCombatSimulation(
   const withMission = stepMission(moved, stepSeconds);
   const withCollisions = resolveCollisions(withMission, evidenceSink);
   const stepped = stepEvacuationAndResolveTerminal(withCollisions);
+  if (denseOwnerWork !== null) {
+    // The frame is sealed against the STEPPED state's mission step count: the
+    // mission step advances it by exactly one, so a skipped, duplicated or
+    // mis-aligned frame can never be sealed as owner evidence.
+    denseOwnerWork.completeStep(stepped.missionStepCount);
+  }
   if (EVIDENCE_COUNTERS_ENABLED && evidenceSink !== null) {
     // Observed workload maxima after the collision phase (surviving entities).
     // The Elite workload facts read the same authoritative post-collision state,
@@ -807,6 +876,42 @@ export function stepCombatSimulation(
     );
   }
   return stepped;
+}
+
+/**
+ * V021-WI-05 E01 (patch §4.1, V021-AC-009) the ONE visual-ageing owner for the
+ * hitbox-free destruction shatters: it advances every live record by exactly one
+ * executed fixed step and drops the records whose exact lifetime is complete
+ * (`12` regular / `15` Elite). It is called by the ordinary executed step and by
+ * both committed terminal fade paths, so a shatter ages once per executed step
+ * and never on a pending, failed, rejected or inert terminal write, a
+ * browser-safety Pause, a resize, or an unexecuted render frame. Nothing here
+ * reads or mutates gameplay data.
+ */
+function ageDestructionShatters(
+  shatters: readonly DestructionShatter[],
+): readonly DestructionShatter[] {
+  const aged: DestructionShatter[] = [];
+  for (const shatter of shatters) {
+    const ageSteps = shatter.ageSteps + 1;
+    if (ageSteps >= shatter.totalSteps) {
+      continue;
+    }
+    aged.push({ ...shatter, ageSteps });
+  }
+  return aged;
+}
+
+/** Applies the visual-only destruction-shatter ageing to a frozen terminal
+ *  state (patch §4.1): a committed terminal's own fixed fade step advances the
+ *  shatter age while every gameplay fact stays frozen. */
+function withAgedDestructionShatters(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  return {
+    ...state,
+    destructionShatters: ageDestructionShatters(state.destructionShatters),
+  };
 }
 
 /** Decrements every existing feedback counter, the per-pair contact cooldowns,
@@ -835,9 +940,10 @@ function beginStepCounters(
       };
     }
   }
-  const destroyedEnemyFlashes = state.destroyedEnemyFlashes
-    .map((flash) => ({ ...flash, stepsRemaining: flash.stepsRemaining - 1 }))
-    .filter((flash) => flash.stepsRemaining > 0);
+  // V021-WI-05 E01 (patch §4.1): likewise, every live destruction-shatter record
+  // advances exactly one executed step and is dropped when its exact `12`
+  // regular / `15` Elite lifetime is complete.
+  const destructionShatters = ageDestructionShatters(state.destructionShatters);
   const pairContactCooldownSteps: Record<number, number> = {};
   for (const [id, steps] of Object.entries(state.pairContactCooldownSteps)) {
     const next = steps - 1;
@@ -849,7 +955,7 @@ function beginStepCounters(
     ...state,
     activeEnemyFlashStepsRemaining,
     eliteDeflectionFeedbacks,
-    destroyedEnemyFlashes,
+    destructionShatters,
     aircraftDangerFlashStepsRemaining: Math.max(
       0,
       state.aircraftDangerFlashStepsRemaining - 1,
@@ -892,28 +998,65 @@ function stepCommittedExit(
   if (state.exitPhase === 'complete') {
     return state;
   }
+  // V021-WI-05 E01 (patch §4.1): a committed Success/Evacuation fade step also
+  // advances the visual-only shatter age, so an Elite destroyed on the Success
+  // step can display its complete 15-step effect inside the approved 15-step
+  // Success fade while every gameplay fact stays frozen.
+  const aged = withAgedDestructionShatters(state);
   if (state.exitPhase === 'centre') {
     if (state.exitCentreStepsRemaining > 0) {
-      const targetX = state.viewportWidth * 0.5;
+      const targetX = aged.viewportWidth * 0.5;
       const centerX =
-        state.aircraft.centerX +
-        (targetX - state.aircraft.centerX) / state.exitCentreStepsRemaining;
+        aged.aircraft.centerX +
+        (targetX - aged.aircraft.centerX) / aged.exitCentreStepsRemaining;
       return {
-        ...state,
-        aircraft: { ...state.aircraft, centerX },
-        exitCentreStepsRemaining: state.exitCentreStepsRemaining - 1,
+        ...aged,
+        aircraft: { ...aged.aircraft, centerX },
+        exitCentreStepsRemaining: aged.exitCentreStepsRemaining - 1,
       };
     }
     // The centre phase has run its exact 30 fixed steps; fall through so the
     // first upward movement happens on this same step (no extra idle step).
   }
-  const stepUp = 0.6 * state.viewportHeight * stepSeconds;
-  const centerY = state.aircraft.centerY - stepUp;
-  const complete = centerY + state.aircraftHeight / 2 <= 0;
+  const stepUp = 0.6 * aged.viewportHeight * stepSeconds;
+  const centerY = aged.aircraft.centerY - stepUp;
+  const complete = centerY + aged.aircraftHeight / 2 <= 0;
   return {
-    ...state,
-    aircraft: { ...state.aircraft, centerY },
+    ...aged,
+    aircraft: { ...aged.aircraft, centerY },
     exitPhase: complete ? 'complete' : 'fly-up',
+  };
+}
+
+/**
+ * V021-WI-04-B committed Defeat/Game Over fade (patch §4, V021-AC-005,
+ * V021-DEC-001): the Aircraft never centres or flies up, so a committed Defeat
+ * advances exactly one fade step per running fixed step and nothing else. The
+ * fade does not start at all until the exact-attempt write has committed
+ * (`exitAuthorized`), so Save Error/Save Conflict/Retry inactivity can never
+ * consume a fade step. It is step-counted, never time-weighted, and it stops
+ * at exact zero: later frames, resize, repeated safety events, and duplicate
+ * commit callbacks cannot restart it, and the frozen payload/economy and the
+ * authoritative enemy/projectile records are never mutated here. Paused or
+ * hidden frames never reach this function (the runtime is frozen), so they
+ * consume zero steps.
+ */
+function stepDefeatFade(state: CombatSimulationState): CombatSimulationState {
+  if (
+    !state.exitAuthorized ||
+    state.defeatFadeStepsRemaining <= 0 ||
+    state.exitPhase !== 'none'
+  ) {
+    return state;
+  }
+  // V021-WI-05 E01 (patch §4.1): a committed Defeat/Game Over fade step also
+  // advances the visual-only shatter age. The frozen payload, economy, and every
+  // authoritative enemy/projectile record stay untouched; an uncommitted
+  // (Save Error/Conflict) Defeat never reaches this line, so neither clock moves.
+  const aged = withAgedDestructionShatters(state);
+  return {
+    ...aged,
+    defeatFadeStepsRemaining: aged.defeatFadeStepsRemaining - 1,
   };
 }
 
@@ -1155,17 +1298,35 @@ function stepRangedFiring(
  *   activation step or a phase-boundary step) is never decremented here and no
  *   shot fires: an old-phase attack due on a boundary step is suppressed and
  *   the new phase keeps its full duration until the next executed step.
- * - `Armoured` fires the two cannons once every `90` steps from the exact
- *   `−6°/+6°` muzzles; the first pair fires `1.5 s` after activation.
- * - `Vulnerable` launches one homing Core every `150` steps from the Core
- *   muzzle; the first may launch only after the complete interval.
- * - At the two-active-Core cap a due launch holds its timer at zero and fires
+ * - `Armoured` fires the two cannons on executed steps `45, 90, …, 675` from the
+ *   exact `−6°/+6°` muzzles; the first pair fires `0.75 s` after activation.
+ * - `Vulnerable` launches six sequential homing Cores from the Core muzzle on
+ *   executed steps `30, 90, 150, 210, 270, 330`; the first may launch only after
+ *   the complete `30`-step first-Core interval and each later launch repeats
+ *   after `60` steps.
+ * - At the six-active-Core cap a due launch holds its timer at zero and fires
  *   on the first later `Vulnerable` step with capacity, resetting the complete
- *   `150`-step timer. No attack ever fires while `Armoured` holds a Core timer
- *   or vice versa: the timer is re-initialized by the owning phase boundary.
+ *   `60`-step repeat timer. No attack ever fires while `Armoured` holds a Core
+ *   timer or vice versa: the timer is re-initialized by the owning phase
+ *   boundary.
  * - Existing launched projectiles are untouched here and keep their lifecycle
  *   across later phase changes.
  */
+/**
+ * V021-PATCH-STAB-01 C01: the armed dense owner-work recorder of this state, or
+ * `null` when no dense evidence run armed one. `DENSE_WORKLOAD_OWNER_WORK_ENABLED`
+ * is a compile-time constant, so the whole read folds away in the ordinary
+ * production build (which never carries the field).
+ */
+function denseOwnerWorkOf(
+  state: CombatSimulationState,
+): DenseWorkloadOwnerWorkRecorder | null {
+  if (!DENSE_WORKLOAD_OWNER_WORK_ENABLED) {
+    return null;
+  }
+  return state.denseWorkloadOwnerWork ?? null;
+}
+
 function stepEliteAttacks(state: CombatSimulationState): CombatSimulationState {
   let nextEnemyProjectileId = state.nextEnemyProjectileId;
   const spawnedProjectiles: EnemyProjectileInstance[] = [];
@@ -1245,12 +1406,34 @@ function stepEliteAttacks(state: CombatSimulationState): CombatSimulationState {
     nextEnemyProjectileId += 1;
     return { ...enemy, attackStepsRemaining: ELITE_CORE_INTERVAL_STEPS };
   });
+  reportOwnerCoreLaunches(state, spawnedProjectiles);
   return {
     ...state,
     enemies,
     enemyProjectiles: [...state.enemyProjectiles, ...spawnedProjectiles],
     nextEnemyProjectileId,
   };
+}
+
+/**
+ * V021-PATCH-STAB-01 C01: reports the Homing Cores THIS attack step created (the
+ * `spawnedProjectiles` the owner just built) so a Core's first appearance can be
+ * attributed to the canonical Elite attack owner instead of to cadence
+ * arithmetic alone. Dead code in the ordinary production build.
+ */
+function reportOwnerCoreLaunches(
+  state: CombatSimulationState,
+  spawnedProjectiles: readonly EnemyProjectileInstance[],
+): void {
+  const ownerWork = denseOwnerWorkOf(state);
+  if (ownerWork === null) {
+    return;
+  }
+  ownerWork.observeOwnerCoreLaunchIds(
+    spawnedProjectiles
+      .filter((projectile) => projectile.kind === 'elite-core')
+      .map((projectile) => projectile.id),
+  );
 }
 
 /**
@@ -1376,6 +1559,11 @@ function resolveCollisions(
   }
   const projectileEvidence =
     evidence === undefined || evidence === null ? {} : { evidence };
+  // V021-PATCH-STAB-01 C01: the two destruction owners that report their own
+  // per-step work into the armed dense recorder (dead code without one).
+  const denseOwnerWork = denseOwnerWorkOf(state);
+  const ownerWork =
+    denseOwnerWork === null ? {} : { ownerWork: denseOwnerWork };
   const projectileResult = resolveProjectileCollisions({
     projectiles: state.projectiles,
     enemies: state.enemies,
@@ -1384,6 +1572,7 @@ function resolveCollisions(
     existingFlashes: state.activeEnemyFlashStepsRemaining,
     existingEliteDeflections: state.eliteDeflectionFeedbacks,
     ...projectileEvidence,
+    ...ownerWork,
   });
   const enemyProjectileResult = resolveEnemyProjectileCollisions({
     projectiles: state.enemyProjectiles,
@@ -1414,6 +1603,7 @@ function resolveCollisions(
     godModeEnabled: state.godModeEnabled,
     playerDefeated: enemyProjectileResult.playerDefeated,
     ...projectileEvidence,
+    ...ownerWork,
   });
   const accounting = applyDestroyedAccounting(state, {
     destroyed: [
@@ -1452,10 +1642,13 @@ function resolveCollisions(
     // records (created/replaced by blocked Armoured hits and removed on Elite
     // destruction); they never enter the generic enemy flash map.
     eliteDeflectionFeedbacks: projectileResult.eliteDeflections,
-    destroyedEnemyFlashes: [
-      ...state.destroyedEnemyFlashes,
-      ...projectileResult.destroyedEnemyFlashes,
-      ...contactResult.destroyedEnemyFlashes,
+    // V021-WI-05 E01 (patch §4.1): every true destruction of this executed step
+    // contributes exactly one hitbox-free shatter record (projectile-pass
+    // destructions followed by the Hunter kamikaze contact destruction).
+    destructionShatters: [
+      ...state.destructionShatters,
+      ...projectileResult.destructionShatters,
+      ...contactResult.destructionShatters,
     ],
     criticalHullMessageTriggered: criticalHull.triggered,
     criticalHullMessageStepsRemaining: criticalHull.stepsRemaining,
@@ -1580,6 +1773,25 @@ function contactDamageByType(
  * Evacuated zero-step terminal is resolved by `stepEvacuationAndResolveTerminal`
  * (the countdown decrements only inside an executed step).
  */
+/**
+ * The single owner of the immutable `Defeat` terminal freeze (Epic §13.5,
+ * V021-WI-04-B): Defeat keeps unconditional priority and freezes gameplay
+ * immediately with a stationary Aircraft (no centring, no upward flight), but
+ * it now also records the exact `TERMINAL_FADE_STEPS` (`0.5 s`) fade window
+ * that runs once the exact-attempt write has committed. Both the ordinary
+ * Hull-`0` evaluation and the committed-Evacuation zero-step tie resolve
+ * through this one function, so neither path can drift from the other.
+ */
+function freezeDefeatTerminal(
+  state: CombatSimulationState,
+): CombatSimulationState {
+  return {
+    ...state,
+    terminalResult: { kind: 'defeat' },
+    defeatFadeStepsRemaining: TERMINAL_FADE_STEPS,
+  };
+}
+
 function evaluateTerminalResult(
   state: CombatSimulationState,
 ): CombatSimulationState {
@@ -1587,7 +1799,7 @@ function evaluateTerminalResult(
     return state;
   }
   if (state.playerDefeated) {
-    return { ...state, terminalResult: { kind: 'defeat' } };
+    return freezeDefeatTerminal(state);
   }
   if (state.evacuationStepsRemaining > 0) {
     // Committed Evacuation countdown still running: Success is suppressed. The
@@ -1683,7 +1895,7 @@ function stepEvacuationAndResolveTerminal(
   // Defeat remains first priority after the complete normal collision/damage
   // work of every step — including the exact zero step.
   if (decremented.playerDefeated) {
-    return { ...decremented, terminalResult: { kind: 'defeat' } };
+    return freezeDefeatTerminal(decremented);
   }
   // The exact step that reduces remainingSteps to 0 resolves Evacuated when
   // the Aircraft remains operational, through the ONE shared terminal owner.
@@ -1732,24 +1944,87 @@ export function buildEvacuationCountdownReadModel(
 }
 
 /**
- * V02-WI-05 E02 simulation-owned enemy/enemy-projectile fade scalar (Epic
- * §13.4, V02-DEC-028): full opacity while no committed Evacuation exit is
- * running, then `exitCentreStepsRemaining / EXIT_CENTRE_STEPS` across the exact
- * shared 30 centre steps — reaching zero exactly when the centre phase
- * completes (after which the presentation removes/inerts the faded enemy
- * surfaces while the Aircraft flies upward). A single simulation-owned
- * scalar/phase drives every active enemy and enemy-projectile opacity; the
- * renderer never owns timers or fade mutation. Success has no active enemies
- * at its exit, so this scalar stays `1` there.
+ * V021-WI-04-B simulation-owned committed terminal-fade scalar (patch §4,
+ * V021-AC-005, V021-DEC-001; generalizes the V02-WI-05 E02
+ * enemy/enemy-projectile Evacuation fade). One scalar, derived from the
+ * authoritative step counters, drives the opacity of EVERY frozen
+ * non-Aircraft Combat surface the presentation exposes: regular/Elite enemies,
+ * player and enemy projectiles, and transient hit/deflection feedback. The
+ * renderer never owns a timer, tween, elapsed time, or fade mutation, and the
+ * Aircraft, Combat background, HUD, controls, blocking recovery UI, and result
+ * UI never consume this value.
+ *
+ * - no terminal / uncommitted terminal write: `1` (nothing may fade before the
+ *   exact-attempt commit);
+ * - committed Success: `(exitCentreStepsRemaining − 15) / 15` clamped to
+ *   `[0, 1]` — full at the first authorized step and exactly `0` after the
+ *   `15` running steps (`0.25 s`) that run concurrently with the existing
+ *   `30`-step centring;
+ * - committed Evacuated: `exitCentreStepsRemaining / 30` — exactly `0` when
+ *   the `30` centre steps complete (the accepted V02-WI-05 E02 behaviour);
+ * - committed Defeat/Game Over: `defeatFadeStepsRemaining / 30` — exactly `0`
+ *   after the `30` fade steps (`0.5 s`), with no Aircraft movement at all.
+ *
+ * Every branch is a pure function of the frozen state, so pause, resize,
+ * duplicate callbacks, and late renderer frames can only re-read the same
+ * progression and can never restart or advance it.
  */
-export function evacuationEnemyOpacity(state: CombatSimulationState): number {
-  if (state.terminalResult?.kind !== 'evacuated' || !state.exitAuthorized) {
+export function terminalFadeOpacity(state: CombatSimulationState): number {
+  const terminal = state.terminalResult;
+  if (terminal === null || !state.exitAuthorized) {
     return 1;
+  }
+  if (terminal.kind === 'defeat') {
+    return Math.min(
+      1,
+      Math.max(0, state.defeatFadeStepsRemaining / TERMINAL_FADE_STEPS),
+    );
   }
   if (state.exitPhase === 'none') {
     return 1;
   }
-  return state.exitCentreStepsRemaining / EXIT_CENTRE_STEPS;
+  if (terminal.kind === 'success') {
+    const fadeStepsRemaining = Math.min(
+      SUCCESS_FADE_STEPS,
+      state.exitCentreStepsRemaining -
+        (TERMINAL_FADE_STEPS - SUCCESS_FADE_STEPS),
+    );
+    return Math.min(1, Math.max(0, fadeStepsRemaining / SUCCESS_FADE_STEPS));
+  }
+  return Math.min(
+    1,
+    Math.max(0, state.exitCentreStepsRemaining / TERMINAL_FADE_STEPS),
+  );
+}
+
+/**
+ * True exactly when a committed terminal's fade has reached zero opacity:
+ * Success after its `15` steps, Evacuated after its `30` centre steps, and
+ * Defeat/Game Over after its `30` fade steps. The presentation uses this to
+ * remove every faded surface, and the entry uses it to decide when the
+ * Defeat/Game Over Result may be presented. An uncommitted terminal write is
+ * never fade-complete.
+ */
+export function terminalFadeComplete(state: CombatSimulationState): boolean {
+  return (
+    state.terminalResult !== null &&
+    state.exitAuthorized &&
+    terminalFadeOpacity(state) <= 0
+  );
+}
+
+/**
+ * V02-WI-05 E02 Evacuation-specific view of the committed fade (Epic §13.4,
+ * V02-DEC-028): `1` for every state except a committed Evacuated terminal,
+ * whose enemy/enemy-projectile opacity is the shared
+ * `terminalFadeOpacity` progression across the exact `30` centre steps.
+ * Retained as the accepted Evacuation-package selector; the general terminal
+ * fade above is the single authority.
+ */
+export function evacuationEnemyOpacity(state: CombatSimulationState): number {
+  return state.terminalResult?.kind === 'evacuated'
+    ? terminalFadeOpacity(state)
+    : 1;
 }
 
 function stepKeyboard(
@@ -1910,6 +2185,20 @@ function resizeSimulation(
         shortSidePx: shortSide,
       });
     }
+    // V021-WI-03 (patch §3): a Hunter re-resolves its configured rendered
+    // bounds at the new scale and re-derives its authoritative AABB from the
+    // UNCHANGED heading, so the rotated envelope still equals the rendered
+    // rectangle and no resize can re-aim, restart, or re-latch its run.
+    if (enemy.kind === 'hunter') {
+      return reprojectHunterForViewport(enemy, {
+        centerX:
+          enemy.entry === 'top'
+            ? reprojectEngagementBandX(enemy.centerX, state.bounds, bounds)
+            : enemy.centerX * ratioX,
+        centerY: enemy.centerY * ratioY,
+        shortSidePx: shortSide,
+      });
+    }
     const enemyBounds = enemyBoundsByType[enemy.type];
     return {
       ...enemy,
@@ -1981,11 +2270,18 @@ function resizeSimulation(
     centerX: projectile.centerX * ratioX,
     centerY: projectile.centerY * ratioY,
   }));
-  const destroyedEnemyFlashes = state.destroyedEnemyFlashes.map((flash) => ({
-    ...flash,
-    centerX: flash.centerX * ratioX,
-    centerY: flash.centerY * ratioY,
-    size: shortSide * 0.04,
+  // V021-WI-05 E01 (patch §4.1): a live destruction burst keeps its exact age
+  // and lifetime, reprojects its destruction centre proportionally, and scales
+  // with the same short-side factor the destroyed enemy's complete visual
+  // bounds use — so a resize never restarts, extends, or re-creates an effect
+  // (an already expired record stays absent because it no longer exists).
+  const shortSideRatio =
+    shortSide / Math.min(state.viewportWidth, state.viewportHeight);
+  const destructionShatters = state.destructionShatters.map((shatter) => ({
+    ...shatter,
+    centerX: shatter.centerX * ratioX,
+    centerY: shatter.centerY * ratioY,
+    size: shatter.size * shortSideRatio,
   }));
   // V02-WI-06 E01 C01: a live Elite deflection's local impact centre reprojects
   // proportionally with the viewport so the authoritative impact location
@@ -2020,7 +2316,7 @@ function resizeSimulation(
     enemies,
     enemyProjectiles,
     projectiles,
-    destroyedEnemyFlashes,
+    destructionShatters,
     eliteDeflectionFeedbacks,
     enemyBoundsByType,
     movementSpeedPxByType,
@@ -2422,6 +2718,82 @@ function spawnLegacyFiveBasicBenchmark(
   };
 }
 
+/**
+ * V021-PATCH-STAB-01 C01 evidence-only dense combined-stress maintenance
+ * (Verification §11 local-patch exception, V021-AC-006).
+ *
+ * The natural Mission 03 route never carries six Hunters, a Ranged Drone, and an
+ * activated Elite on the same executed step, so a bounded evidence-only setup
+ * tops the LIVE population up to the §11 combined-stress minimum through the
+ * ordinary deterministic Debug spawn owner (`combat-debug/spawn-enemy`, authored
+ * Top/Side placements, canonical per-enemy streams) before each recorded
+ * executed step. It only ADDS enemies: it never removes, moves, damages, heals,
+ * or latches an existing enemy, so every value the C01 recorder reads remains
+ * authoritative simulation state. Like `spawnLegacyFiveBasicBenchmark` it is
+ * reachable only through the scenarios-gated runtime method below and is
+ * compile-time absent from the ordinary artifact.
+ */
+export function maintainDenseCombinedStress(
+  state: CombatSimulationState,
+  ownerWork: DenseWorkloadOwnerWorkRecorder | null = null,
+): CombatSimulationState {
+  const withHunters = topUpDenseRole(
+    state,
+    'hunter-drone',
+    DENSE_WORKLOAD_MIN_HUNTERS,
+  );
+  const topped = topUpDenseRole(
+    withHunters,
+    'ranged-drone',
+    DENSE_WORKLOAD_MIN_RANGED,
+  );
+  // The recorder is armed together with the population top-up, so the steps that
+  // carry the §11 combined-stress population are exactly the steps whose owners
+  // report their own work (and an already-armed recorder is left in place).
+  return ownerWork === null
+    ? topped
+    : { ...topped, denseWorkloadOwnerWork: ownerWork };
+}
+
+/**
+ * Spawns the authored-placement Debug enemies of one role until `minimum` are
+ * live. Bounded by `minimum` attempts and stops on the strict no-op (a terminal
+ * state, or a mission that authors no placement for the role), so it can never
+ * spin.
+ */
+function topUpDenseRole(
+  state: CombatSimulationState,
+  type: EnemyType,
+  minimum: number,
+): CombatSimulationState {
+  let next = state;
+  for (let attempt = 0; attempt < minimum; attempt += 1) {
+    if (countLiveRole(next, type) >= minimum) {
+      break;
+    }
+    const spawned = applyDebugCommand(next, {
+      type: 'combat-debug/spawn-enemy',
+      enemyType: type,
+    });
+    if (spawned === next) {
+      break;
+    }
+    next = spawned;
+  }
+  return next;
+}
+
+/** Live enemies of one authored role in the authoritative state. */
+function countLiveRole(state: CombatSimulationState, type: EnemyType): number {
+  let count = 0;
+  for (const enemy of state.enemies) {
+    if (enemy.type === type) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 export interface CombatSimulationRuntime {
   readonly getState: () => CombatSimulationState;
   readonly submit: (command: CombatInputCommand) => void;
@@ -2450,6 +2822,22 @@ export interface CombatSimulationRuntime {
   readonly submitEvidenceBenchmark?: (
     scenario: 'legacy-five-basic' | 'm01-e5' | 'm03-e8',
   ) => void;
+  /** V021-PATCH-STAB-01 C01 evidence-only dense combined-stress maintenance
+   *  (Verification §11 local-patch exception, V021-AC-006): tops the live
+   *  population up to the §11 combined-stress minimum through the ordinary
+   *  deterministic Debug spawn owner. Every §11 population claim is a PRE-step
+   *  claim — six Hunters and one Ranged Drone live in the population the executed
+   *  step RAN WITH — so a driver must invoke this BEFORE each executed step it
+   *  records (never after it), exactly as the C01 regression does; the topped-up
+   *  enemies then belong to that step's own pre-step population, and the
+   *  post-step population an executed step leaves behind may legitimately be
+   *  below the minimum. Present only in scenario-bearing builds (compile-time
+   *  absent from the ordinary production artifact) and inspectable through
+   *  `getState`, so the evidence run records the resulting authoritative state.
+   *  C01 does NOT prove the browser/frame driver that will consume this method:
+   *  demonstrating the same pre-step contract under multi-step frames belongs to
+   *  C02, and the browser bucket stays blocked until then. */
+  readonly submitEvidenceDenseStress?: () => void;
   readonly dispose: () => void;
 }
 
@@ -2524,18 +2912,18 @@ export function createCombatSimulationRuntime(
       state = applyDebugCommand(state, command);
     },
     authorizeCommittedExit() {
-      // V02-WI-05 E02 C01: only a frozen committed Success/Evacuated terminal
-      // may authorize the deterministic exit. Premature (no terminal yet) and
-      // Defeat authorizations are strict no-ops: a Defeat has no exit sequence
-      // (Epic §13.5) and authorizing before the terminal freeze would bypass
-      // the commit gate.
+      // V02-WI-05 E02 C01 / V021-WI-04-B: only a frozen terminal may authorize
+      // its committed continuation. A premature call (no terminal yet) is a
+      // strict no-op: authorizing before the terminal freeze would bypass the
+      // commit gate. For a committed Success/Evacuated this starts the shared
+      // centre-and-up exit; for a committed Defeat/Game Over it starts ONLY the
+      // `30`-step fade, because Defeat has no centring or flight (Epic §13.5,
+      // V021-DEC-001). Either way it is idempotent: an already-authorized
+      // terminal never restarts or re-arms its progression.
       if (disposed || state.exitAuthorized) {
         return;
       }
-      if (
-        state.terminalResult === null ||
-        state.terminalResult.kind === 'defeat'
-      ) {
+      if (state.terminalResult === null) {
         return;
       }
       state = { ...state, exitAuthorized: true };
@@ -2565,6 +2953,16 @@ export function createCombatSimulationRuntime(
             } else if (scenario === 'm03-e8') {
               state = prepareEliteWorkloadBenchmark(state);
             }
+          },
+          // V021-PATCH-STAB-01 C01 evidence-only dense combined-stress
+          // maintenance (Verification §11): the bounded setup that reaches the
+          // §11 population minimum. Compile-time absent from the ordinary
+          // artifact through the same scenarios gate.
+          submitEvidenceDenseStress(): void {
+            if (disposed) {
+              return;
+            }
+            state = maintainDenseCombinedStress(state);
           },
         }
       : {}),

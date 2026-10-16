@@ -2,6 +2,8 @@ import type { CombatOverlayId } from './lifecycle';
 import type { EnemyType } from '@domain/index';
 import {
   FIXED_STEPS_PER_SECOND,
+  terminalFadeComplete,
+  terminalFadeOpacity,
   type CombatSimulationState,
 } from './combat-simulation';
 import type { ElitePhase } from './enemies';
@@ -114,6 +116,24 @@ export interface CombatObservabilityElite {
 }
 
 /**
+ * V021-WI-04-B authoritative committed terminal-fade read model (patch §4,
+ * V021-AC-005). Read-only derived facts only: the development browser route
+ * asserts the exact per-terminal fade boundaries and that the frozen surfaces
+ * reach zero opacity on the authoritative step. No gameplay, mutation, or
+ * renderer behaviour may read this model.
+ */
+export interface CombatObservabilityTerminal {
+  readonly resultKind: 'success' | 'defeat' | 'evacuated';
+  readonly exitAuthorized: boolean;
+  readonly exitPhase: 'none' | 'centre' | 'fly-up' | 'complete';
+  readonly exitCentreStepsRemaining: number;
+  readonly defeatFadeStepsRemaining: number;
+  /** The shared committed fade scalar in `[0, 1]` (`1` before the commit). */
+  readonly fadeOpacity: number;
+  readonly fadeComplete: boolean;
+}
+
+/**
  * Read-only Debug observability read model (Combat §11.7; Epic §17, V02-WI-04/
  * WI-07): refreshed only on Debug open and accepted Debug actions while paused —
  * never per frame. God Mode is carried for the canonical Checkbox and is not a
@@ -157,6 +177,9 @@ export interface CombatObservability {
   readonly escapedEnemiesByType: Readonly<Record<EnemyType, number>>;
   readonly pendingCombatRewards: number;
   readonly pendingEscapePenalties: number;
+  /** V021-WI-04-B: the committed terminal-fade facts, or `null` while this
+   *  simulation has no terminal result. */
+  readonly terminal: CombatObservabilityTerminal | null;
 }
 
 export function buildCombatObservability(
@@ -208,6 +231,18 @@ export function buildCombatObservability(
     escapedEnemiesByType: state.escapedCountByType,
     pendingCombatRewards: state.pendingCombatRewards,
     pendingEscapePenalties: state.pendingEscapePenalties,
+    terminal:
+      state.terminalResult === null
+        ? null
+        : {
+            resultKind: state.terminalResult.kind,
+            exitAuthorized: state.exitAuthorized,
+            exitPhase: state.exitPhase,
+            exitCentreStepsRemaining: state.exitCentreStepsRemaining,
+            defeatFadeStepsRemaining: state.defeatFadeStepsRemaining,
+            fadeOpacity: terminalFadeOpacity(state),
+            fadeComplete: terminalFadeComplete(state),
+          },
   };
 }
 

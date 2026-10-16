@@ -36,7 +36,7 @@ import type { CombatSceneContext } from './combat-scene';
  * `CombatSceneContext`. The assertions inspect the scene's real GameObjects:
  * the Elite's prepared Armoured/Vulnerable texture swap (exactly one visual per
  * Elite), the approved procedural fallback for both states, the Elite cannon
- * rectangle and homing-Core diamond geometry/lifecycle, the authoritative local
+ * circle and homing-Core diamond geometry/lifecycle, the authoritative local
  * Armoured deflection diamond, the one-request prepared-texture boundary, and
  * shutdown cleanup. jsdom cannot decode images or draw canvas, so the harness
  * stubs `Image` (fires load with usable dimensions), a no-op 2D context, and
@@ -171,6 +171,24 @@ beforeAll(async () => {
 }, REAL_PHASER_BOOTSTRAP_TIMEOUT_MS);
 
 /**
+ * V021-PATCH-DEP-01-C01: explicit, bounded per-test allowance for this file's
+ * heavy real-Phaser Elite tests, matching the file-local bootstrap allowance
+ * above (both are `5 s x 6`/`10 s x 6`), so the same bounded-allowance convention
+ * covers the test bodies as well as the hook. Each test boots a real CANVAS
+ * `Phaser.Game` plus a real `CombatScene` (eight boots cost a measured 3 212 ms
+ * of fixed 400 ms settle waits alone) and drives long simulations (5 700 steps
+ * for the §2.3 Hunter wave), so its own wall clock is already 0.4-1.05 s while
+ * Vitest's default `5_000 ms` test budget measures wall clock. Under the
+ * complete 102-file parallel run the measured per-test wall clock inflates
+ * (5 253 ms here at eight-times CPU oversubscription), so these tests failed the
+ * aggregate gate with spurious `Test timed out in 5000ms` results while every
+ * assertion held. No global timeout/worker setting, assertion, fixture or
+ * authored-content/rendering claim changes, and the value still expires, so a
+ * genuinely hanging test can never be masked.
+ */
+const AGGREGATE_LOAD_TEST_TIMEOUT_MS = 30_000;
+
+/**
  * Prepared Elite bytes (one distinct inline source per state kind). The runtime
  * URL is a plain catalogue path that would be a second manifest request if the
  * renderer ever used it, so the test can prove the prepared bytes are reused.
@@ -205,6 +223,18 @@ function eliteIn(state: CombatSimulationState): EliteEnemyState | null {
 }
 
 /**
+ * The recorded filled colour of the shape one projectile Graphics surface draws
+ * (V021-WI-04-A): `Phaser.GameObjects.Graphics#commandBuffer` is Phaser's own
+ * public record of the draw commands the canvas renderer consumed, and every
+ * projectile draw records `FILL_STYLE, colour, alpha` before its outline, so a
+ * wrong or outline-only surface cannot satisfy this read.
+ */
+function drawnFillColor(graphics: Phaser.GameObjects.Graphics): number {
+  const commandBuffer = graphics.commandBuffer as number[];
+  return commandBuffer[1]!;
+}
+
+/**
  * The real Mission 03 pipeline driven to the exactly activated (Armoured)
  * Elite, with the existing `god-mode` development seam so the aircraft survives
  * the 05:20 arrival. No gameplay rule is altered for the presentation test.
@@ -231,7 +261,7 @@ interface EliteSceneHarness {
   readonly game: InstanceType<PhaserModule['Game']>;
   readonly scene: Phaser.Scene & {
     enemyVisuals: Map<number, Phaser.GameObjects.GameObject>;
-    enemyProjectileVisuals: Map<number, Phaser.GameObjects.Rectangle>;
+    enemyProjectileVisuals: Map<number, Phaser.GameObjects.Graphics>;
     eliteCoreVisuals: Map<number, Phaser.GameObjects.Graphics>;
     eliteDeflectionVisuals: Map<number, Phaser.GameObjects.Graphics>;
     enemyVisualResolutions: Map<string, { readonly status: string }>;
@@ -350,450 +380,543 @@ function advanceUntilElitePhase(
   throw new Error(`Fixture failed: the Elite never reached ${phase}.`);
 }
 
+/** The real Mission 03 state at the first authored Hunter wave (e3 `01:35`,
+ *  the `RH6-16` six-Hunter arrangement). */
+function firstHunterWaveState(): CombatSimulationState {
+  let state = applyDebugCommand(
+    createTestCombatState({ missionId: 'interception-03' }),
+    { type: 'combat-debug/god-mode', enabled: true },
+  );
+  for (let step = 0; step < 95 * FIXED_STEPS_PER_SECOND; step += 1) {
+    state = stepCombatSimulation(state, FIXED_STEP_SECONDS);
+  }
+  return state;
+}
+
+/** The live-enemy presentation contract: exactly one Combat visual per enemy in
+ *  the authoritative snapshot. The Elite is framed inside a Mission 03 state
+ *  that legitimately still owns its surviving §2.3 regulars, so a bare `1`
+ *  would assert the wrong thing. */
+function expectOneVisualPerLiveEnemy(scene: EliteSceneHarness['scene']): void {
+  expect(scene.enemyVisuals.size).toBe(scene.simState.enemies.length);
+}
+
 describe('real CombatScene Elite presentation (V02-WI-06 E03)', () => {
-  it('renders the prepared Armoured texture, swaps to Vulnerable on the authoritative phase change, requests each asset once, and cleans up on shutdown', async () => {
-    const state = activatedEliteState();
-    const elite = eliteIn(state);
-    if (elite === null) {
-      throw new Error('Fixture failed: no activated Elite.');
-    }
-    const harness = await bootRealCombatScene(
-      [PREPARED_ELITE_ARMOURED, PREPARED_ELITE_VULNERABLE],
-      state,
-    );
-    activeCleanups.push(harness);
-    const { scene } = harness;
-    await waitForTexture(harness, 'elite-drone-armoured');
-    scene.update(0, 16.7);
-    const armouredVisual = scene.enemyVisuals.get(elite.id);
-    expect(armouredVisual).toBeInstanceOf(Phaser.GameObjects.Image);
-    const armouredImage = armouredVisual as Phaser.GameObjects.Image;
-    expect(armouredImage.texture.key).toBe('enemy-visual-elite-drone-armoured');
-    expect(armouredImage.displayWidth).toBeCloseTo(elite.width, 6);
-    expect(armouredImage.displayHeight).toBeCloseTo(elite.height, 6);
-    expect(armouredImage.x).toBeCloseTo(elite.centerX, 6);
-    expect(armouredImage.y).toBeCloseTo(elite.centerY, 6);
-    // Exactly one visual for the one Elite, and no full-craft tint.
-    expect(scene.enemyVisuals.size).toBe(1);
-    expect(armouredImage.isTinted).toBe(false);
-
-    // The authoritative Armoured → Vulnerable boundary swaps the ready state
-    // texture without adding a second Elite visual.
-    const vulnerableState = advanceUntilElitePhase(state, 'vulnerable');
-    const vulnerableElite = eliteIn(vulnerableState);
-    if (vulnerableElite === null) {
-      throw new Error('Fixture failed: the Elite disappeared.');
-    }
-    expect(vulnerableElite.width).not.toBeCloseTo(elite.width, 6);
-    harness.holder.state = vulnerableState;
-    await waitForTexture(harness, 'elite-drone-vulnerable');
-    scene.update(0, 16.7);
-    const vulnerableVisual = scene.enemyVisuals.get(elite.id);
-    expect(vulnerableVisual).toBeInstanceOf(Phaser.GameObjects.Image);
-    const vulnerableImage = vulnerableVisual as Phaser.GameObjects.Image;
-    expect(vulnerableImage.texture.key).toBe(
-      'enemy-visual-elite-drone-vulnerable',
-    );
-    expect(vulnerableImage.displayWidth).toBeCloseTo(vulnerableElite.width, 6);
-    expect(vulnerableImage.displayHeight).toBeCloseTo(
-      vulnerableElite.height,
-      6,
-    );
-    expect(vulnerableImage.x).toBeCloseTo(vulnerableElite.centerX, 6);
-    expect(scene.enemyVisuals.size).toBe(1);
-    expect(armouredImage.active).toBe(false);
-
-    // Exactly one prepared decode per elite state kind for the session, from
-    // the prepared inline bytes: the catalogue path is never requested a second
-    // time by Combat (V02-AC-025, MASTER-AC-014).
-    expect(srcAssignments.get(ELITE_ARMOURED_BYTES)).toBe(1);
-    expect(srcAssignments.get(ELITE_VULNERABLE_BYTES)).toBe(1);
-    expect(srcAssignments.get(ELITE_ARMOURED_PATH)).toBeUndefined();
-    expect(srcAssignments.get(ELITE_VULNERABLE_PATH)).toBeUndefined();
-
-    // Shutdown cleanup releases every Elite-owned visual map.
-    harness.dispose();
-    // `Game.destroy()` defers the actual teardown to the next game step, so the
-    // scene-owned disposal handler runs on the following frame.
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(scene.enemyVisuals.size).toBe(0);
-    expect(scene.enemyProjectileVisuals.size).toBe(0);
-    expect(scene.eliteCoreVisuals.size).toBe(0);
-    expect(scene.eliteDeflectionVisuals.size).toBe(0);
-  });
-
-  it('renders both Elite states from the approved procedural fallback when no prepared asset is available, reusing one surface', async () => {
-    const state = activatedEliteState();
-    const elite = eliteIn(state);
-    if (elite === null) {
-      throw new Error('Fixture failed: no activated Elite.');
-    }
-    const harness = await bootRealCombatScene([], state);
-    activeCleanups.push(harness);
-    const { scene } = harness;
-    scene.update(0, 16.7);
-    // Both Elite kinds resolved to their approved stable fallback for the
-    // session (never to a regular-role kind).
-    expect(
-      scene.enemyVisualResolutions.get('elite-drone-armoured')?.status,
-    ).toBe('fallback');
-    expect(
-      scene.enemyVisualResolutions.get('elite-drone-vulnerable')?.status,
-    ).toBe('fallback');
-    const visual = scene.enemyVisuals.get(elite.id);
-    expect(visual).toBeInstanceOf(Phaser.GameObjects.Graphics);
-    expect(scene.enemyVisuals.size).toBe(1);
-    // The two approved Elite fallbacks differ by geometry, not by colour alone
-    // (Epic §16.5: the Vulnerable state exposes the centred Core opening).
-    expect(
-      enemyVisualMappingFor('elite-drone-armoured').fallback.shapes,
-    ).not.toEqual(
-      enemyVisualMappingFor('elite-drone-vulnerable').fallback.shapes,
-    );
-
-    // The authoritative phase change redraws the SAME single fallback surface
-    // for the Vulnerable state: one visual per Elite, no second object.
-    const vulnerableState = advanceUntilElitePhase(state, 'vulnerable');
-    harness.holder.state = vulnerableState;
-    scene.update(0, 16.7);
-    expect(scene.enemyVisuals.get(elite.id)).toBe(visual);
-    expect(scene.enemyVisuals.size).toBe(1);
-  });
-
-  it('renders the Elite cannon rectangle, the homing-Core diamond, and the local Armoured deflection from authoritative geometry only', async () => {
-    const state = activatedEliteState();
-    const elite = eliteIn(state);
-    if (elite === null) {
-      throw new Error('Fixture failed: no activated Elite.');
-    }
-    const shortSide = Math.min(state.viewportWidth, state.viewportHeight);
-    // The two Elite attacks are created by their real spawn owners, exactly as
-    // the simulation creates them (no test-invented geometry).
-    const cannon = spawnEliteCannonProjectile(
-      900,
-      elite.centerX,
-      elite.centerY,
-      elite.width,
-      elite.height,
-      'left',
-      eliteCannonSpeedPxPerSecond(state.viewportHeight),
-      eliteCannonProjectileGeometry(shortSide),
-    );
-    const core = spawnEliteHomingCore(
-      901,
-      elite.centerX,
-      elite.centerY,
-      elite.height,
-      state.aircraft.centerX,
-      state.aircraft.centerY,
-      eliteCoreSpeedPxPerSecond(state.viewportHeight),
-      eliteCoreProjectileGeometry(shortSide),
-    );
-    const deflection = {
-      enemyId: elite.id,
-      impactCenterX: elite.centerX + 40,
-      impactCenterY: elite.centerY + 10,
-      stepsRemaining: 3,
-    };
-    const harness = await bootRealCombatScene([], {
-      ...state,
-      enemyProjectiles: [cannon, core],
-      eliteDeflectionFeedbacks: { [elite.id]: deflection },
-    });
-    activeCleanups.push(harness);
-    const { scene } = harness;
-    const geometry = resolveCombatGeometry({ width: 1280, height: 600 });
-    scene.update(0, 16.7);
-
-    // Cannon: a solid VERTICAL `danger` rectangle whose complete bounds equal
-    // the projectile's authoritative AABB.
-    const cannonVisual = scene.enemyProjectileVisuals.get(cannon.id);
-    expect(cannonVisual).toBeInstanceOf(Phaser.GameObjects.Rectangle);
-    expect(cannonVisual!.width).toBeCloseTo(cannon.width, 6);
-    expect(cannonVisual!.height).toBeCloseTo(cannon.height, 6);
-    expect(cannonVisual!.height).toBeGreaterThan(cannonVisual!.width);
-    expect(cannonVisual!.x).toBeCloseTo(cannon.centerX, 6);
-    expect(cannonVisual!.y).toBeCloseTo(cannon.centerY, 6);
-    expect(cannonVisual!.depth).toBe(COMBAT_RENDER_DEPTH.projectile);
-    expect(cannonVisual!.fillColor).toBe(
-      Number.parseInt(geometry.eliteCannonProjectileColor.slice(1), 16),
-    );
-
-    // Core: a solid `accent` diamond centred on the authoritative square AABB
-    // (and never a rectangle on the Ranged surface).
-    const coreVisual = scene.eliteCoreVisuals.get(core.id);
-    expect(coreVisual).toBeInstanceOf(Phaser.GameObjects.Graphics);
-    expect(coreVisual!.x).toBeCloseTo(core.centerX, 6);
-    expect(coreVisual!.y).toBeCloseTo(core.centerY, 6);
-    expect(coreVisual!.depth).toBe(COMBAT_RENDER_DEPTH.projectile);
-    expect(scene.enemyProjectileVisuals.has(core.id)).toBe(false);
-
-    // Deflection: exactly one local diamond at the stored impact point, with the
-    // exact `1.2%` short-side size, and the Elite itself is never tinted.
-    const deflectionVisual = scene.eliteDeflectionVisuals.get(elite.id);
-    expect(deflectionVisual).toBeInstanceOf(Phaser.GameObjects.Graphics);
-    expect(deflectionVisual!.x).toBeCloseTo(deflection.impactCenterX, 6);
-    expect(deflectionVisual!.y).toBeCloseTo(deflection.impactCenterY, 6);
-    expect(geometry.eliteDeflectionSizeRatio).toBe(0.012);
-    expect(scene.enemyVisuals.get(elite.id)).toBeInstanceOf(
-      Phaser.GameObjects.Graphics,
-    );
-
-    // Lifecycle: once the authoritative projectiles/record are gone, every
-    // Elite-owned projectile and feedback surface is destroyed with no residue.
-    const lastCannon = cannonVisual;
-    const lastCore = coreVisual;
-    const lastDeflection = deflectionVisual;
-    harness.holder.state = {
-      ...state,
-      enemyProjectiles: [],
-      eliteDeflectionFeedbacks: {},
-    };
-    scene.update(0, 16.7);
-    expect(scene.enemyProjectileVisuals.size).toBe(0);
-    expect(scene.eliteCoreVisuals.size).toBe(0);
-    expect(scene.eliteDeflectionVisuals.size).toBe(0);
-    expect(lastCannon?.active).toBe(false);
-    expect(lastCore?.active).toBe(false);
-    expect(lastDeflection?.active).toBe(false);
-  });
-
-  it('follows the authoritative Elite centre and bounds through a viewport resize without recreating the visual', async () => {
-    const state = activatedEliteState();
-    const elite = eliteIn(state);
-    if (elite === null) {
-      throw new Error('Fixture failed: no activated Elite.');
-    }
-    const harness = await bootRealCombatScene([], state);
-    activeCleanups.push(harness);
-    const { scene } = harness;
-    scene.update(0, 16.7);
-    const visual = scene.enemyVisuals.get(elite.id);
-    expect(visual).toBeInstanceOf(Phaser.GameObjects.Graphics);
-
-    const resized = submitCombatCommand(state, {
-      type: 'combat/viewport-resize',
-      width: 900,
-      height: 700,
-      aircraftWidth: state.aircraftWidth,
-      aircraftHeight: state.aircraftHeight,
-    });
-    const resizedElite = eliteIn(resized);
-    if (resizedElite === null) {
-      throw new Error('Fixture failed: the Elite disappeared on resize.');
-    }
-    expect(resizedElite.centerX).not.toBeCloseTo(elite.centerX, 6);
-    harness.holder.state = resized;
-    scene.update(0, 16.7);
-    // The same single visual follows the reprojected authoritative centre.
-    expect(scene.enemyVisuals.get(elite.id)).toBe(visual);
-    const graphics = visual as Phaser.GameObjects.Graphics;
-    expect(graphics.x).toBeCloseTo(resizedElite.centerX, 6);
-    expect(graphics.y).toBeCloseTo(resizedElite.centerY, 6);
-    expect(scene.enemyVisuals.size).toBe(1);
-  });
-
-  it('fades the Elite surface with the authoritative Evacuation opacity and removes it at exact zero without recreation', async () => {
-    const state = activatedEliteState();
-    const elite = eliteIn(state);
-    if (elite === null) {
-      throw new Error('Fixture failed: no activated Elite.');
-    }
-    // The exact zero step freezes an immutable Evacuated terminal while the
-    // crafted Elite remains active.
-    const frozen = stepCombatSimulation(
-      { ...state, evacuationStepsRemaining: 1 },
-      FIXED_STEP_SECONDS,
-    );
-    expect(frozen.terminalResult?.kind).toBe('evacuated');
-    expect(eliteIn(frozen)).not.toBeNull();
-    const harness = await bootRealCombatScene([], frozen);
-    activeCleanups.push(harness);
-    const { scene, holder } = harness;
-    scene.update(0, 16.7);
-    expect(scene.enemyVisuals.has(elite.id)).toBe(true);
-
-    // The commitment authorizes the shared exit; the fade shares its 30 steps.
-    let current = { ...holder.state, exitAuthorized: true };
-    holder.state = current;
-    let lastVisual = scene.enemyVisuals.get(elite.id);
-    for (let step = 1; step <= EXIT_CENTRE_STEPS; step += 1) {
-      lastVisual = scene.enemyVisuals.get(elite.id);
-      current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
-      holder.state = current;
+  it(
+    'renders the six authored fixed-side Hunters of the §2.3 wave at their authoritative centres and headings (V021-AC-001)',
+    async () => {
+      const state = firstHunterWaveState();
+      const hunters = state.enemies.filter((enemy) => enemy.kind === 'hunter');
+      expect(hunters).toHaveLength(6);
+      // The authored `RH6-16` wave: three Hunters per side, left side first and
+      // each side in ascending Y (0.10 / 0.20 / 0.30 VH at 1280×600).
+      expect(hunters.map((enemy) => enemy.entry)).toEqual([
+        'upper-left',
+        'upper-left',
+        'upper-left',
+        'upper-right',
+        'upper-right',
+        'upper-right',
+      ]);
+      expect(hunters.map((enemy) => enemy.centerY)).toEqual([
+        60, 120, 180, 60, 120, 180,
+      ]);
+      const harness = await bootRealCombatScene([], state);
+      activeCleanups.push(harness);
+      const { scene } = harness;
       scene.update(0, 16.7);
-      if (step < EXIT_CENTRE_STEPS) {
-        const faded = scene.enemyVisuals.get(elite.id);
-        expect((faded as Phaser.GameObjects.Graphics).alpha).toBeCloseTo(
-          (EXIT_CENTRE_STEPS - step) / EXIT_CENTRE_STEPS,
-          6,
-        );
+      for (const hunter of hunters) {
+        const visual = scene.enemyVisuals.get(hunter.id);
+        expect(visual).toBeInstanceOf(Phaser.GameObjects.Graphics);
+        const graphics = visual as Phaser.GameObjects.Graphics;
+        // The one authoritative centre and the one authoritative side-entry
+        // heading own the rendered surface.
+        expect(graphics.x).toBeCloseTo(hunter.centerX, 6);
+        expect(graphics.y).toBeCloseTo(hunter.centerY, 6);
+        expect(graphics.rotation).toBeCloseTo(hunter.headingRadians, 9);
       }
-    }
-    // Exact zero: the surface is destroyed even though the frozen Elite remains.
-    expect(scene.simState.enemies).toHaveLength(1);
-    expect(scene.enemyVisuals.has(elite.id)).toBe(false);
-    expect(lastVisual?.active).toBe(false);
+      // The six centres split into exactly two side positions and three heights.
+      expect(new Set(hunters.map((enemy) => enemy.centerX)).size).toBe(2);
+      expect(new Set(hunters.map((enemy) => enemy.centerY)).size).toBe(3);
+      expectOneVisualPerLiveEnemy(scene);
+    },
+    AGGREGATE_LOAD_TEST_TIMEOUT_MS,
+  );
 
-    // Fly-up frames never recreate the faded Elite surface.
-    for (let step = 0; step < 12; step += 1) {
-      current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
-      holder.state = current;
+  it(
+    'renders the prepared Armoured texture, swaps to Vulnerable on the authoritative phase change, requests each asset once, and cleans up on shutdown',
+    async () => {
+      const state = activatedEliteState();
+      const elite = eliteIn(state);
+      if (elite === null) {
+        throw new Error('Fixture failed: no activated Elite.');
+      }
+      const harness = await bootRealCombatScene(
+        [PREPARED_ELITE_ARMOURED, PREPARED_ELITE_VULNERABLE],
+        state,
+      );
+      activeCleanups.push(harness);
+      const { scene } = harness;
+      await waitForTexture(harness, 'elite-drone-armoured');
       scene.update(0, 16.7);
-      expect(scene.enemyVisuals.has(elite.id)).toBe(false);
-    }
-    expect(scene.simState.exitPhase).toBe('fly-up');
-  });
+      const armouredVisual = scene.enemyVisuals.get(elite.id);
+      expect(armouredVisual).toBeInstanceOf(Phaser.GameObjects.Image);
+      const armouredImage = armouredVisual as Phaser.GameObjects.Image;
+      expect(armouredImage.texture.key).toBe(
+        'enemy-visual-elite-drone-armoured',
+      );
+      expect(armouredImage.displayWidth).toBeCloseTo(elite.width, 6);
+      expect(armouredImage.displayHeight).toBeCloseTo(elite.height, 6);
+      expect(armouredImage.x).toBeCloseTo(elite.centerX, 6);
+      expect(armouredImage.y).toBeCloseTo(elite.centerY, 6);
+      // One visual per live enemy, and no full-craft tint.
+      expectOneVisualPerLiveEnemy(scene);
+      expect(armouredImage.isTinted).toBe(false);
 
-  it('fades a live Elite deflection record and the Elite cannon/Core surfaces with the authoritative Evacuation opacity, destroys them at exact zero, and never recreates them during fly-up', async () => {
-    const state = activatedEliteState();
-    const elite = eliteIn(state);
-    if (elite === null) {
-      throw new Error('Fixture failed: no activated Elite.');
-    }
-    const shortSide = Math.min(state.viewportWidth, state.viewportHeight);
-    const cannon = spawnEliteCannonProjectile(
-      910,
-      elite.centerX,
-      elite.centerY,
-      elite.width,
-      elite.height,
-      'right',
-      eliteCannonSpeedPxPerSecond(state.viewportHeight),
-      eliteCannonProjectileGeometry(shortSide),
-    );
-    const core = spawnEliteHomingCore(
-      911,
-      elite.centerX,
-      elite.centerY,
-      elite.height,
-      state.aircraft.centerX,
-      state.aircraft.centerY,
-      eliteCoreSpeedPxPerSecond(state.viewportHeight),
-      eliteCoreProjectileGeometry(shortSide),
-    );
-    const deflection = {
-      enemyId: elite.id,
-      impactCenterX: elite.centerX + 40,
-      impactCenterY: elite.centerY + 10,
-      stepsRemaining: 3,
-    };
-    // The exact zero step freezes the immutable Evacuated terminal with the
-    // Elite, both Elite projectiles, and a LIVE deflection record.
-    const frozen = stepCombatSimulation(
-      {
+      // The authoritative Armoured → Vulnerable boundary swaps the ready state
+      // texture without adding a second Elite visual.
+      const vulnerableState = advanceUntilElitePhase(state, 'vulnerable');
+      const vulnerableElite = eliteIn(vulnerableState);
+      if (vulnerableElite === null) {
+        throw new Error('Fixture failed: the Elite disappeared.');
+      }
+      expect(vulnerableElite.width).not.toBeCloseTo(elite.width, 6);
+      harness.holder.state = vulnerableState;
+      await waitForTexture(harness, 'elite-drone-vulnerable');
+      scene.update(0, 16.7);
+      const vulnerableVisual = scene.enemyVisuals.get(elite.id);
+      expect(vulnerableVisual).toBeInstanceOf(Phaser.GameObjects.Image);
+      const vulnerableImage = vulnerableVisual as Phaser.GameObjects.Image;
+      expect(vulnerableImage.texture.key).toBe(
+        'enemy-visual-elite-drone-vulnerable',
+      );
+      expect(vulnerableImage.displayWidth).toBeCloseTo(
+        vulnerableElite.width,
+        6,
+      );
+      expect(vulnerableImage.displayHeight).toBeCloseTo(
+        vulnerableElite.height,
+        6,
+      );
+      expect(vulnerableImage.x).toBeCloseTo(vulnerableElite.centerX, 6);
+      expectOneVisualPerLiveEnemy(scene);
+      expect(armouredImage.active).toBe(false);
+
+      // Exactly one prepared decode per elite state kind for the session, from
+      // the prepared inline bytes: the catalogue path is never requested a second
+      // time by Combat (V02-AC-025, MASTER-AC-014).
+      expect(srcAssignments.get(ELITE_ARMOURED_BYTES)).toBe(1);
+      expect(srcAssignments.get(ELITE_VULNERABLE_BYTES)).toBe(1);
+      expect(srcAssignments.get(ELITE_ARMOURED_PATH)).toBeUndefined();
+      expect(srcAssignments.get(ELITE_VULNERABLE_PATH)).toBeUndefined();
+
+      // Shutdown cleanup releases every Elite-owned visual map.
+      harness.dispose();
+      // `Game.destroy()` defers the actual teardown to the next game step, so the
+      // scene-owned disposal handler runs on the following frame.
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(scene.enemyVisuals.size).toBe(0);
+      expect(scene.enemyProjectileVisuals.size).toBe(0);
+      expect(scene.eliteCoreVisuals.size).toBe(0);
+      expect(scene.eliteDeflectionVisuals.size).toBe(0);
+    },
+    AGGREGATE_LOAD_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'renders both Elite states from the approved procedural fallback when no prepared asset is available, reusing one surface',
+    async () => {
+      const state = activatedEliteState();
+      const elite = eliteIn(state);
+      if (elite === null) {
+        throw new Error('Fixture failed: no activated Elite.');
+      }
+      const harness = await bootRealCombatScene([], state);
+      activeCleanups.push(harness);
+      const { scene } = harness;
+      scene.update(0, 16.7);
+      // Both Elite kinds resolved to their approved stable fallback for the
+      // session (never to a regular-role kind).
+      expect(
+        scene.enemyVisualResolutions.get('elite-drone-armoured')?.status,
+      ).toBe('fallback');
+      expect(
+        scene.enemyVisualResolutions.get('elite-drone-vulnerable')?.status,
+      ).toBe('fallback');
+      const visual = scene.enemyVisuals.get(elite.id);
+      expect(visual).toBeInstanceOf(Phaser.GameObjects.Graphics);
+      expectOneVisualPerLiveEnemy(scene);
+      // The two approved Elite fallbacks differ by geometry, not by colour alone
+      // (Epic §16.5: the Vulnerable state exposes the centred Core opening).
+      expect(
+        enemyVisualMappingFor('elite-drone-armoured').fallback.shapes,
+      ).not.toEqual(
+        enemyVisualMappingFor('elite-drone-vulnerable').fallback.shapes,
+      );
+
+      // The authoritative phase change redraws the SAME single fallback surface
+      // for the Vulnerable state: one visual per enemy, no second Elite object.
+      const vulnerableState = advanceUntilElitePhase(state, 'vulnerable');
+      harness.holder.state = vulnerableState;
+      scene.update(0, 16.7);
+      expect(scene.enemyVisuals.get(elite.id)).toBe(visual);
+      expectOneVisualPerLiveEnemy(scene);
+    },
+    AGGREGATE_LOAD_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'renders the Elite cannon circle, the homing-Core diamond, and the local Armoured deflection from authoritative geometry only',
+    async () => {
+      const state = activatedEliteState();
+      const elite = eliteIn(state);
+      if (elite === null) {
+        throw new Error('Fixture failed: no activated Elite.');
+      }
+      const shortSide = Math.min(state.viewportWidth, state.viewportHeight);
+      // The two Elite attacks are created by their real spawn owners, exactly as
+      // the simulation creates them (no test-invented geometry).
+      const cannon = spawnEliteCannonProjectile(
+        900,
+        elite.centerX,
+        elite.centerY,
+        elite.width,
+        elite.height,
+        'left',
+        eliteCannonSpeedPxPerSecond(state.viewportHeight),
+        eliteCannonProjectileGeometry(shortSide),
+      );
+      const core = spawnEliteHomingCore(
+        901,
+        elite.centerX,
+        elite.centerY,
+        elite.height,
+        state.aircraft.centerX,
+        state.aircraft.centerY,
+        eliteCoreSpeedPxPerSecond(state.viewportHeight),
+        eliteCoreProjectileGeometry(shortSide),
+      );
+      const deflection = {
+        enemyId: elite.id,
+        impactCenterX: elite.centerX + 40,
+        impactCenterY: elite.centerY + 10,
+        stepsRemaining: 3,
+      };
+      const harness = await bootRealCombatScene([], {
         ...state,
-        evacuationStepsRemaining: 1,
         enemyProjectiles: [cannon, core],
         eliteDeflectionFeedbacks: { [elite.id]: deflection },
-      },
-      FIXED_STEP_SECONDS,
-    );
-    expect(frozen.terminalResult?.kind).toBe('evacuated');
-    expect(eliteIn(frozen)).not.toBeNull();
-    expect(frozen.enemyProjectiles).toHaveLength(2);
-    // After the terminal there is no further simulation step, so this record can
-    // never decrement again: the authoritative opacity scalar is the only
-    // terminal-fade authority left.
-    expect(frozen.eliteDeflectionFeedbacks[elite.id]).toBeDefined();
-
-    const harness = await bootRealCombatScene([], frozen);
-    activeCleanups.push(harness);
-    const { scene, holder } = harness;
-    scene.update(0, 16.7);
-    // The pre-commit freeze keeps every Elite-owned surface at full opacity.
-    expect(
-      (scene.enemyVisuals.get(elite.id) as Phaser.GameObjects.Graphics).alpha,
-    ).toBeCloseTo(1, 6);
-    expect(
-      (
-        scene.enemyProjectileVisuals.get(
-          cannon.id,
-        ) as Phaser.GameObjects.Rectangle
-      ).alpha,
-    ).toBeCloseTo(1, 6);
-    expect(
-      (scene.eliteCoreVisuals.get(core.id) as Phaser.GameObjects.Graphics)
-        .alpha,
-    ).toBeCloseTo(1, 6);
-    expect(
-      (
-        scene.eliteDeflectionVisuals.get(
-          elite.id,
-        ) as Phaser.GameObjects.Graphics
-      ).alpha,
-    ).toBeCloseTo(1, 6);
-
-    let current = { ...holder.state, exitAuthorized: true };
-    holder.state = current;
-    let lastElite = scene.enemyVisuals.get(elite.id);
-    let lastCannon = scene.enemyProjectileVisuals.get(cannon.id);
-    let lastCore = scene.eliteCoreVisuals.get(core.id);
-    let lastDeflection = scene.eliteDeflectionVisuals.get(elite.id);
-    for (let step = 1; step <= EXIT_CENTRE_STEPS; step += 1) {
-      lastElite = scene.enemyVisuals.get(elite.id);
-      lastCannon = scene.enemyProjectileVisuals.get(cannon.id);
-      lastCore = scene.eliteCoreVisuals.get(core.id);
-      lastDeflection = scene.eliteDeflectionVisuals.get(elite.id);
-      current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
-      holder.state = current;
+      });
+      activeCleanups.push(harness);
+      const { scene } = harness;
+      const geometry = resolveCombatGeometry({ width: 1280, height: 600 });
       scene.update(0, 16.7);
-      const expected = (EXIT_CENTRE_STEPS - step) / EXIT_CENTRE_STEPS;
-      if (step < EXIT_CENTRE_STEPS) {
-        expect(
-          (scene.enemyVisuals.get(elite.id) as Phaser.GameObjects.Graphics)
-            .alpha,
-        ).toBeCloseTo(expected, 6);
-        expect(
-          (
-            scene.enemyProjectileVisuals.get(
-              cannon.id,
-            ) as Phaser.GameObjects.Rectangle
-          ).alpha,
-        ).toBeCloseTo(expected, 6);
-        expect(
-          (scene.eliteCoreVisuals.get(core.id) as Phaser.GameObjects.Graphics)
-            .alpha,
-        ).toBeCloseTo(expected, 6);
-        expect(
-          (
-            scene.eliteDeflectionVisuals.get(
-              elite.id,
-            ) as Phaser.GameObjects.Graphics
-          ).alpha,
-        ).toBeCloseTo(expected, 6);
-      }
-      if (step === 1) {
-        // The frozen authoritative record is still live during the fade.
-        expect(
-          current.eliteDeflectionFeedbacks[elite.id]?.stepsRemaining,
-        ).toBeGreaterThan(0);
-      }
-    }
-    // At exact zero every Elite-owned surface is destroyed and removed even
-    // though the frozen record still exists.
-    expect(current.eliteDeflectionFeedbacks[elite.id]).toBeDefined();
-    expect(scene.enemyVisuals.has(elite.id)).toBe(false);
-    expect(scene.enemyProjectileVisuals.has(cannon.id)).toBe(false);
-    expect(scene.eliteCoreVisuals.has(core.id)).toBe(false);
-    expect(scene.eliteDeflectionVisuals.has(elite.id)).toBe(false);
-    expect(lastElite?.active).toBe(false);
-    expect(lastCannon?.active).toBe(false);
-    expect(lastCore?.active).toBe(false);
-    expect(lastDeflection?.active).toBe(false);
 
-    // Fly-up frames must never recreate any Elite-owned surface.
-    for (let step = 0; step < 12; step += 1) {
-      current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
-      holder.state = current;
+      // Cannon: a solid `danger` filled circle (V021-WI-04-A, patch
+      // §4/V021-DEC-002/V021-AC-004) centred on the projectile's authoritative
+      // centre, with a diameter equal to the longer side of its unchanged
+      // authoritative AABB. That AABB is unchanged and still taller than wide; the
+      // rendered circle, its exact diameter and the accepted `1.8 px` overhang are
+      // proven by the dedicated real-Phaser projectile silhouette regression.
+      const cannonVisual = scene.enemyProjectileVisuals.get(cannon.id);
+      expect(cannonVisual).toBeInstanceOf(Phaser.GameObjects.Graphics);
+      expect(cannon.height).toBeGreaterThan(cannon.width);
+      expect(cannonVisual!.x).toBeCloseTo(cannon.centerX, 6);
+      expect(cannonVisual!.y).toBeCloseTo(cannon.centerY, 6);
+      expect(cannonVisual!.depth).toBe(COMBAT_RENDER_DEPTH.projectile);
+      expect(drawnFillColor(cannonVisual!)).toBe(
+        Number.parseInt(geometry.eliteCannonProjectileColor.slice(1), 16),
+      );
+
+      // Core: a solid `accent` diamond centred on the authoritative square AABB
+      // (and never a rectangle on the Ranged surface).
+      const coreVisual = scene.eliteCoreVisuals.get(core.id);
+      expect(coreVisual).toBeInstanceOf(Phaser.GameObjects.Graphics);
+      expect(coreVisual!.x).toBeCloseTo(core.centerX, 6);
+      expect(coreVisual!.y).toBeCloseTo(core.centerY, 6);
+      expect(coreVisual!.depth).toBe(COMBAT_RENDER_DEPTH.projectile);
+      expect(scene.enemyProjectileVisuals.has(core.id)).toBe(false);
+
+      // Deflection: exactly one local diamond at the stored impact point, with the
+      // exact `1.2%` short-side size, and the Elite itself is never tinted.
+      const deflectionVisual = scene.eliteDeflectionVisuals.get(elite.id);
+      expect(deflectionVisual).toBeInstanceOf(Phaser.GameObjects.Graphics);
+      expect(deflectionVisual!.x).toBeCloseTo(deflection.impactCenterX, 6);
+      expect(deflectionVisual!.y).toBeCloseTo(deflection.impactCenterY, 6);
+      expect(geometry.eliteDeflectionSizeRatio).toBe(0.012);
+      expect(scene.enemyVisuals.get(elite.id)).toBeInstanceOf(
+        Phaser.GameObjects.Graphics,
+      );
+
+      // Lifecycle: once the authoritative projectiles/record are gone, every
+      // Elite-owned projectile and feedback surface is destroyed with no residue.
+      const lastCannon = cannonVisual;
+      const lastCore = coreVisual;
+      const lastDeflection = deflectionVisual;
+      harness.holder.state = {
+        ...state,
+        enemyProjectiles: [],
+        eliteDeflectionFeedbacks: {},
+      };
       scene.update(0, 16.7);
+      expect(scene.enemyProjectileVisuals.size).toBe(0);
+      expect(scene.eliteCoreVisuals.size).toBe(0);
+      expect(scene.eliteDeflectionVisuals.size).toBe(0);
+      expect(lastCannon?.active).toBe(false);
+      expect(lastCore?.active).toBe(false);
+      expect(lastDeflection?.active).toBe(false);
+    },
+    AGGREGATE_LOAD_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'follows the authoritative Elite centre and bounds through a viewport resize without recreating the visual',
+    async () => {
+      const state = activatedEliteState();
+      const elite = eliteIn(state);
+      if (elite === null) {
+        throw new Error('Fixture failed: no activated Elite.');
+      }
+      const harness = await bootRealCombatScene([], state);
+      activeCleanups.push(harness);
+      const { scene } = harness;
+      scene.update(0, 16.7);
+      const visual = scene.enemyVisuals.get(elite.id);
+      expect(visual).toBeInstanceOf(Phaser.GameObjects.Graphics);
+
+      const resized = submitCombatCommand(state, {
+        type: 'combat/viewport-resize',
+        width: 900,
+        height: 700,
+        aircraftWidth: state.aircraftWidth,
+        aircraftHeight: state.aircraftHeight,
+      });
+      const resizedElite = eliteIn(resized);
+      if (resizedElite === null) {
+        throw new Error('Fixture failed: the Elite disappeared on resize.');
+      }
+      expect(resizedElite.centerX).not.toBeCloseTo(elite.centerX, 6);
+      harness.holder.state = resized;
+      scene.update(0, 16.7);
+      // The same single visual follows the reprojected authoritative centre.
+      expect(scene.enemyVisuals.get(elite.id)).toBe(visual);
+      const graphics = visual as Phaser.GameObjects.Graphics;
+      expect(graphics.x).toBeCloseTo(resizedElite.centerX, 6);
+      expect(graphics.y).toBeCloseTo(resizedElite.centerY, 6);
+      expectOneVisualPerLiveEnemy(scene);
+    },
+    AGGREGATE_LOAD_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'fades the Elite surface with the authoritative Evacuation opacity and removes it at exact zero without recreation',
+    async () => {
+      const state = activatedEliteState();
+      const elite = eliteIn(state);
+      if (elite === null) {
+        throw new Error('Fixture failed: no activated Elite.');
+      }
+      // The exact zero step freezes an immutable Evacuated terminal while the
+      // crafted Elite remains active.
+      const frozen = stepCombatSimulation(
+        { ...state, evacuationStepsRemaining: 1 },
+        FIXED_STEP_SECONDS,
+      );
+      expect(frozen.terminalResult?.kind).toBe('evacuated');
+      expect(eliteIn(frozen)).not.toBeNull();
+      const harness = await bootRealCombatScene([], frozen);
+      activeCleanups.push(harness);
+      const { scene, holder } = harness;
+      scene.update(0, 16.7);
+      expect(scene.enemyVisuals.has(elite.id)).toBe(true);
+
+      // The commitment authorizes the shared exit; the fade shares its 30 steps.
+      let current = { ...holder.state, exitAuthorized: true };
+      holder.state = current;
+      let lastVisual = scene.enemyVisuals.get(elite.id);
+      for (let step = 1; step <= EXIT_CENTRE_STEPS; step += 1) {
+        lastVisual = scene.enemyVisuals.get(elite.id);
+        current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+        holder.state = current;
+        scene.update(0, 16.7);
+        if (step < EXIT_CENTRE_STEPS) {
+          const faded = scene.enemyVisuals.get(elite.id);
+          expect((faded as Phaser.GameObjects.Graphics).alpha).toBeCloseTo(
+            (EXIT_CENTRE_STEPS - step) / EXIT_CENTRE_STEPS,
+            6,
+          );
+        }
+      }
+      // Exact zero: the surface is destroyed even though the frozen Elite remains.
+      expect(eliteIn(scene.simState)).not.toBeNull();
+      expect(scene.enemyVisuals.has(elite.id)).toBe(false);
+      expect(lastVisual?.active).toBe(false);
+
+      // Fly-up frames never recreate the faded Elite surface.
+      for (let step = 0; step < 12; step += 1) {
+        current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+        holder.state = current;
+        scene.update(0, 16.7);
+        expect(scene.enemyVisuals.has(elite.id)).toBe(false);
+      }
+      expect(scene.simState.exitPhase).toBe('fly-up');
+    },
+    AGGREGATE_LOAD_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'fades a live Elite deflection record and the Elite cannon/Core surfaces with the authoritative Evacuation opacity, destroys them at exact zero, and never recreates them during fly-up',
+    async () => {
+      const state = activatedEliteState();
+      const elite = eliteIn(state);
+      if (elite === null) {
+        throw new Error('Fixture failed: no activated Elite.');
+      }
+      const shortSide = Math.min(state.viewportWidth, state.viewportHeight);
+      const cannon = spawnEliteCannonProjectile(
+        910,
+        elite.centerX,
+        elite.centerY,
+        elite.width,
+        elite.height,
+        'right',
+        eliteCannonSpeedPxPerSecond(state.viewportHeight),
+        eliteCannonProjectileGeometry(shortSide),
+      );
+      const core = spawnEliteHomingCore(
+        911,
+        elite.centerX,
+        elite.centerY,
+        elite.height,
+        state.aircraft.centerX,
+        state.aircraft.centerY,
+        eliteCoreSpeedPxPerSecond(state.viewportHeight),
+        eliteCoreProjectileGeometry(shortSide),
+      );
+      const deflection = {
+        enemyId: elite.id,
+        impactCenterX: elite.centerX + 40,
+        impactCenterY: elite.centerY + 10,
+        stepsRemaining: 3,
+      };
+      // The exact zero step freezes the immutable Evacuated terminal with the
+      // Elite, both Elite projectiles, and a LIVE deflection record.
+      const frozen = stepCombatSimulation(
+        {
+          ...state,
+          evacuationStepsRemaining: 1,
+          enemyProjectiles: [cannon, core],
+          eliteDeflectionFeedbacks: { [elite.id]: deflection },
+        },
+        FIXED_STEP_SECONDS,
+      );
+      expect(frozen.terminalResult?.kind).toBe('evacuated');
+      expect(eliteIn(frozen)).not.toBeNull();
+      expect(frozen.enemyProjectiles).toHaveLength(2);
+      // After the terminal there is no further simulation step, so this record can
+      // never decrement again: the authoritative opacity scalar is the only
+      // terminal-fade authority left.
+      expect(frozen.eliteDeflectionFeedbacks[elite.id]).toBeDefined();
+
+      const harness = await bootRealCombatScene([], frozen);
+      activeCleanups.push(harness);
+      const { scene, holder } = harness;
+      scene.update(0, 16.7);
+      // The pre-commit freeze keeps every Elite-owned surface at full opacity.
+      expect(
+        (scene.enemyVisuals.get(elite.id) as Phaser.GameObjects.Graphics).alpha,
+      ).toBeCloseTo(1, 6);
+      expect(
+        (
+          scene.enemyProjectileVisuals.get(
+            cannon.id,
+          ) as Phaser.GameObjects.Graphics
+        ).alpha,
+      ).toBeCloseTo(1, 6);
+      expect(
+        (scene.eliteCoreVisuals.get(core.id) as Phaser.GameObjects.Graphics)
+          .alpha,
+      ).toBeCloseTo(1, 6);
+      expect(
+        (
+          scene.eliteDeflectionVisuals.get(
+            elite.id,
+          ) as Phaser.GameObjects.Graphics
+        ).alpha,
+      ).toBeCloseTo(1, 6);
+
+      let current = { ...holder.state, exitAuthorized: true };
+      holder.state = current;
+      let lastElite = scene.enemyVisuals.get(elite.id);
+      let lastCannon = scene.enemyProjectileVisuals.get(cannon.id);
+      let lastCore = scene.eliteCoreVisuals.get(core.id);
+      let lastDeflection = scene.eliteDeflectionVisuals.get(elite.id);
+      for (let step = 1; step <= EXIT_CENTRE_STEPS; step += 1) {
+        lastElite = scene.enemyVisuals.get(elite.id);
+        lastCannon = scene.enemyProjectileVisuals.get(cannon.id);
+        lastCore = scene.eliteCoreVisuals.get(core.id);
+        lastDeflection = scene.eliteDeflectionVisuals.get(elite.id);
+        current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+        holder.state = current;
+        scene.update(0, 16.7);
+        const expected = (EXIT_CENTRE_STEPS - step) / EXIT_CENTRE_STEPS;
+        if (step < EXIT_CENTRE_STEPS) {
+          expect(
+            (scene.enemyVisuals.get(elite.id) as Phaser.GameObjects.Graphics)
+              .alpha,
+          ).toBeCloseTo(expected, 6);
+          expect(
+            (
+              scene.enemyProjectileVisuals.get(
+                cannon.id,
+              ) as Phaser.GameObjects.Graphics
+            ).alpha,
+          ).toBeCloseTo(expected, 6);
+          expect(
+            (scene.eliteCoreVisuals.get(core.id) as Phaser.GameObjects.Graphics)
+              .alpha,
+          ).toBeCloseTo(expected, 6);
+          expect(
+            (
+              scene.eliteDeflectionVisuals.get(
+                elite.id,
+              ) as Phaser.GameObjects.Graphics
+            ).alpha,
+          ).toBeCloseTo(expected, 6);
+        }
+        if (step === 1) {
+          // The frozen authoritative record is still live during the fade.
+          expect(
+            current.eliteDeflectionFeedbacks[elite.id]?.stepsRemaining,
+          ).toBeGreaterThan(0);
+        }
+      }
+      // At exact zero every Elite-owned surface is destroyed and removed even
+      // though the frozen record still exists.
+      expect(current.eliteDeflectionFeedbacks[elite.id]).toBeDefined();
       expect(scene.enemyVisuals.has(elite.id)).toBe(false);
       expect(scene.enemyProjectileVisuals.has(cannon.id)).toBe(false);
       expect(scene.eliteCoreVisuals.has(core.id)).toBe(false);
       expect(scene.eliteDeflectionVisuals.has(elite.id)).toBe(false);
-    }
-    expect(scene.simState.exitPhase).toBe('fly-up');
-  });
+      expect(lastElite?.active).toBe(false);
+      expect(lastCannon?.active).toBe(false);
+      expect(lastCore?.active).toBe(false);
+      expect(lastDeflection?.active).toBe(false);
+
+      // Fly-up frames must never recreate any Elite-owned surface.
+      for (let step = 0; step < 12; step += 1) {
+        current = stepCombatSimulation(current, FIXED_STEP_SECONDS);
+        holder.state = current;
+        scene.update(0, 16.7);
+        expect(scene.enemyVisuals.has(elite.id)).toBe(false);
+        expect(scene.enemyProjectileVisuals.has(cannon.id)).toBe(false);
+        expect(scene.eliteCoreVisuals.has(core.id)).toBe(false);
+        expect(scene.eliteDeflectionVisuals.has(elite.id)).toBe(false);
+      }
+      expect(scene.simState.exitPhase).toBe('fly-up');
+    },
+    AGGREGATE_LOAD_TEST_TIMEOUT_MS,
+  );
 });
 
 /**
@@ -845,72 +968,84 @@ describe('prepared damaging-hit feedback (V02-WI-07 D04-C02)', () => {
     throw new Error('Prepared Basic Drone texture never registered.');
   }
 
-  it('whitens the prepared silhouette for the authoritative 3 flash steps and restores the artwork', async () => {
-    const geometry = resolveCombatGeometry({ width: 1280, height: 600 });
-    const state = stateWithVisibleBasicDrone();
-    const basic = state.enemies.find((enemy) => enemy.kind === 'basic');
-    if (basic === undefined) {
-      throw new Error('Fixture failed: no Basic Drone in the observed state.');
-    }
-    // The simulation authors a 3-step damaging-hit feedback for a non-lethal hit;
-    // the scene reads exactly that authoritative state field.
-    const flashingState: CombatSimulationState = {
-      ...state,
-      activeEnemyFlashStepsRemaining: { [basic.id]: 3 },
-    };
-    const harness = await bootRealCombatScene(
-      [PREPARED_BASIC_DRONE],
-      flashingState,
-    );
-    activeCleanups.push(harness);
-    const { scene } = harness;
-    await waitForBasicTexture(harness);
-    scene.update(0, 16.7);
+  it(
+    'whitens the prepared silhouette for the authoritative 3 flash steps and restores the artwork',
+    async () => {
+      const geometry = resolveCombatGeometry({ width: 1280, height: 600 });
+      const state = stateWithVisibleBasicDrone();
+      const basic = state.enemies.find((enemy) => enemy.kind === 'basic');
+      if (basic === undefined) {
+        throw new Error(
+          'Fixture failed: no Basic Drone in the observed state.',
+        );
+      }
+      // The simulation authors a 3-step damaging-hit feedback for a non-lethal hit;
+      // the scene reads exactly that authoritative state field.
+      const flashingState: CombatSimulationState = {
+        ...state,
+        activeEnemyFlashStepsRemaining: { [basic.id]: 3 },
+      };
+      const harness = await bootRealCombatScene(
+        [PREPARED_BASIC_DRONE],
+        flashingState,
+      );
+      activeCleanups.push(harness);
+      const { scene } = harness;
+      await waitForBasicTexture(harness);
+      scene.update(0, 16.7);
 
-    const visual = scene.enemyVisuals.get(basic.id) as Phaser.GameObjects.Image;
-    const preparedKey = 'enemy-visual-basic-drone';
-    const flashKey = 'enemy-visual-flash-basic-drone';
-    expect(visual).toBeInstanceOf(Phaser.GameObjects.Image);
-    const sourceBefore = scene.textures
-      .get(preparedKey)
-      .getSourceImage() as unknown;
-    // The rendered visual IS the flush whitened silhouette, not a tint flag...
-    expect(visual.texture.key).toBe(flashKey);
-    expect(scene.textures.exists(flashKey)).toBe(true);
-    expect(visual.isTinted).toBe(false);
-    // ...derived from the prepared artwork with the approved flash colour and an
-    // alpha-preserving composite.
-    expect(canvasOps.drawImage).toBeGreaterThan(0);
-    expect(canvasOps.fillRect).toBeGreaterThan(0);
-    expect(canvasOps.fillStyles).toContain(geometry.enemyFlashColor);
-    expect(canvasOps.compositeOperations).toContain('source-in');
-    // Size and alpha are unchanged by the feedback.
-    expect(visual.displayWidth).toBeCloseTo(basic.width, 6);
-    expect(visual.displayHeight).toBeCloseTo(basic.height, 6);
-    expect(visual.x).toBeCloseTo(basic.centerX, 6);
-    expect(visual.y).toBeCloseTo(basic.centerY, 6);
+      const visual = scene.enemyVisuals.get(
+        basic.id,
+      ) as Phaser.GameObjects.Image;
+      const preparedKey = 'enemy-visual-basic-drone';
+      const flashKey = 'enemy-visual-flash-basic-drone';
+      expect(visual).toBeInstanceOf(Phaser.GameObjects.Image);
+      const sourceBefore = scene.textures
+        .get(preparedKey)
+        .getSourceImage() as unknown;
+      // The rendered visual IS the flush whitened silhouette, not a tint flag...
+      expect(visual.texture.key).toBe(flashKey);
+      expect(scene.textures.exists(flashKey)).toBe(true);
+      expect(visual.isTinted).toBe(false);
+      // ...derived from the prepared artwork with the approved flash colour and an
+      // alpha-preserving composite.
+      expect(canvasOps.drawImage).toBeGreaterThan(0);
+      expect(canvasOps.fillRect).toBeGreaterThan(0);
+      expect(canvasOps.fillStyles).toContain(geometry.enemyFlashColor);
+      expect(canvasOps.compositeOperations).toContain('source-in');
+      // Size and alpha are unchanged by the feedback.
+      expect(visual.displayWidth).toBeCloseTo(basic.width, 6);
+      expect(visual.displayHeight).toBeCloseTo(basic.height, 6);
+      expect(visual.x).toBeCloseTo(basic.centerX, 6);
+      expect(visual.y).toBeCloseTo(basic.centerY, 6);
 
-    // Expiry restores the prepared artwork exactly (same visual, no tint).
-    harness.holder.state = {
-      ...flashingState,
-      activeEnemyFlashStepsRemaining: {},
-    };
-    scene.update(0, 16.7);
-    expect(visual.texture.key).toBe(preparedKey);
-    expect(visual.isTinted).toBe(false);
-    expect(visual.displayWidth).toBeCloseTo(basic.width, 6);
-    expect(scene.enemyVisuals.get(basic.id)).toBe(visual);
+      // Expiry restores the prepared artwork exactly (same visual, no tint).
+      harness.holder.state = {
+        ...flashingState,
+        activeEnemyFlashStepsRemaining: {},
+      };
+      scene.update(0, 16.7);
+      expect(visual.texture.key).toBe(preparedKey);
+      expect(visual.isTinted).toBe(false);
+      expect(visual.displayWidth).toBeCloseTo(basic.width, 6);
+      expect(scene.enemyVisuals.get(basic.id)).toBe(visual);
 
-    // A repeated damaging hit re-applies the same feedback.
-    harness.holder.state = flashingState;
-    scene.update(0, 16.7);
-    expect(visual.texture.key).toBe(flashKey);
+      // A repeated damaging hit re-applies the same feedback.
+      harness.holder.state = flashingState;
+      scene.update(0, 16.7);
+      expect(visual.texture.key).toBe(flashKey);
 
-    // The prepared artwork itself is never mutated, and the feedback adds no
-    // second decode or network request (the prepared data URI is assigned once,
-    // and the silhouette comes from the already-registered texture).
-    expect(scene.textures.get(preparedKey).getSourceImage()).toBe(sourceBefore);
-    expect(srcAssignments.get(PREPARED_BASIC_DRONE.imageDataUri ?? '')).toBe(1);
-    expect(canvasOps.clearRect).toBeGreaterThan(0);
-  });
+      // The prepared artwork itself is never mutated, and the feedback adds no
+      // second decode or network request (the prepared data URI is assigned once,
+      // and the silhouette comes from the already-registered texture).
+      expect(scene.textures.get(preparedKey).getSourceImage()).toBe(
+        sourceBefore,
+      );
+      expect(srcAssignments.get(PREPARED_BASIC_DRONE.imageDataUri ?? '')).toBe(
+        1,
+      );
+      expect(canvasOps.clearRect).toBeGreaterThan(0);
+    },
+    AGGREGATE_LOAD_TEST_TIMEOUT_MS,
+  );
 });

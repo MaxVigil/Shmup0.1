@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CONTENT_CATALOGUE } from '@test-support/content';
+import { HUNTER_DRONE, enemyRenderedBounds } from '@application/content';
 import {
   AIRCRAFT_WIDTH,
   AIRCRAFT_HEIGHT,
@@ -11,8 +12,18 @@ import {
   FIXED_STEP_SECONDS,
 } from './combat-simulation';
 import type { CombatSimulationState } from './combat-simulation';
-import { spawnEnemyFromPlacement, stepEnemy } from './enemies';
-import type { CombatEnemy, EnemyStepInput } from './enemies';
+import {
+  HUNTER_COMMITTED_STEERING_STEPS,
+  hunterHeadingToward,
+  hunterMaxTurnPerStep,
+  hunterRotatedBounds,
+  hunterTravelVector,
+  reprojectHunterForViewport,
+  spawnBoundsForEntry,
+  spawnEnemyFromPlacement,
+  stepEnemy,
+} from './enemies';
+import type { CombatEnemy, EnemyStepInput, HunterEnemyState } from './enemies';
 
 /**
  * V02-WI-04 regular-enemy simulation evidence (Epic §9, V02-AC-006–008,
@@ -116,11 +127,20 @@ describe('authored-staging spawn (V02-DEC-018)', () => {
       viewportHeight: VIEWPORT.height,
       ordinal: 0,
     });
-    expect(enemy.centerX + bounds.width / 2).toBeCloseTo(0, 6);
-    expect(enemy.centerY).toBeCloseTo(0.2 * VIEWPORT.height, 6);
     if (enemy.kind !== 'hunter') {
       throw new Error('Expected a Hunter enemy from the Hunter placement.');
     }
+    // V021-WI-03 (patch §3): the configured rendered bounds stay the visual
+    // rectangle, the injected entry heading is nose-right, and the AABB that
+    // touches the boundary is their enclosing rotated rectangle (the swapped
+    // envelope) — the same rectangle the simulation moves and collides.
+    expect(enemy.visualWidth).toBeCloseTo(bounds.width, 9);
+    expect(enemy.visualHeight).toBeCloseTo(bounds.height, 9);
+    expect(enemy.width).toBeCloseTo(bounds.height, 9);
+    expect(enemy.height).toBeCloseTo(bounds.width, 9);
+    expect(enemy.headingRadians).toBeCloseTo(-Math.PI / 2, 12);
+    expect(enemy.centerX + enemy.width / 2).toBeCloseTo(0, 6);
+    expect(enemy.centerY).toBeCloseTo(0.2 * VIEWPORT.height, 6);
     expect(enemy.phase).toBe('entering');
   });
 });
@@ -233,10 +253,29 @@ describe('Ranged Drone (Epic §9.2, V02-AC-006)', () => {
 
   it('creates one independent ranged-fire stream per authored Ranged member ordinal', () => {
     const state = createState();
+    // Derived from the resolved Mission 01 §2.1 arrivals: every authored Ranged
+    // member ordinal of e2 (`BR12` rows at 00:55/01:03/01:11/01:19/01:35), e3
+    // (`BRH14`/`BR18`/`BR12` rows at 01:40–02:12), e4 (`BR12`/`BRH14`/`BR18`
+    // rows at 02:20–03:02) and e5 (`BRH14` at 03:08.70) — never a second
+    // ordinal authority.
+    const authoredOrdinals = state.arrivalGroups
+      .flatMap((group) => group.members)
+      .filter((member) => member.type === 'ranged-drone')
+      .map((member) => member.ordinal)
+      .sort((a, b) => a - b);
+    expect(authoredOrdinals).toEqual([
+      101, 102, 113, 114, 125, 126, 137, 138, 161, 162, 174, 175, 176, 177, 191,
+      192, 193, 194, 205, 206, 218, 219, 220, 221, 231, 232, 243, 244, 256, 257,
+      258, 259, 273, 274, 275, 276, 287, 288, 300, 301, 302, 303, 317, 318, 319,
+      320, 331, 332, 344, 345, 346, 347,
+    ]);
     const ordinals = Object.keys(state.rangedFireStreams)
       .map(Number)
       .sort((a, b) => a - b);
-    expect(ordinals).toEqual([6, 13]);
+    expect(ordinals).toEqual(authoredOrdinals);
+    for (const ordinal of authoredOrdinals) {
+      expect(state.rangedFireStreams[ordinal]).toBeDefined();
+    }
   });
 
   it('keeps the fired projectile collision-active in the same step (V02-WI-04 C01: muzzle top edge)', () => {
@@ -259,7 +298,7 @@ describe('Ranged Drone (Epic §9.2, V02-AC-006)', () => {
       entry: 'top',
       hasEnteredVisibleArea: true,
       activated: true,
-      ordinal: 6, // an authored Ranged ordinal with a seeded stream
+      ordinal: 101, // e2 00:55 BR12: the first authored Ranged member ordinal
       width: 30,
       height: rangedHeight,
       firingStepsRemaining: 1,
@@ -339,16 +378,30 @@ describe('Hunter Drone (Epic §9.3, V02-AC-007)', () => {
       throw new Error('Expected the Hunter to commit.');
     }
     expect(enemy.phase).toBe('committed');
-    // The committed direction is locked: the Aircraft moving away does not
-    // bend the attack run (Epic §9.3).
+    // V021-WI-03 (patch §3, V021-AC-003): the committed run is owned by the
+    // heading, and inside its 60-executed-step window it steers at most 25°/s
+    // toward the Aircraft's CURRENT centre — never an instant re-aim.
     const locked = { ...enemy };
     const awayInput = { ...input, aircraftCenterX: 200, aircraftCenterY: 500 };
     const after = stepEnemy(enemy, awayInput).enemy as CombatEnemy;
     if (after.kind !== 'hunter') {
       throw new Error('Expected the committed Hunter after the step.');
     }
-    expect(after.committedVx).toBe(locked.committedVx);
-    expect(after.committedVy).toBe(locked.committedVy);
+    expect(after.committedStepsExecuted).toBe(
+      locked.committedStepsExecuted + 1,
+    );
+    expect(
+      Math.abs(after.headingRadians - locked.headingRadians),
+    ).toBeLessThanOrEqual(hunterMaxTurnPerStep(FIXED_STEP_SECONDS) + 1e-9);
+    const travel = hunterTravelVector(after.headingRadians);
+    expect(after.centerX - locked.centerX).toBeCloseTo(
+      travel.x * input.committedSpeedPx * FIXED_STEP_SECONDS,
+      9,
+    );
+    expect(after.centerY - locked.centerY).toBeCloseTo(
+      travel.y * input.committedSpeedPx * FIXED_STEP_SECONDS,
+      9,
+    );
   });
 
   it('begins Approach on the exact step the moved complete bounds become fully inside (V02-WI-04 C01)', () => {
@@ -400,8 +453,14 @@ describe('Hunter Drone (Epic §9.3, V02-AC-007)', () => {
       width: 20,
       height: 20,
       phase: 'approach',
-      committedVx: 0,
-      committedVy: 0,
+      // V021-WI-03 (patch §3): the injected Side Entry heading (nose right) and
+      // the configured rendered bounds; Approach re-derives its own heading
+      // toward the Aircraft on every executed step.
+      headingRadians: -Math.PI / 2,
+      visualWidth: 20,
+      visualHeight: 20,
+      committedStepsExecuted: 0,
+      steeringEnded: false,
       // One step from the 2.0 s commitment timer expiring.
       approachStepsElapsed: 119,
     };
@@ -419,5 +478,423 @@ describe('Hunter Drone (Epic §9.3, V02-AC-007)', () => {
     // 18% approach speed (1.8 px) the previous code applied for one extra step.
     expect(result.enemy.centerY).toBeCloseTo(200 + 156 / 60, 6);
     expect(result.enemy.centerX).toBe(640);
+    // V021-WI-03 (patch §3): commitment points the authoritative heading at the
+    // Aircraft's current centre (straight down here) and opens the 60-step
+    // steering window at step 1.
+    expect(result.enemy.headingRadians).toBeCloseTo(0, 9);
+    expect(result.enemy.committedStepsExecuted).toBe(1);
+    expect(result.enemy.steeringEnded).toBe(false);
+  });
+});
+
+describe('Hunter heading ownership and bounded committed steering (V021-WI-03 patch §3, V021-AC-003)', () => {
+  const HUNTER_VISUAL = { width: 30, height: 10 };
+
+  /**
+   * One committed Hunter whose `headingRadians` is the ONLY direction owner and
+   * whose authoritative AABB is the enclosing rectangle of its configured
+   * rendered bounds at that heading.
+   */
+  function committedHunter(
+    overrides: Partial<HunterEnemyState> = {},
+  ): HunterEnemyState {
+    const headingRadians = overrides.headingRadians ?? 0;
+    const envelope = hunterRotatedBounds({
+      width: HUNTER_VISUAL.width,
+      height: HUNTER_VISUAL.height,
+      headingRadians,
+    });
+    return {
+      id: 0,
+      kind: 'hunter',
+      type: 'hunter-drone',
+      hullIntegrity: enemyDef('hunter-drone').maximumHullIntegrity,
+      centerX: 640,
+      centerY: 300,
+      entry: 'top',
+      hasEnteredVisibleArea: true,
+      activated: true,
+      ordinal: 7,
+      width: envelope.width,
+      height: envelope.height,
+      phase: 'committed',
+      headingRadians,
+      visualWidth: HUNTER_VISUAL.width,
+      visualHeight: HUNTER_VISUAL.height,
+      committedStepsExecuted: 0,
+      steeringEnded: false,
+      approachStepsElapsed: 121,
+      ...overrides,
+    };
+  }
+
+  it('injects each Side Entry heading so the nose already points along the entry movement', () => {
+    const cases = [
+      { entry: 'upper-left' as const, heading: -Math.PI / 2, dx: 1 },
+      { entry: 'upper-right' as const, heading: Math.PI / 2, dx: -1 },
+    ];
+    for (const testCase of cases) {
+      const enemy = spawnEnemyFromPlacement({
+        id: 0,
+        type: 'hunter-drone',
+        hullIntegrity: enemyDef('hunter-drone').maximumHullIntegrity,
+        width: HUNTER_VISUAL.width,
+        height: HUNTER_VISUAL.height,
+        placement: {
+          kind: 'side',
+          side: testCase.entry,
+          yViewportFraction: 0.2,
+        },
+        viewportWidth: VIEWPORT.width,
+        viewportHeight: VIEWPORT.height,
+        ordinal: 7,
+      });
+      if (enemy.kind !== 'hunter') {
+        throw new Error('Expected a Hunter from the Hunter placement.');
+      }
+      const placed = spawnBoundsForEntry({
+        type: 'hunter-drone',
+        width: HUNTER_VISUAL.width,
+        height: HUNTER_VISUAL.height,
+        entry: testCase.entry,
+      });
+      expect(enemy.headingRadians).toBe(testCase.heading);
+      expect(enemy.visualWidth).toBe(HUNTER_VISUAL.width);
+      expect(enemy.visualHeight).toBe(HUNTER_VISUAL.height);
+      expect(enemy.width).toBeCloseTo(placed.width, 9);
+      expect(enemy.height).toBeCloseTo(placed.height, 9);
+      // The AABB that touches the entry boundary is the ENCLOSING rectangle of
+      // the rotated visual, not the configured rectangle.
+      expect(enemy.width).toBeCloseTo(HUNTER_VISUAL.height, 9);
+      expect(enemy.height).toBeCloseTo(HUNTER_VISUAL.width, 9);
+      expect(enemy.centerX + (testCase.dx * enemy.width) / 2).toBeCloseTo(
+        testCase.dx > 0 ? 0 : VIEWPORT.width,
+        9,
+      );
+      // The injected heading IS the entry movement vector: the first entering
+      // step travels along it at the unchanged 18% VH/s approach speed.
+      const input = stepInput({
+        movementSpeedPx: 600 * 0.18,
+        committedSpeedPx: 600 * 0.26,
+        aircraftCenterX: 640,
+        aircraftCenterY: 480,
+      });
+      const stepped = stepEnemy(enemy, input).enemy;
+      if (stepped?.kind !== 'hunter') {
+        throw new Error('Expected the entering Hunter after the step.');
+      }
+      const travel = hunterTravelVector(enemy.headingRadians);
+      const entryStep = 600 * 0.18 * FIXED_STEP_SECONDS;
+      expect(travel.y).toBeCloseTo(0, 9);
+      expect(stepped.centerX - enemy.centerX).toBeCloseTo(
+        travel.x * entryStep,
+        9,
+      );
+      expect(stepped.centerY - enemy.centerY).toBeCloseTo(0, 9);
+      expect(stepped.headingRadians).toBe(testCase.heading);
+      expect(stepped.phase).toBe('entering');
+    }
+  });
+
+  it('steers at most 25°/s along the shortest signed turn toward the current Aircraft centre', () => {
+    const maxTurn = hunterMaxTurnPerStep(FIXED_STEP_SECONDS);
+    expect(maxTurn).toBeCloseTo((25 * Math.PI) / 180 / 60, 12);
+    // Nose down while the Aircraft sits 400 px right and 100 px below: the
+    // shortest signed turn is -76°, far beyond the cap, so the step advances
+    // exactly `maxTurn` (and the target is still ahead, so steering is live).
+    const enemy = committedHunter({
+      headingRadians: 0,
+      centerX: 640,
+      centerY: 300,
+    });
+    const input = stepInput({
+      committedSpeedPx: 600 * 0.26,
+      aircraftCenterX: 1040,
+      aircraftCenterY: 400,
+    });
+    const stepped = stepEnemy(enemy, input).enemy;
+    if (stepped?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after the step.');
+    }
+    expect(stepped.headingRadians).toBeCloseTo(-maxTurn, 12);
+    expect(stepped.committedStepsExecuted).toBe(1);
+    expect(stepped.steeringEnded).toBe(false);
+    // The same step moves along the heading it owns at the 26% VH/s committed
+    // speed and re-derives its AABB from that heading.
+    const travel = hunterTravelVector(stepped.headingRadians);
+    const committedStep = 600 * 0.26 * FIXED_STEP_SECONDS;
+    expect(stepped.centerX - enemy.centerX).toBeCloseTo(
+      travel.x * committedStep,
+      9,
+    );
+    expect(stepped.centerY - enemy.centerY).toBeCloseTo(
+      travel.y * committedStep,
+      9,
+    );
+    const envelope = hunterRotatedBounds({
+      width: HUNTER_VISUAL.width,
+      height: HUNTER_VISUAL.height,
+      headingRadians: stepped.headingRadians,
+    });
+    expect(stepped.width).toBeCloseTo(envelope.width, 9);
+    expect(stepped.height).toBeCloseTo(envelope.height, 9);
+  });
+
+  it('locks the heading from the 61st executed committed step', () => {
+    const maxTurn = hunterMaxTurnPerStep(FIXED_STEP_SECONDS);
+    const input = stepInput({
+      committedSpeedPx: 600 * 0.26,
+      aircraftCenterX: 1040,
+      aircraftCenterY: 400,
+    });
+    // Step 60 is the LAST step of the steering window and still steers.
+    const last = stepEnemy(
+      committedHunter({
+        headingRadians: 0,
+        committedStepsExecuted: HUNTER_COMMITTED_STEERING_STEPS - 1,
+      }),
+      input,
+    ).enemy;
+    if (last?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after step 60.');
+    }
+    expect(last.committedStepsExecuted).toBe(HUNTER_COMMITTED_STEERING_STEPS);
+    expect(last.headingRadians).toBeCloseTo(-maxTurn, 12);
+    // Step 61 is outside the window: the run keeps its locked heading even
+    // though the Aircraft needs a 90° turn.
+    const locked = stepEnemy(
+      committedHunter({
+        headingRadians: 0,
+        committedStepsExecuted: HUNTER_COMMITTED_STEERING_STEPS,
+      }),
+      input,
+    ).enemy;
+    if (locked?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after step 61.');
+    }
+    expect(locked.committedStepsExecuted).toBe(
+      HUNTER_COMMITTED_STEERING_STEPS + 1,
+    );
+    expect(locked.headingRadians).toBe(0);
+    expect(locked.steeringEnded).toBe(false);
+    expect(locked.centerX).toBeCloseTo(640, 9);
+    expect(locked.centerY).toBeCloseTo(300 + (600 * 0.26) / 60, 9);
+    expect(locked.width).toBeCloseTo(HUNTER_VISUAL.width, 9);
+    expect(locked.height).toBeCloseTo(HUNTER_VISUAL.height, 9);
+  });
+
+  it('permanently ends steering when the Aircraft centre is behind, without reversal or reacquisition', () => {
+    const committedStep = (600 * 0.26) / 60;
+    // Travel is straight down and the Aircraft is 200 px ABOVE the centre, so
+    // the dot product is negative: steering ends on this step.
+    const behind = stepEnemy(
+      committedHunter({ headingRadians: 0, centerX: 640, centerY: 300 }),
+      stepInput({ aircraftCenterX: 640, aircraftCenterY: 100 }),
+    ).enemy;
+    if (behind?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after the step.');
+    }
+    expect(behind.steeringEnded).toBe(true);
+    expect(behind.headingRadians).toBe(0);
+    expect(behind.centerX).toBeCloseTo(640, 9);
+    expect(behind.centerY).toBeCloseTo(300 + committedStep, 9);
+    // A later Aircraft position squarely AHEAD inside the window cannot
+    // reacquire steering: the latch is permanent and never reverses.
+    const ahead = stepEnemy(
+      behind,
+      stepInput({ aircraftCenterX: 640, aircraftCenterY: 5000 }),
+    ).enemy;
+    if (ahead?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after the second step.');
+    }
+    expect(ahead.steeringEnded).toBe(true);
+    expect(ahead.headingRadians).toBe(0);
+    expect(ahead.committedStepsExecuted).toBe(2);
+    expect(ahead.centerX).toBeCloseTo(640, 9);
+    expect(ahead.centerY).toBeCloseTo(300 + 2 * committedStep, 9);
+  });
+
+  it('retains the heading at exactly zero centre distance without latching', () => {
+    const maxTurn = hunterMaxTurnPerStep(FIXED_STEP_SECONDS);
+    const zero = stepEnemy(
+      committedHunter({ headingRadians: 0.5, centerX: 640, centerY: 300 }),
+      stepInput({ aircraftCenterX: 640, aircraftCenterY: 300 }),
+    ).enemy;
+    if (zero?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after the step.');
+    }
+    // Exactly zero distance: the heading is retained for the step and the
+    // window stays open.
+    expect(zero.headingRadians).toBe(0.5);
+    expect(zero.steeringEnded).toBe(false);
+    expect(zero.committedStepsExecuted).toBe(1);
+    // A genuinely ahead, off-axis target inside the window still steers, so the
+    // zero-distance step consumed no eligibility.
+    const aheadHeading = 0.5 + 0.2;
+    const ahead = stepEnemy(
+      zero,
+      stepInput({
+        aircraftCenterX: zero.centerX - 100 * Math.sin(aheadHeading),
+        aircraftCenterY: zero.centerY + 100 * Math.cos(aheadHeading),
+      }),
+    ).enemy;
+    if (ahead?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after the second step.');
+    }
+    expect(ahead.steeringEnded).toBe(false);
+    expect(ahead.headingRadians).toBeCloseTo(0.5 + maxTurn, 12);
+  });
+
+  it('never authorizes a U-turn from an exactly opposite heading', () => {
+    // The Aircraft sits exactly 200 px BEHIND the nose-down travel vector, the
+    // one case where the naive desired heading is exactly π away: the shortest
+    // signed turn would be ±180°, so an unlatched stepper would U-turn. The
+    // behind rule must win and the Hunter must keep its heading.
+    const enemy = committedHunter({
+      headingRadians: 0,
+      centerX: 640,
+      centerY: 300,
+    });
+    const input = stepInput({
+      aircraftCenterX: 640,
+      aircraftCenterY: 100,
+    });
+    // The naive desired heading is exactly π away (the reported sign is
+    // immaterial: the behind rule decides before any turn is applied).
+    expect(Math.abs(hunterHeadingToward(0, -200))).toBeCloseTo(Math.PI, 9);
+    const stepped = stepEnemy(enemy, input).enemy;
+    if (stepped?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after the step.');
+    }
+    expect(stepped.headingRadians).toBe(0);
+    expect(stepped.steeringEnded).toBe(true);
+    // Reversed exactly: the closest reachable heading is still the retained one.
+    expect(Math.abs(stepped.headingRadians - Math.PI)).toBeCloseTo(Math.PI, 9);
+  });
+
+  it('derives full-bounds activation from the rotated envelope, not the configured rectangle', () => {
+    // Configured 30 × 10 rotated by 0.5 rad ⇒ envelope 31.11 × 23.16. At
+    // `centerY = 7` the CONFIGURED rectangle (top edge at 2 px) is already fully
+    // inside the viewport while the ENVELOPE top edge is still 2.30 px above it
+    // after this step's own movement, so activation must not fire yet.
+    const heading = 0.5;
+    const envelope = hunterRotatedBounds({
+      width: HUNTER_VISUAL.width,
+      height: HUNTER_VISUAL.height,
+      headingRadians: heading,
+    });
+    expect(envelope.height).toBeGreaterThan(HUNTER_VISUAL.height);
+    const configuredTopInside = 7 - HUNTER_VISUAL.height / 2;
+    expect(configuredTopInside).toBeGreaterThan(0);
+    const notInsideYet = stepEnemy(
+      committedHunter({
+        headingRadians: heading,
+        centerX: 640,
+        centerY: 7,
+        activated: false,
+      }),
+      stepInput({ aircraftCenterX: 640, aircraftCenterY: 590 }),
+    );
+    expect(notInsideYet.newlyActivated).toBe(false);
+    const stillOutside = notInsideYet.enemy;
+    if (stillOutside?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after the step.');
+    }
+    expect(stillOutside.activated).toBe(false);
+    // The same step's own movement still leaves the envelope's top edge above
+    // the viewport top, which is the only reason activation is withheld.
+    expect(stillOutside.centerY - stillOutside.height / 2).toBeLessThan(0);
+
+    // Once the complete rotated envelope is inside, the latch fires on that
+    // exact step and is permanent.
+    const activated = stepEnemy(
+      committedHunter({
+        headingRadians: heading,
+        centerX: 640,
+        centerY: 30,
+        activated: false,
+      }),
+      stepInput({ aircraftCenterX: 640, aircraftCenterY: 590 }),
+    );
+    expect(activated.newlyActivated).toBe(true);
+    const inside = activated.enemy;
+    if (inside?.kind !== 'hunter') {
+      throw new Error('Expected the committed Hunter after the step.');
+    }
+    expect(inside.activated).toBe(true);
+    expect(inside.centerY - inside.height / 2).toBeGreaterThanOrEqual(0);
+  });
+
+  it('escapes only when the complete rotated envelope leaves the viewport', () => {
+    // Configured 30 × 10 rotated by 0.5 rad ⇒ half-height 11.58 > 5, so the
+    // envelope keeps the Hunter alive past the point where the superseded
+    // configured rectangle would already report an escape.
+    const heading = 0.5;
+    const envelope = hunterRotatedBounds({
+      width: HUNTER_VISUAL.width,
+      height: HUNTER_VISUAL.height,
+      headingRadians: heading,
+    });
+    const committedStep = (600 * 0.26) / 60;
+    const stepY = Math.cos(heading) * committedStep;
+    // The configured rectangle is ALREADY fully below the viewport here, so a
+    // superseded-rectangle implementation would report an escape on this step.
+    const centerY = 600 + HUNTER_VISUAL.height / 2 + 1;
+    expect(centerY - HUNTER_VISUAL.height / 2).toBeGreaterThan(600);
+    const stepped = stepEnemy(
+      committedHunter({ headingRadians: heading, centerX: 640, centerY }),
+      stepInput({ aircraftCenterX: 640, aircraftCenterY: 120 }),
+    );
+    const survivor = stepped.enemy;
+    if (survivor?.kind !== 'hunter') {
+      throw new Error(
+        'Expected the Hunter to survive on its rotated envelope.',
+      );
+    }
+    expect(survivor.centerY - envelope.height / 2).toBeLessThan(600);
+
+    // Fully beyond the bottom on the ENVELOPE: removed as Escaped exactly then.
+    const escaping = stepEnemy(
+      committedHunter({
+        headingRadians: heading,
+        centerX: 640,
+        centerY: 600 + envelope.height / 2 - stepY + 0.25,
+      }),
+      stepInput({ aircraftCenterX: 640, aircraftCenterY: 120 }),
+    );
+    expect(escaping.enemy).toBeNull();
+  });
+
+  it('re-resolves the configured bounds on a viewport resize without touching the heading or the run', () => {
+    const shortSidePx = 600;
+    const configured = enemyRenderedBounds(HUNTER_DRONE, shortSidePx);
+    const headingRadians = 0.25;
+    const resized = reprojectHunterForViewport(
+      committedHunter({
+        headingRadians,
+        committedStepsExecuted: 12,
+        steeringEnded: true,
+      }),
+      { centerX: 200, centerY: 100, shortSidePx },
+    );
+    expect(resized.visualWidth).toBeCloseTo(configured.widthPx, 9);
+    expect(resized.visualHeight).toBeCloseTo(configured.heightPx, 9);
+    const envelope = hunterRotatedBounds({
+      width: configured.widthPx,
+      height: configured.heightPx,
+      headingRadians,
+    });
+    expect(resized.width).toBeCloseTo(envelope.width, 9);
+    expect(resized.height).toBeCloseTo(envelope.height, 9);
+    // Resize never re-aims, restarts, or re-latches the run.
+    expect(resized.headingRadians).toBe(headingRadians);
+    expect(resized.phase).toBe('committed');
+    expect(resized.committedStepsExecuted).toBe(12);
+    expect(resized.steeringEnded).toBe(true);
+    expect(resized.centerX).toBe(200);
+    expect(resized.centerY).toBe(100);
+    // The configured Hunter rectangle is not square, so the authoritative AABB
+    // is genuinely the rotated envelope rather than the configured bounds.
+    expect(envelope.width).not.toBeCloseTo(configured.widthPx, 6);
   });
 });

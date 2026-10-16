@@ -307,7 +307,19 @@ Verification §18 is the approved P123 routing amendment for new assignments
 (including its bounded tooling introduction). It supersedes the blanket
 per-correction browser requirement below only where an explicit risk-linked
 gate plan applies. Missing routing falls back to the existing full requirements;
-milestone, dependency, security and physical-device obligations are not waived.
+the default milestone gate remains binding except for an explicitly approved
+local substitute, and dependency, security and physical-device obligations are
+not waived.
+
+The Product Owner's V021-DEC-006 authorizes a **prospective, local-only v0.2.1
+patch-stabilization gate substitution**, independently reviewed and accepted
+in `verification/v021-patch-route-amendment-acceptance.md`. Verification
+§18.1's exact patch route replaces the
+`verify:all`/`verify:isolated` milestone command for that local patch verdict
+only. It does not make those commands green, alter their test membership,
+waive a critical AC, transfer a v0.2.0 security exception, or authorize an
+external release/test build or physical-device claim. Every other milestone
+still follows the default full-gate rule.
 
 - During implementation, run the narrowest relevant tests. Before handoff, run `npm run verify` once against the final unchanged revision.
 - Browser/player-visible/lifecycle/build work also runs `npm run verify:browser` once against the final unchanged revision.

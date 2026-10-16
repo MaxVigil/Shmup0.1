@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { INTERCEPTION_02 } from '@content/index';
 import { CANNON } from '@content/weapons';
-import { createMissionDataStream } from '@domain/index';
 import type { EnemyType } from '@domain/index';
 import {
   createTestCombatRuntime,
@@ -17,6 +16,7 @@ import {
   submitCombatCommand,
 } from './combat-simulation';
 import type { CombatSimulationState } from './combat-simulation';
+import { hunterMaxTurnPerStep, hunterTravelVector } from './enemies';
 import type { CombatEnemy } from './enemies';
 
 /**
@@ -27,7 +27,7 @@ import type { CombatEnemy } from './enemies';
  * are owned by `src/content/missions/missions-exact.test.ts` and
  * `src/application/mission/encounter-resolution.test.ts`. This file adds only
  * the missing boundary evidence: the GENERIC Combat runtime materializes that
- * validated plan verbatim, creates all six Encounters and all ten Arrival
+ * validated plan verbatim, creates all six Encounters and all 112 Arrival
  * Groups on their exact fixed steps with the authored ordered members,
  * offsets, normalized placements and stable ordinals, projects Top members
  * inside the current engagement band without consuming RNG, keeps the plan
@@ -38,6 +38,23 @@ import type { CombatEnemy } from './enemies';
  * is introduced: every assertion runs the same runtime path that owns Mission
  * 01 with the Mission 02 read-only content input.
  */
+/**
+ * V021-PATCH-DEP-01-C01: explicit, bounded per-test allowance for this file's
+ * heavy Mission 02 runtime test. It resolves and replays all 112 authored
+ * Arrival Groups through the real pipeline, so its own wall clock is already
+ * ~0.85 s alone, while Vitest's default `5_000 ms` test budget measures wall
+ * clock. Under the complete 102-file parallel run the measured per-test wall
+ * clock inflates (this test reached 5 057 ms here at eight-times CPU
+ * oversubscription, and the parent gate recorded the same class at host load
+ * 10.39), so it failed the aggregate gate with a spurious
+ * `Test timed out in 5000ms` while every assertion held. The allowance is
+ * file-local and bounded: no global timeout/worker setting, assertion, fixture
+ * or authored-content claim changes, and the value still expires, so a genuinely
+ * hanging test can never be masked. The multiplier follows the bounded-allowance
+ * convention the real-Phaser suites already use for their bootstrap hook.
+ */
+const AGGREGATE_LOAD_TEST_TIMEOUT_MS = 30_000;
+
 const MISSION_02 = 'interception-02';
 
 const stepIndexFor = (seconds: number): number =>
@@ -79,6 +96,19 @@ function flatGroups(plan: MissionEncounterPlan): readonly FlatGroupEvidence[] {
       })),
     })),
   );
+}
+
+/** Zero-based global member ordinal of `members[memberIndex]` in `groups`. */
+function memberOrdinalAt(
+  groups: readonly FlatGroupEvidence[],
+  groupIndex: number,
+  memberIndex: number,
+): number {
+  let ordinal = 0;
+  for (let index = 0; index < groupIndex; index += 1) {
+    ordinal += groups[index]?.members.length ?? 0;
+  }
+  return ordinal + memberIndex;
 }
 
 function missionPlan(): MissionEncounterPlan {
@@ -167,8 +197,13 @@ function forgedEnemy(
       ...common,
       kind: 'hunter',
       phase: 'committed',
-      committedVx: 0,
-      committedVy: 1,
+      // V021-WI-03 (patch §3): the heading is the single owner of the committed
+      // travel vector and of the rendered rotation; `0` is nose-down.
+      headingRadians: 0,
+      visualWidth: bounds.width,
+      visualHeight: bounds.height,
+      committedStepsExecuted: 0,
+      steeringEnded: false,
       approachStepsElapsed: 120,
     };
   }
@@ -176,7 +211,7 @@ function forgedEnemy(
 }
 
 describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V02-WI-05 M02-R01)', () => {
-  it('materializes the validated Mission 02 plan verbatim: six Encounters, ten Arrival Groups and 21 ordered members', () => {
+  it('materializes the validated Mission 02 plan verbatim: six Encounters, 112 Arrival Groups and 480 ordered members', () => {
     const runtime = createTestCombatRuntime({ missionId: MISSION_02 });
     const state = runtime.getState();
     const plan = missionPlan();
@@ -193,47 +228,90 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
       'interception-02-e6',
     ]);
     expect(plan.encounters.map((entry) => entry.timeSeconds)).toEqual([
-      10, 50, 100, 150, 200, 260,
+      10, 50, 100, 150, 200, 244,
     ]);
+    // The single authored final member lands on 04:20 exactly.
     expect(state.enemyPlan.finalArrivalTimeSeconds).toBe(260);
     expect(state.enemyPlan.finalArrivalStepIndex).toBe(stepIndexFor(260));
 
     const groups = flatGroups(plan);
-    expect(groups).toHaveLength(10);
+    expect(groups).toHaveLength(112);
     // The runtime materializes every resolved group exactly once, in authored
     // order, with the plan's own steps, offsets, members, placements and
     // assigned member ordinals — a verbatim consumption boundary.
     expect(state.arrivalGroups).toEqual(groups);
-    expect(state.arrivalGroups.map((group) => group.encounterId)).toEqual([
+    expect(
+      plan.encounters.map((encounter) => encounter.staging?.length),
+    ).toEqual([20, 24, 23, 19, 18, 8]);
+    expect([
+      ...new Set(state.arrivalGroups.map((group) => group.encounterId)),
+    ]).toEqual([
       'interception-02-e1',
-      'interception-02-e2',
       'interception-02-e2',
       'interception-02-e3',
       'interception-02-e4',
-      'interception-02-e4',
-      'interception-02-e5',
-      'interception-02-e5',
       'interception-02-e5',
       'interception-02-e6',
     ]);
-    expect(state.arrivalGroups.map((group) => group.offsetSeconds)).toEqual([
-      0, 0, 2, 0, 0, 2, 0, 1, 2, 0,
+    // Every Encounter opens on its authored start step.
+    expect(
+      groups
+        .filter((group) => group.offsetSeconds === 0)
+        .map((group) => group.stepIndex),
+    ).toEqual([
+      stepIndexFor(10),
+      stepIndexFor(50),
+      stepIndexFor(100),
+      stepIndexFor(150),
+      stepIndexFor(200),
+      stepIndexFor(244),
     ]);
-    expect(state.arrivalGroups.map((group) => group.stepIndex)).toEqual([
-      600, 3000, 3120, 6000, 9000, 9120, 12000, 12060, 12120, 15600,
-    ]);
+    // Authored density contract (patch §2.2, V021-AC-001): every creation event
+    // carries at least four members, 77 of the 111 consecutive gaps are exactly
+    // one authored `0.65 s` / 39-step formation row, and every remaining gap is
+    // a transition between the 35 formations (including the five Encounter
+    // boundaries) that is larger than one row and stays inside the patch's
+    // maximum `8 s` start gap.
+    const groupSteps = groups.map((group) => group.stepIndex);
+    const consecutiveSteps = groupSteps
+      .slice(1)
+      .map((step, index) => step - (groupSteps[index] as number));
+    const rowOffsetSteps = stepIndexFor(0.65);
+    expect(consecutiveSteps).toHaveLength(111);
+    expect(
+      consecutiveSteps.filter((step) => step === rowOffsetSteps),
+    ).toHaveLength(112 - 35);
+    expect(
+      consecutiveSteps
+        .filter((step) => step !== rowOffsetSteps)
+        .every((step) => step > rowOffsetSteps && step <= stepIndexFor(8)),
+    ).toBe(true);
+    for (const group of groups) {
+      expect(group.members.length).toBeGreaterThanOrEqual(4);
+    }
+
     const members = state.arrivalGroups.flatMap((group) => group.members);
-    expect(members).toHaveLength(21);
+    expect(members).toHaveLength(480);
     const countByType = (type: EnemyType): number =>
       members.filter((member) => member.type === type).length;
-    expect(countByType('basic-drone')).toBe(15);
-    expect(countByType('ranged-drone')).toBe(4);
-    expect(countByType('hunter-drone')).toBe(2);
+    expect(countByType('basic-drone')).toBe(352);
+    expect(countByType('ranged-drone')).toBe(100);
+    expect(countByType('hunter-drone')).toBe(28);
     expect(countByType('elite-drone')).toBe(0);
+    // Authored screening order: Basic opens 00:10, the first Ranged arrives
+    // 00:51.30 and the first fixed-side Hunter 02:00 — through authored row
+    // order only, never a runtime formation generator.
+    const firstStepOfRole = (type: EnemyType): number =>
+      groups.find((group) =>
+        group.members.some((member) => member.type === type),
+      )?.stepIndex ?? -1;
+    expect(firstStepOfRole('basic-drone')).toBe(stepIndexFor(10));
+    expect(firstStepOfRole('ranged-drone')).toBe(stepIndexFor(51.3));
+    expect(firstStepOfRole('hunter-drone')).toBe(stepIndexFor(120));
     // Stable zero-based mission ordinals in authored order: the per-member
     // `ranged-fire` RNG identity and presentation key never shift.
     expect(members.map((member) => member.ordinal)).toEqual(
-      Array.from({ length: 21 }, (_, index) => index),
+      Array.from({ length: 480 }, (_, index) => index),
     );
 
     expect(state.arrivalGroupIndex).toBe(0);
@@ -244,115 +322,139 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
     expect(state.countdownSeconds).toBe(260);
   });
 
-  it('creates all ten Arrival Groups on their exact fixed steps with ordered members, stable ordinals and engagement-band placements', () => {
-    const runtime = createTestCombatRuntime({ missionId: MISSION_02 });
-    // God Mode keeps the Aircraft operational across the complete 04:20
-    // schedule so every authored creation step is observed; it never changes
-    // spawning, placements, member order, or RNG consumption.
-    runtime.submitDebug({ type: 'combat-debug/god-mode', enabled: true });
-    const groups = flatGroups(missionPlan());
-    const draws = createMissionDataStream(TEST_MISSION_SEED);
-    const expectedSides = [
-      draws.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
-      draws.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
-      draws.nextInt(2) === 0 ? 'upper-left' : 'upper-right',
-    ];
-    const seededSides: string[] = [];
-    let expectedNextEnemyId = 0;
+  it(
+    'creates all 112 Arrival Groups on their exact fixed steps with ordered members, stable ordinals and engagement-band placements',
+    () => {
+      const runtime = createTestCombatRuntime({ missionId: MISSION_02 });
+      // God Mode keeps the Aircraft operational across the complete 04:20
+      // schedule so every authored creation step is observed; it never changes
+      // spawning, placements, member order, or RNG consumption.
+      runtime.submitDebug({ type: 'combat-debug/god-mode', enabled: true });
+      const groups = flatGroups(missionPlan());
+      let expectedNextEnemyId = 0;
 
-    for (const [groupIndex, group] of groups.entries()) {
-      const before = advanceToStep(runtime, group.stepIndex - 1);
-      // Nothing from this group exists on the preceding step, and no scheduled
-      // group beyond it has been created yet.
-      expect(before.arrivalGroupIndex).toBe(groupIndex);
-      expect(
-        before.enemies.some((enemy) => enemy.id >= expectedNextEnemyId),
-      ).toBe(false);
+      for (const [groupIndex, group] of groups.entries()) {
+        const before = advanceToStep(runtime, group.stepIndex - 1);
+        // Nothing from this group exists on the preceding step, and no scheduled
+        // group beyond it has been created yet.
+        expect(before.arrivalGroupIndex).toBe(groupIndex);
+        expect(
+          before.enemies.some((enemy) => enemy.id >= expectedNextEnemyId),
+        ).toBe(false);
 
-      const created = stepRuntime(runtime);
-      expect(created.missionStepCount).toBe(group.stepIndex);
-      expect(created.missionTimeSeconds).toBe(group.timeSeconds);
-      expect(created.countdownSeconds).toBe(260 - group.timeSeconds);
-      expect(created.arrivalGroupIndex).toBe(groupIndex + 1);
-      expect(created.currentEncounterId).toBe(group.encounterId);
-      // Exactly-once creation: the monotonic enemy id advances by exactly this
-      // group's authored member count, so a delayed group can never duplicate.
-      expect(created.nextEnemyId).toBe(
-        expectedNextEnemyId + group.members.length,
-      );
-
-      const ids = group.members.map((_, index) => expectedNextEnemyId + index);
-      const spawned = created.enemies.filter((enemy) => ids.includes(enemy.id));
-      // Simultaneous members keep their authored order and stable identity.
-      expect(spawned.map((enemy) => enemy.id)).toEqual(ids);
-      expect(spawned.map((enemy) => enemy.type)).toEqual(
-        group.members.map((member) => member.type),
-      );
-      expect(spawned.map((enemy) => enemy.ordinal)).toEqual(
-        group.members.map((member) => member.ordinal),
-      );
-
-      for (const [memberIndex, member] of group.members.entries()) {
-        const enemy = spawned[memberIndex];
-        if (enemy === undefined) {
-          throw new Error('Mission 02 runtime evidence: missing member.');
-        }
-        const bounds = created.enemyBoundsByType[member.type];
-        if (member.placement.kind === 'top') {
-          // Top projection: the authored normalized fraction is measured inside
-          // the CURRENT Aircraft horizontal engagement band, the complete
-          // bounds start exactly on the upper boundary, and the complete bounds
-          // stay inside the band (no invented geometry, no hidden offset).
-          const band = created.bounds;
-          expect(enemy.entry).toBe('top');
-          expect(enemy.centerY).toBe(-bounds.height / 2);
-          const fraction =
-            (enemy.centerX - band.minX) / (band.maxX - band.minX);
-          expect(fraction).toBeCloseTo(
-            member.placement.engagementBandFraction,
-            9,
-          );
-          expect(enemy.centerX - bounds.width / 2).toBeGreaterThanOrEqual(
-            band.minX,
-          );
-          expect(enemy.centerX + bounds.width / 2).toBeLessThanOrEqual(
-            band.maxX,
-          );
-        } else {
-          // Seeded Side member: the authored viewport-height fraction and the
-          // resolved approved side, with the complete bounds exactly outside
-          // the selected boundary.
-          const side = member.placement.side;
-          seededSides.push(side);
-          expect(enemy.entry).toBe(side);
-          expect(enemy.centerX).toBe(
-            side === 'upper-left'
-              ? -bounds.width / 2
-              : created.viewportWidth + bounds.width / 2,
-          );
-          expect(enemy.centerY).toBe(
-            member.placement.yViewportFraction * created.viewportHeight,
-          );
-        }
-        expect(enemy.hullIntegrity).toBe(
-          created.enemyDefsByType[member.type].maximumHullIntegrity,
+        const created = stepRuntime(runtime);
+        expect(created.missionStepCount).toBe(group.stepIndex);
+        // The authored fractional row time and the fixed-step clock may differ by
+        // one floating-point unit; the Countdown stays the ceiling of the
+        // remaining authored time.
+        expect(created.missionTimeSeconds).toBeCloseTo(group.timeSeconds, 9);
+        expect(created.countdownSeconds).toBe(
+          Math.ceil(260 - group.timeSeconds),
         );
+        expect(created.arrivalGroupIndex).toBe(groupIndex + 1);
+        expect(created.currentEncounterId).toBe(group.encounterId);
+        // Exactly-once creation: the monotonic enemy id advances by exactly this
+        // group's authored member count, so a delayed group can never duplicate.
+        expect(created.nextEnemyId).toBe(
+          expectedNextEnemyId + group.members.length,
+        );
+
+        const ids = group.members.map(
+          (_, index) => expectedNextEnemyId + index,
+        );
+        const spawned = created.enemies.filter((enemy) =>
+          ids.includes(enemy.id),
+        );
+        // Simultaneous members keep their authored order and stable identity.
+        expect(spawned.map((enemy) => enemy.id)).toEqual(ids);
+        expect(spawned.map((enemy) => enemy.type)).toEqual(
+          group.members.map((member) => member.type),
+        );
+        expect(spawned.map((enemy) => enemy.ordinal)).toEqual(
+          group.members.map((member) => member.ordinal),
+        );
+
+        for (const [memberIndex, member] of group.members.entries()) {
+          const enemy = spawned[memberIndex];
+          if (enemy === undefined) {
+            throw new Error('Mission 02 runtime evidence: missing member.');
+          }
+          const bounds = created.enemyBoundsByType[member.type];
+          if (member.placement.kind === 'top') {
+            // Top projection: the authored normalized fraction is measured inside
+            // the CURRENT Aircraft horizontal engagement band, the complete
+            // bounds start exactly on the upper boundary, and the complete bounds
+            // stay inside the band (no invented geometry, no hidden offset).
+            const band = created.bounds;
+            expect(enemy.entry).toBe('top');
+            expect(enemy.centerY).toBe(-bounds.height / 2);
+            const fraction =
+              (enemy.centerX - band.minX) / (band.maxX - band.minX);
+            expect(fraction).toBeCloseTo(
+              member.placement.engagementBandFraction,
+              9,
+            );
+            expect(enemy.centerX - bounds.width / 2).toBeGreaterThanOrEqual(
+              band.minX,
+            );
+            expect(enemy.centerX + bounds.width / 2).toBeLessThanOrEqual(
+              band.maxX,
+            );
+          } else {
+            // Fixed-side Hunter member: the authored viewport-height fraction and
+            // the authored side, with the complete bounds exactly outside the
+            // selected boundary (no seeded draw is consumed).
+            const side = member.placement.side;
+            expect(enemy.entry).toBe(side);
+            // The per-step AABB is authoritative: the configured rectangle for a
+            // level member, and the ENCLOSING rectangle of the configured
+            // rectangle at the injected side-entry heading for the Hunter
+            // (V021-WI-03 patch §3), so the AABB width is the configured height.
+            if (enemy.kind === 'hunter') {
+              expect(enemy.width).toBeCloseTo(bounds.height, 9);
+              expect(enemy.height).toBeCloseTo(bounds.width, 9);
+            } else {
+              expect(enemy.width).toBe(bounds.width);
+              expect(enemy.height).toBe(bounds.height);
+            }
+            expect(enemy.centerX).toBe(
+              side === 'upper-left'
+                ? -enemy.width / 2
+                : created.viewportWidth + enemy.width / 2,
+            );
+            expect(enemy.centerY).toBe(
+              member.placement.yViewportFraction * created.viewportHeight,
+            );
+          }
+          expect(enemy.hullIntegrity).toBe(
+            created.enemyDefsByType[member.type].maximumHullIntegrity,
+          );
+        }
+
+        expectedNextEnemyId = created.nextEnemyId;
       }
 
-      expectedNextEnemyId = created.nextEnemyId;
-    }
+      const finalState = runtime.getState();
+      expect(expectedNextEnemyId).toBe(480);
+      expect(finalState.nextEnemyId).toBe(480);
+      expect(finalState.arrivalGroupIndex).toBe(112);
+      expect(finalState.terminalResult).toBeNull();
 
-    // The three Mission 02 seeded-side members consumed exactly the three
-    // `mission-data` draws in e4 delayed Basic → e5 Hunter → e6 Hunter order;
-    // every Top member consumed zero draws (any extra draw would shift this
-    // mapping).
-    expect(seededSides).toEqual(expectedSides);
-    const finalState = runtime.getState();
-    expect(expectedNextEnemyId).toBe(21);
-    expect(finalState.nextEnemyId).toBe(21);
-    expect(finalState.arrivalGroupIndex).toBe(10);
-    expect(finalState.terminalResult).toBeNull();
-  });
+      // Mission 02 authors every regular member as a Top row or a fixed-side
+      // Hunter, so resolution consumes ZERO `mission-data` draws and an unrelated
+      // mission seed materializes the identical authored plan (a stray
+      // seeded-side draw would shift a placement).
+      const otherSeed = createTestCombatRuntime({
+        missionId: MISSION_02,
+        missionSeed: 0x11111111,
+      });
+      expect(otherSeed.getState().arrivalGroups).toEqual(groups);
+      expect(otherSeed.getState().enemyPlan).toEqual(
+        runtime.getState().enemyPlan,
+      );
+    },
+    AGGREGATE_LOAD_TEST_TIMEOUT_MS,
+  );
 
   it('keeps the resolved plan immutable across Aircraft, Hull and loadout state', () => {
     const baseline = createTestCombatRuntime({ missionId: MISSION_02 });
@@ -411,9 +513,10 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
 
     const created = stepRuntime(runtime);
     expect(created.missionStepCount).toBe(600);
-    expect(created.enemies).toHaveLength(3);
+    // e1's opening row: four Basics on the authored engagement-band fractions.
+    expect(created.enemies).toHaveLength(4);
     const band = created.bounds;
-    const authoredFractions = [0.15, 0.45, 0.75];
+    const authoredFractions = [0.32, 0.44, 0.56, 0.68];
     for (const [index, enemy] of created.enemies.entries()) {
       const bounds = created.enemyBoundsByType[enemy.type];
       expect(enemy.centerY).toBe(-bounds.height / 2);
@@ -426,10 +529,10 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
     );
   });
 
-  it('holds the Countdown at 00:00 on the single 04:20 step, creates the complete e6 group once and grants no Success while a regular enemy remains', () => {
+  it('holds the Countdown at 00:00 on the single 04:20 step, creates the complete final e6 group once and grants no Success while a regular enemy remains', () => {
     const fresh = createTestCombatState({ missionId: MISSION_02 });
     const groups = flatGroups(missionPlan());
-    const finalGroup = groups[9];
+    const finalGroup = groups[groups.length - 1];
     if (finalGroup === undefined) {
       throw new Error('Mission 02 runtime evidence: missing final group.');
     }
@@ -444,18 +547,22 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
     const atFinalStep = stepCombatSimulation(crafted, FIXED_STEP_SECONDS);
     expect(atFinalStep.missionStepCount).toBe(15600);
     expect(atFinalStep.missionTimeSeconds).toBe(260);
-    // The crafted cursor starts at the final group, so exactly the three e6
-    // members receive identities 0-2.
-    expect(atFinalStep.nextEnemyId).toBe(3);
+    // The crafted cursor starts at the final group, so exactly this group's
+    // four e6 Ranged members receive identities 0-3.
+    expect(finalGroup.members).toHaveLength(4);
+    expect(finalGroup.members.map((member) => member.type)).toEqual([
+      'ranged-drone',
+      'ranged-drone',
+      'ranged-drone',
+      'ranged-drone',
+    ]);
+    expect(atFinalStep.nextEnemyId).toBe(4);
     // The Countdown reaches exactly 00:00 on this single step.
     expect(atFinalStep.countdownSeconds).toBe(0);
-    // The complete e6 group (2 Basic + 1 Hunter) was created on this step.
     expect(atFinalStep.currentEncounterId).toBe('interception-02-e6');
-    expect(atFinalStep.enemies.map((enemy) => enemy.type)).toEqual([
-      'basic-drone',
-      'basic-drone',
-      'hunter-drone',
-    ]);
+    expect(atFinalStep.enemies.map((enemy) => enemy.type)).toEqual(
+      finalGroup.members.map((member) => member.type),
+    );
     expect(atFinalStep.arrivalGroupIndex).toBe(groups.length);
     // Reaching 00:00 alone does not grant Success while regular enemies remain.
     expect(atFinalStep.terminalResult).toBeNull();
@@ -464,7 +571,7 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
     let later = atFinalStep;
     for (let index = 0; index < 60; index += 1) {
       later = stepCombatSimulation(later, FIXED_STEP_SECONDS);
-      expect(later.nextEnemyId).toBe(3);
+      expect(later.nextEnemyId).toBe(4);
       expect(later.arrivalGroupIndex).toBe(groups.length);
       expect(later.countdownSeconds).toBe(0);
       expect(later.currentEncounterId).toBe('interception-02-e6');
@@ -570,39 +677,49 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
 
   it('drives the Mission 02 Ranged and Hunter instances through the shared per-member behaviour owners', () => {
     const streams = createTestCombatRuntime({ missionId: MISSION_02 });
-    // Per-member `ranged-fire` streams are keyed exactly by the authored
-    // Mission 02 Ranged ordinals (e2 delayed Ranged 6, e3 Ranged 8/9, e5
-    // delayed Ranged 16) — the shared owner, not a Mission 02 fork.
+    const groups = flatGroups(missionPlan());
+    // Every authored Ranged member owns exactly one independent `ranged-fire`
+    // stream keyed by its stable member ordinal — the shared owner, not a
+    // Mission 02 fork. All 100 authored Ranged streams exist from creation.
+    const planRangedOrdinals = groups
+      .flatMap((group) => group.members)
+      .filter((member) => member.type === 'ranged-drone')
+      .map((member) => member.ordinal);
+    expect(planRangedOrdinals).toHaveLength(100);
     expect(
       Object.keys(streams.getState().rangedFireStreams)
         .map(Number)
         .sort((left, right) => left - right),
-    ).toEqual([6, 8, 9, 16]);
+    ).toEqual(planRangedOrdinals);
 
-    const groups = flatGroups(missionPlan());
-    const rangedGroup = groups[7];
-    const hunterGroup = groups[8];
-    if (rangedGroup === undefined || hunterGroup === undefined) {
-      throw new Error('Mission 02 runtime evidence: missing e5 groups.');
+    // e2's opening Ranged row (the first authored Ranged) begins its
+    // full-bounds activation timer and fires its first shot exactly 180 steps
+    // later through the shared cadence, with the shared projectile geometry.
+    const rangedGroupIndex = groups.findIndex((group) =>
+      group.members.some((member) => member.type === 'ranged-drone'),
+    );
+    const rangedGroup = groups[rangedGroupIndex];
+    if (rangedGroup === undefined) {
+      throw new Error(
+        'Mission 02 runtime evidence: missing first Ranged group.',
+      );
     }
-
-    // The e5 delayed Ranged (member ordinal 16) begins its full-bounds
-    // activation timer and fires its first shot exactly 180 steps later
-    // through the shared cadence, with the shared ranged projectile geometry.
     const rangedRuntime = createTestCombatRuntime({ missionId: MISSION_02 });
     const rangedCreated = stepCombatSimulation(
       {
         ...rangedRuntime.getState(),
         missionStepCount: rangedGroup.stepIndex - 1,
         missionTimeSeconds: (rangedGroup.stepIndex - 1) * FIXED_STEP_SECONDS,
-        arrivalGroupIndex: 7,
+        arrivalGroupIndex: rangedGroupIndex,
       },
       FIXED_STEP_SECONDS,
     );
     const rangedMember = rangedCreated.enemies.find(
       (enemy) => enemy.type === 'ranged-drone',
     );
-    expect(rangedMember?.ordinal).toBe(16);
+    expect(rangedMember?.ordinal).toBe(
+      memberOrdinalAt(groups, rangedGroupIndex, 0),
+    );
     expect(rangedMember?.entry).toBe('top');
     if (rangedMember === undefined) {
       throw new Error('Mission 02 runtime evidence: ranged instance missing.');
@@ -629,37 +746,63 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
       (state) => state.enemyProjectiles.length > 0,
     );
     expect(fired.steps).toBe(180);
-    expect(fired.state.enemyProjectiles).toHaveLength(1);
-    expect(fired.state.enemyProjectiles[0]!.width).toBe(
-      fired.state.rangedProjectileGeometry.width,
+    // The authored `4R` row creates four simultaneous Ranged members, so all
+    // four independent streams fire on the same cadence step, each with the
+    // shared projectile geometry.
+    expect(fired.state.enemyProjectiles).toHaveLength(
+      rangedGroup.members.length,
     );
-    expect(fired.state.enemyProjectiles[0]!.height).toBe(
-      fired.state.rangedProjectileGeometry.height,
-    );
+    for (const projectile of fired.state.enemyProjectiles) {
+      expect(projectile.width).toBe(fired.state.rangedProjectileGeometry.width);
+      expect(projectile.height).toBe(
+        fired.state.rangedProjectileGeometry.height,
+      );
+    }
 
-    // The e5 delayed Hunter (member ordinal 17) uses the shared entry machine:
-    // it enters horizontally from its resolved authored side, begins Approach
-    // on the exact step its complete bounds are inside, then commits with a
-    // locked direction that does not bend when the Aircraft later moves.
+    // The first authored Hunter row (e3's `H4-12` template) uses the shared
+    // entry machine: each Hunter enters horizontally from its authored fixed
+    // side, begins Approach on the exact step its complete bounds are inside,
+    // then commits at 26% VH/s with a heading-owned direction that steers
+    // toward the moving Aircraft only within the bounded 25°/s window
+    // (V021-WI-03 patch §3).
+    const hunterGroupIndex = groups.findIndex((group) =>
+      group.members.some((member) => member.type === 'hunter-drone'),
+    );
+    const hunterGroup = groups[hunterGroupIndex];
+    if (hunterGroup === undefined) {
+      throw new Error('Mission 02 runtime evidence: missing first Hunter row.');
+    }
+    const hunterMemberIndex = hunterGroup.members.findIndex(
+      (member) => member.type === 'hunter-drone',
+    );
+    const hunterPlacement = hunterGroup.members[hunterMemberIndex]?.placement;
+    if (hunterPlacement?.kind !== 'side') {
+      throw new Error(
+        'Mission 02 runtime evidence: authored Hunter side missing.',
+      );
+    }
     const hunterRuntime = createTestCombatRuntime({ missionId: MISSION_02 });
     const hunterCreated = stepCombatSimulation(
       {
         ...hunterRuntime.getState(),
         missionStepCount: hunterGroup.stepIndex - 1,
         missionTimeSeconds: (hunterGroup.stepIndex - 1) * FIXED_STEP_SECONDS,
-        arrivalGroupIndex: 8,
+        arrivalGroupIndex: hunterGroupIndex,
       },
       FIXED_STEP_SECONDS,
     );
-    expect(hunterCreated.currentEncounterId).toBe('interception-02-e5');
+    expect(hunterCreated.currentEncounterId).toBe('interception-02-e3');
     const hunter = hunterCreated.enemies.find(
       (enemy) => enemy.type === 'hunter-drone',
     );
     if (hunter?.kind !== 'hunter') {
       throw new Error('Mission 02 runtime evidence: hunter state missing.');
     }
-    expect(hunter.ordinal).toBe(17);
-    expect(['upper-left', 'upper-right']).toContain(hunter.entry);
+    expect(hunter.ordinal).toBe(
+      memberOrdinalAt(groups, hunterGroupIndex, hunterMemberIndex),
+    );
+    // The authored fixed side is content: no `mission-data` draw is consumed.
+    expect(hunter.entry).toBe(hunterPlacement.side);
     expect(hunter.phase).toBe('entering');
     expect(hunter.activated).toBe(false);
     const hunterId = hunter.id;
@@ -668,7 +811,9 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
         ? -hunter.width / 2
         : hunterCreated.viewportWidth + hunter.width / 2,
     );
-    expect(hunter.centerY).toBe(0.2 * hunterCreated.viewportHeight);
+    expect(hunter.centerY).toBe(
+      hunterPlacement.yViewportFraction * hunterCreated.viewportHeight,
+    );
 
     const approached = stepStateUntil(
       hunterCreated,
@@ -691,29 +836,49 @@ describe('Mission 02 runtime consumption (Epic §8.2–8.2.1, V02-DEC-018/026, V
       throw new Error('Mission 02 runtime evidence: hunter commit missing.');
     }
     expect(
-      committedHunter.committedVx ** 2 + committedHunter.committedVy ** 2,
+      Math.hypot(
+        hunterTravelVector(committedHunter.headingRadians).x,
+        hunterTravelVector(committedHunter.headingRadians).y,
+      ),
     ).toBeCloseTo(1, 9);
-    const lockedVx = committedHunter.committedVx;
-    const lockedVy = committedHunter.committedVy;
+    const lockedHeading = committedHunter.headingRadians;
     const lockedX = committedHunter.centerX;
     const lockedY = committedHunter.centerY;
 
-    // Move the Aircraft after the commit: the locked run must not bend.
+    // V021-WI-03 (patch §3, V021-AC-003): the committed run no longer locks a
+    // direction instantly — inside its 60-executed-step window it may steer
+    // toward the Aircraft's CURRENT centre by at most 25°/s along the shortest
+    // signed turn, and it always travels at the 26% VH/s committed speed.
     const moved = submitCombatCommand(committedRun.state, {
       type: 'combat/pointer-move',
       x: 160,
       y: 120,
     });
     const afterMove = stepCombatSimulation(moved, FIXED_STEP_SECONDS);
-    const bent = enemyById(afterMove, hunterId);
-    if (bent?.kind !== 'hunter') {
+    const steered = enemyById(afterMove, hunterId);
+    if (steered?.kind !== 'hunter') {
       throw new Error('Mission 02 runtime evidence: committed run missing.');
     }
-    expect(bent.committedVx).toBe(lockedVx);
-    expect(bent.committedVy).toBe(lockedVy);
-    expect(bent.phase).toBe('committed');
+    expect(steered.phase).toBe('committed');
+    // The commit step itself is the first executed committed step, so this
+    // step is the second executed one.
+    expect(committedHunter.committedStepsExecuted).toBe(1);
+    expect(steered.committedStepsExecuted).toBe(
+      committedHunter.committedStepsExecuted + 1,
+    );
+    expect(
+      Math.abs(steered.headingRadians - lockedHeading),
+    ).toBeLessThanOrEqual(hunterMaxTurnPerStep(FIXED_STEP_SECONDS) + 1e-9);
     const committedStep = 0.26 * afterMove.viewportHeight * FIXED_STEP_SECONDS;
-    expect(bent.centerX - lockedX).toBeCloseTo(lockedVx * committedStep, 9);
-    expect(bent.centerY - lockedY).toBeCloseTo(lockedVy * committedStep, 9);
+    expect(
+      Math.hypot(steered.centerX - lockedX, steered.centerY - lockedY),
+    ).toBeCloseTo(committedStep, 9);
+    const steeredTravel = hunterTravelVector(steered.headingRadians);
+    expect(
+      steered.centerX - lockedX - steeredTravel.x * committedStep,
+    ).toBeCloseTo(0, 9);
+    expect(
+      steered.centerY - lockedY - steeredTravel.y * committedStep,
+    ).toBeCloseTo(0, 9);
   });
 });

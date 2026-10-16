@@ -15,8 +15,9 @@ import type {
  * fixed step), it always resolves the same encounter identities, timestamps,
  * compositions, authored ordering, typed entry/formation/delay data, approved
  * seeded entry regions, and — where the canonical source records exact numeric
- * staging (Mission 01, V02-DEC-021) — the ordered Arrival Groups and normalized
- * Spawn Placements. It reads ONLY the authored mission definition and the
+ * staging (Mission 01 V02-DEC-021, Mission 02 V02-DEC-026, Mission 03
+ * V021-DEC-003) — the ordered Arrival Groups and normalized Spawn Placements.
+ * It reads ONLY the authored mission definition and the
  * supplied seed — never the current Hull, loadout, Aircraft position, score, or
  * performance — so spawn data cannot react to the player (no Reactive Spawn
  * Cheating). Combat (V02-WI-04+) consumes this resolved plan as its authored
@@ -25,13 +26,14 @@ import type {
  * The only seeded draws are the approved binary entry-region pair for encounters
  * whose authored entry is `seeded` (exactly `upper-left`, `upper-right`, Epic
  * §8). Draws come from the dedicated `mission-data` stream derived from the
- * already-derived mission seed, in strict authored encounter order — for Mission
- * 01 exactly the three Hunter draws `e3 → e4 → e5` (V02-AC-003), and for
- * Mission 02 exactly the three draws `e4 (delayed Basic flank) → e5 Hunter →
- * e6 Hunter` (V02-DEC-026). Top Placements consume zero draws. Every
- * seeded-side staging member resolves its side from the same encounter-level
- * draw, so consuming this contract never changes the authoritative Combat
- * spawn stream sequence (Technical Foundation §8).
+ * already-derived mission seed, in strict authored encounter order. No v0.2.1
+ * Interception encounter is seeded: Mission 01 §2.1 and Mission 03 §2.3 are
+ * entirely authored, and Mission 02 §2.2 removed its seeded sides, so every
+ * authored mission resolves zero draws today. Top Placements and `fixed-side`
+ * Placements consume zero draws. Every seeded-side staging member
+ * resolves its side from the same encounter-level draw, so consuming this
+ * contract never changes the authoritative Combat spawn stream sequence
+ * (Technical Foundation §8).
  */
 
 export interface ResolvedArrivalGroupMember {
@@ -81,8 +83,8 @@ export interface ResolvedEncounter {
   readonly roleDelays: readonly RoleDelay[];
   /**
    * Resolved ordered Arrival Groups (Epic §8.1.1), or `null` when the authored
-   * mission carries no exact numeric staging (Mission 03 until its Product
-   * Owner staging decision is recorded; Missions 01 and 02 are fully staged).
+   * mission carries no exact numeric staging. All three authored Interception
+   * Missions are fully staged (V02-DEC-021, V02-DEC-026, V021-DEC-003).
    */
   readonly staging: readonly ResolvedArrivalGroup[] | null;
 }
@@ -143,22 +145,51 @@ export function resolveMissionEncounters(
       'Encounter resolution failed: the validated mission has no encounters.',
     );
   }
+  // v0.2.1 patch §2.1 (V021-AC-002): the final scheduled arrival is the LATEST
+  // resolved Arrival Group, not the last encounter's own arrival time. Mission
+  // 01 e5 starts at 03:08.70 and ends its last row at exactly 03:10, so the
+  // Combat Countdown still reaches 00:00 on that final member step.
+  const finalArrival = finalArrivalOf(encounters, final);
   return {
     missionId: mission.id,
     encounters,
-    finalArrivalTimeSeconds: final.timeSeconds,
-    finalArrivalStepIndex: final.stepIndex,
+    finalArrivalTimeSeconds: finalArrival.timeSeconds,
+    finalArrivalStepIndex: finalArrival.stepIndex,
   };
+}
+
+/** The latest resolved member step across every staged encounter; falls back to
+ *  the last encounter arrival when a mission carries no positive offset. */
+function finalArrivalOf(
+  encounters: readonly ResolvedEncounter[],
+  fallback: ResolvedEncounter,
+): { readonly timeSeconds: number; readonly stepIndex: number } {
+  let latest = {
+    timeSeconds: fallback.timeSeconds,
+    stepIndex: fallback.stepIndex,
+  };
+  for (const encounter of encounters) {
+    for (const group of encounter.staging ?? []) {
+      if (group.stepIndex > latest.stepIndex) {
+        latest = {
+          timeSeconds: group.timeSeconds,
+          stepIndex: group.stepIndex,
+        };
+      }
+    }
+  }
+  return latest;
 }
 
 /**
  * Resolves authored Arrival Groups into absolute-step groups (Epic §8.1.1).
  * The seeded side of every `seeded-side` member comes from the encounter's
- * single resolved entry draw (each Mission 01/02 seeded encounter carries one
+ * single resolved entry draw (each Mission 02 seeded encounter carries one
  * binary side draw, and every seeded-side member in that encounter resolves
  * from it), so staging consumes no additional RNG beyond that encounter draw
- * and preserves the exact Mission 01 `e3 → e4 → e5` and Mission 02
- * `e4 → e5 → e6` draw order.
+ * and preserves the exact Mission 02 `e4 → e5 → e6` draw order. Authored
+ * `fixed-side` members keep their explicit side and consume no draw at all
+ * (v0.2.1 patch §2.1).
  */
 function resolveStaging(
   staging: readonly ArrivalGroup[] | undefined,
@@ -178,7 +209,16 @@ function resolveStaging(
               kind: 'top' as const,
               engagementBandFraction: member.placement.fraction,
             }
-          : resolveSeededSide(member.placement.yViewportFraction, entryRegion),
+          : member.placement.kind === 'fixed-side'
+            ? {
+                kind: 'side' as const,
+                side: member.placement.side,
+                yViewportFraction: member.placement.yViewportFraction,
+              }
+            : resolveSeededSide(
+                member.placement.yViewportFraction,
+                entryRegion,
+              ),
     }));
     const timeSeconds = encounterTimeSeconds + group.offsetSeconds;
     return {

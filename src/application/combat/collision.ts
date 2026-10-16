@@ -13,8 +13,14 @@ import {
   enemyProjectileCollisionAabb,
   projectileCollisionAabb,
 } from './collision-geometry';
-import { EVIDENCE_COUNTERS_ENABLED } from './evidence';
-import type { CollisionEvidenceSink } from './evidence';
+import {
+  DENSE_WORKLOAD_OWNER_WORK_ENABLED,
+  EVIDENCE_COUNTERS_ENABLED,
+} from './evidence';
+import type {
+  CollisionEvidenceSink,
+  DenseWorkloadOwnerWorkSink,
+} from './evidence';
 
 /**
  * V02-WI-04 deterministic collision phase (Epic §11, V02-AC-008/011–013;
@@ -51,8 +57,18 @@ export const PAIR_CONTACT_COOLDOWN_STEPS = 45;
 export const ELITE_CONTACT_DAMAGE = 20;
 /** Non-destroying enemy hit flash: 50 ms = 3 fixed steps. */
 export const ENEMY_HIT_FLASH_STEPS = 3;
-/** Destroyed-enemy flash: 100 ms = 6 fixed steps, hitbox-free and stationary. */
-export const DESTROYED_ENEMY_FLASH_STEPS = 6;
+/**
+ * V021-WI-05 E01 (patch §4.1, V021-DEC-005, V021-AC-009): a true regular
+ * destruction creates one hitbox-free shatter that lasts exactly `12` executed
+ * fixed steps (`0.20 s`) and is drawn as six fragments.
+ */
+export const DESTRUCTION_SHATTER_REGULAR_STEPS = 12;
+/**
+ * V021-WI-05 E01: the Elite destruction shatter lasts exactly `15` executed
+ * fixed steps (`0.25 s`), is drawn as ten fragments, and adds its second broken
+ * ring from effect step `4` (patch §4.1).
+ */
+export const DESTRUCTION_SHATTER_ELITE_STEPS = 15;
 /** Player aircraft danger flash after valid damage: 100 ms = 6 fixed steps. */
 export const AIRCRAFT_DAMAGE_FLASH_STEPS = 6;
 
@@ -80,12 +96,68 @@ export type EliteDeflectionFeedbacks = Readonly<
   Record<number, EliteDeflectionFeedback>
 >;
 
-export interface DestroyedEnemyFlash {
+/** The two approved destruction-burst variants (patch §4.1): the regular
+ *  six-fragment burst and the Elite ten-fragment burst with its second broken
+ *  ring. */
+export type DestructionShatterVariant = 'regular' | 'elite';
+
+/**
+ * V021-WI-05 E01 authoritative hitbox-free destruction-shatter record (patch
+ * §4.1, V021-DEC-005, V021-AC-009). The simulation creates exactly one record
+ * on the lethal collision step of a true Basic/Ranged/Hunter/Elite destruction
+ * (including the Hunter kamikaze contact under God Mode), carries that step's
+ * authoritative destruction centre, the destroyed enemy's complete visual
+ * dimension and the role variant with its exact duration, and ages it once per
+ * executed fixed step. The record is presentation-only: it has no hitbox and no
+ * authority over collision, rewards, counts, mission resolution, RNG, or
+ * terminal timing, and it never exists for an Escaped enemy, a nonlethal hit,
+ * or a blocked Armoured deflection.
+ */
+export interface DestructionShatter {
   readonly enemyId: number;
   readonly centerX: number;
   readonly centerY: number;
+  /** `max(complete visual width, complete visual height)` in px (patch §4.1). */
   readonly size: number;
-  readonly stepsRemaining: number;
+  readonly variant: DestructionShatterVariant;
+  /** Exact lifetime: `12` regular / `15` Elite executed fixed steps. */
+  readonly totalSteps: number;
+  /** Executed fixed steps this effect has been alive (`0` on its creation step). */
+  readonly ageSteps: number;
+}
+
+/**
+ * The complete visual dimension that scales one destruction burst (patch §4.1):
+ * the destroyed enemy's maximum complete width/height. A Hunter contributes its
+ * CONFIGURED `visualWidth`/`visualHeight` bounds instead of its
+ * orientation-expanded rotated collision AABB, so a steering change can never
+ * change the burst size (V021-WI-03 owns the same rule for the rendered
+ * rectangle; the presentation mirrors it in `enemyVisualSize`).
+ */
+export function destructionShatterSize(enemy: CombatEnemy): number {
+  return enemy.kind === 'hunter'
+    ? Math.max(enemy.visualWidth, enemy.visualHeight)
+    : Math.max(enemy.width, enemy.height);
+}
+
+/** The ONE creation owner of a destruction-shatter record (patch §4.1). */
+export function createDestructionShatter(
+  enemy: CombatEnemy,
+): DestructionShatter {
+  const variant: DestructionShatterVariant =
+    enemy.kind === 'elite' ? 'elite' : 'regular';
+  return {
+    enemyId: enemy.id,
+    centerX: enemy.centerX,
+    centerY: enemy.centerY,
+    size: destructionShatterSize(enemy),
+    variant,
+    totalSteps:
+      variant === 'elite'
+        ? DESTRUCTION_SHATTER_ELITE_STEPS
+        : DESTRUCTION_SHATTER_REGULAR_STEPS,
+    ageSteps: 0,
+  };
 }
 
 /** Active-enemy white-flash counters keyed by enemy id. */
@@ -112,6 +184,14 @@ export interface ProjectileCollisionInput {
   readonly existingEliteDeflections?: EliteDeflectionFeedbacks;
   /** Evidence-only read-only work sink (Pass A; absent from the ordinary build). */
   readonly evidence?: CollisionEvidenceSink;
+  /**
+   * V021-PATCH-STAB-01 C01 dense owner-work sink (evidence-only, scenarios/dev
+   * gated). When the dense combined-stress bucket arms its recorder, this pass
+   * reports the candidate pairs it actually ENUMERATED and the enemy ids its own
+   * lethal hit removed — the raw per-step work facts of §11, produced by the
+   * canonical owner instead of being inferred from population counts.
+   */
+  readonly ownerWork?: DenseWorkloadOwnerWorkSink;
 }
 
 export interface ProjectileCollisionResult {
@@ -120,7 +200,11 @@ export interface ProjectileCollisionResult {
   readonly destroyedEnemies: readonly DestroyedEnemyInfo[];
   readonly flashes: EnemyFlashSteps;
   readonly eliteDeflections: EliteDeflectionFeedbacks;
-  readonly destroyedEnemyFlashes: readonly DestroyedEnemyFlash[];
+  /**
+   * V021-WI-05 E01 (patch §4.1, V021-DEC-005): one hitbox-free shatter per true
+   * destruction caused by this pass's lethal player-projectile hit.
+   */
+  readonly destructionShatters: readonly DestructionShatter[];
 }
 
 /**
@@ -129,8 +213,10 @@ export interface ProjectileCollisionResult {
  * still-active eligible enemy by ascending enemy id and is consumed exactly
  * once. An enemy reaching Hull <= 0 immediately leaves the active collection,
  * is reported exactly once (the simulation owns reward/count), and creates only
- * the 100 ms hitbox-free destruction flash; later projectiles in the same step
- * ignore it. A non-destroying hit applies or restarts that enemy's 50 ms flash
+ * its ONE hitbox-free destruction-shatter record (V021-WI-05 E01, patch §4.1:
+ * six fragments over 12 executed steps for a regular role, ten fragments over
+ * 15 for the Elite); later projectiles in the same step ignore it. A
+ * non-destroying hit applies or restarts that enemy's 50 ms flash
  * and preserves movement and hitbox. Enemy hulls are reduced only by
  * projectiles — regular contact never damages an enemy (Epic §11.1).
  *
@@ -158,11 +244,20 @@ export function resolveProjectileCollisions(
     ...input.existingEliteDeflections,
   };
   const destroyedEnemies: DestroyedEnemyInfo[] = [];
-  const destroyedEnemyFlashes: DestroyedEnemyFlash[] = [];
+  // V021-WI-05 E01 (patch §4.1): the hitbox-free destruction-shatter records
+  // created by this pass, in ascending hit order.
+  const destructionShatters: DestructionShatter[] = [];
   // V02-WI-04 C03 evidence-only observed work counters (Pass A): candidates are
   // the (projectile, enemy) pairs actually enumerated; intersections are the
-  // pairs that actually overlapped. The counters are eliminated from the
-  // ordinary production artifact through the counters gate.
+  // pairs that actually overlapped. V021-PATCH-STAB-01 C01 reuses the SAME
+  // enumeration for the dense bucket's owner-reported work facts, and both
+  // branches are eliminated from the ordinary production artifact through their
+  // compile-time gates.
+  const ownerWork =
+    DENSE_WORKLOAD_OWNER_WORK_ENABLED && input.ownerWork !== undefined
+      ? input.ownerWork
+      : null;
+  const countsWork = EVIDENCE_COUNTERS_ENABLED || ownerWork !== null;
   let evidenceCandidates = 0;
   let evidenceIntersections = 0;
 
@@ -182,7 +277,7 @@ export function resolveProjectileCollisions(
       if (enemy.kind === 'elite' && !isEliteProjectileTargetEligible(enemy)) {
         continue;
       }
-      if (EVIDENCE_COUNTERS_ENABLED) {
+      if (countsWork) {
         evidenceCandidates += 1;
       }
       const hit = overlaps(
@@ -193,7 +288,7 @@ export function resolveProjectileCollisions(
         ),
         enemyCollisionAabb(enemy),
       );
-      if (EVIDENCE_COUNTERS_ENABLED && hit) {
+      if (countsWork && hit) {
         evidenceIntersections += 1;
       }
       if (hit) {
@@ -235,17 +330,22 @@ export function resolveProjectileCollisions(
       const enemy = sortedEnemies.find((candidate) => candidate.id === hitId);
       if (enemy !== undefined) {
         destroyedEnemies.push({ id: enemy.id, type: enemy.type });
-        destroyedEnemyFlashes.push({
-          enemyId: enemy.id,
-          centerX: enemy.centerX,
-          centerY: enemy.centerY,
-          size: Math.max(enemy.width, enemy.height),
-          stepsRemaining: DESTROYED_ENEMY_FLASH_STEPS,
-        });
+        // V021-WI-05 E01: exactly one shatter record for this true
+        // destruction, created on this lethal collision step (patch §4.1).
+        destructionShatters.push(createDestructionShatter(enemy));
       }
     } else {
       flashes[hitId] = ENEMY_HIT_FLASH_STEPS;
     }
+  }
+  if (ownerWork !== null) {
+    ownerWork.observePlayerProjectileCandidates(evidenceCandidates);
+    ownerWork.observePlayerProjectileIntersections(evidenceIntersections);
+    // The enemy ids THIS pass removed through its own lethal hit — the
+    // destruction event a same-step shatter must be backed by (C01 §11).
+    ownerWork.observePlayerProjectileLethalEnemyIds(
+      destroyedEnemies.map((enemy) => enemy.id),
+    );
   }
   if (EVIDENCE_COUNTERS_ENABLED && input.evidence !== undefined) {
     input.evidence.addPlayerProjectileCandidates(evidenceCandidates);
@@ -278,7 +378,7 @@ export function resolveProjectileCollisions(
     destroyedEnemies,
     flashes,
     eliteDeflections: liveEliteDeflections,
-    destroyedEnemyFlashes,
+    destructionShatters,
   };
 }
 
@@ -389,6 +489,13 @@ export interface ContactCollisionInput {
   readonly playerDefeated: boolean;
   /** Evidence-only read-only work sink (Pass A; absent from the ordinary build). */
   readonly evidence?: CollisionEvidenceSink;
+  /**
+   * V021-PATCH-STAB-01 C01 dense owner-work sink (evidence-only, scenarios/dev
+   * gated): this pass reports the enemy candidates it actually ENUMERATED and
+   * the enemy ids its Hunter kamikaze destruction removed, each of which owns
+   * its own `ageSteps === 0` shatter record.
+   */
+  readonly ownerWork?: DenseWorkloadOwnerWorkSink;
 }
 
 export interface ContactCollisionResult {
@@ -399,7 +506,12 @@ export interface ContactCollisionResult {
   readonly aircraftDangerFlashStepsRemaining: number;
   /** Hunters destroyed through kamikaze contact (zero reward, Epic §11.2). */
   readonly destroyedByContact: readonly DestroyedEnemyInfo[];
-  readonly destroyedEnemyFlashes: readonly DestroyedEnemyFlash[];
+  /**
+   * V021-WI-05 E01: the Hunter kamikaze shatter (patch §4.1). It is created on
+   * the destruction step even while God Mode suppresses the player's contact
+   * damage, and it changes no reward, count, or state.
+   */
+  readonly destructionShatters: readonly DestructionShatter[];
 }
 
 /**
@@ -435,9 +547,15 @@ export function resolveAircraftContacts(
     ...input.pairContactCooldownSteps,
   };
   const destroyedByContact: DestroyedEnemyInfo[] = [];
-  const destroyedEnemyFlashes: DestroyedEnemyFlash[] = [];
+  const destructionShatters: DestructionShatter[] = [];
   const sorted = [...input.enemies].sort((a, b) => a.id - b.id);
-  // V02-WI-04 C03 evidence-only observed work counters (Pass A).
+  // V02-WI-04 C03 evidence-only observed work counters (Pass A) plus the
+  // V021-PATCH-STAB-01 C01 dense owner-work report (see the projectile pass).
+  const ownerWork =
+    DENSE_WORKLOAD_OWNER_WORK_ENABLED && input.ownerWork !== undefined
+      ? input.ownerWork
+      : null;
+  const countsWork = EVIDENCE_COUNTERS_ENABLED || ownerWork !== null;
   let evidenceCandidates = 0;
   let evidenceIntersections = 0;
   for (const enemy of sorted) {
@@ -449,13 +567,13 @@ export function resolveAircraftContacts(
       // Elite produces no damage, flash, cooldown, destruction, or accounting.
       continue;
     }
-    if (EVIDENCE_COUNTERS_ENABLED) {
+    if (countsWork) {
       evidenceCandidates += 1;
     }
     if (!overlaps(aircraftBox, enemyCollisionAabb(enemy))) {
       continue;
     }
-    if (EVIDENCE_COUNTERS_ENABLED) {
+    if (countsWork) {
       evidenceIntersections += 1;
     }
     if (input.godModeEnabled) {
@@ -471,13 +589,11 @@ export function resolveAircraftContacts(
         }
       }
       destroyedByContact.push({ id: enemy.id, type: enemy.type });
-      destroyedEnemyFlashes.push({
-        enemyId: enemy.id,
-        centerX: enemy.centerX,
-        centerY: enemy.centerY,
-        size: Math.max(enemy.width, enemy.height),
-        stepsRemaining: DESTROYED_ENEMY_FLASH_STEPS,
-      });
+      // V021-WI-05 E01 (patch §4.1, V021-DEC-005): the Hunter kamikaze
+      // destruction creates its one shatter even while God Mode suppresses the
+      // player's contact damage — the Hunter is truly destroyed, so the visual
+      // is owed, and it remains presentation-only.
+      destructionShatters.push(createDestructionShatter(enemy));
       continue;
     }
     // Regular contact (Epic §11.1): the same pair can apply damage at most
@@ -497,6 +613,16 @@ export function resolveAircraftContacts(
     }
     cooldowns[enemy.id] = PAIR_CONTACT_COOLDOWN_STEPS;
   }
+  if (ownerWork !== null) {
+    ownerWork.observeContactCandidates(evidenceCandidates);
+    ownerWork.observeContactIntersections(evidenceIntersections);
+    // The Hunter kamikaze destructions THIS pass produced. Each one owns an
+    // `ageSteps === 0` shatter created right here, so the bucket's shatter proof
+    // must be able to attribute it to this canonical owner.
+    ownerWork.observeContactLethalEnemyIds(
+      destroyedByContact.map((enemy) => enemy.id),
+    );
+  }
   if (EVIDENCE_COUNTERS_ENABLED && input.evidence !== undefined) {
     input.evidence.addContactCandidates(evidenceCandidates);
     input.evidence.addContactIntersections(evidenceIntersections);
@@ -511,6 +637,6 @@ export function resolveAircraftContacts(
     pairContactCooldownSteps: cooldowns,
     aircraftDangerFlashStepsRemaining: aircraftFlash,
     destroyedByContact,
-    destroyedEnemyFlashes,
+    destructionShatters,
   };
 }

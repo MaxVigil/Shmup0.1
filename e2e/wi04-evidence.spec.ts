@@ -11,10 +11,11 @@ import type { Page } from '@playwright/test';
  * The C01 evidence files were false-green: they spawned E1+E5, waited a fixed
  * 400 ms, installed the page-error observer too late, and asserted only the
  * output path. This replacement spawns ONLY the exact Mission 01 e5 Arrival
- * Group (3 Basic + 1 Ranged + 1 Hunter), parks the Aircraft at the left firing
- * lane so the evidence setup cannot prematurely destroy the group, and waits
- * for authoritative development observability to prove the exact active mix
- * AND that all five complete rendered bounds are inside the gameplay viewport
+ * Group, whose approved v0.2.1 §2.1 composition is the `BRH14` block
+ * (8 Basic + 4 Ranged + 2 fixed-side Hunter), parks the Aircraft at the left
+ * firing lane so the evidence setup cannot prematurely destroy the group, and
+ * waits for authoritative development observability to prove the exact active
+ * mix AND that all 14 complete rendered bounds are inside the gameplay viewport
  * before capturing the actual Combat canvas. Page-error and request observers
  * are installed BEFORE navigation and the workload/request/fallback facts are
  * asserted — never merely the output path. Development project only.
@@ -51,13 +52,13 @@ function isWorkloadFullyInside(
   viewport: { width: number; height: number },
 ): boolean {
   if (
-    observability.activeEnemiesByType['basic-drone'] !== 3 ||
-    observability.activeEnemiesByType['ranged-drone'] !== 1 ||
-    observability.activeEnemiesByType['hunter-drone'] !== 1
+    observability.activeEnemiesByType['basic-drone'] !== 8 ||
+    observability.activeEnemiesByType['ranged-drone'] !== 4 ||
+    observability.activeEnemiesByType['hunter-drone'] !== 2
   ) {
     return false;
   }
-  if (observability.activeEnemyBounds.length !== 5) {
+  if (observability.activeEnemyBounds.length !== 14) {
     return false;
   }
   return observability.activeEnemyBounds.every(
@@ -145,11 +146,12 @@ test('captures only the exact Mission 01 e5 group fully inside the viewport at g
     'v02-wi-04-m01-e5-viewport-review.png',
   );
 
-  // Workload facts asserted from authoritative development observability.
+  // Workload facts asserted from authoritative development observability: the
+  // exact approved v0.2.1 §2.1 `BRH14` composition of the Mission 01 e5 group.
   expect(observed.activeEnemiesByType).toEqual({
-    'basic-drone': 3,
-    'ranged-drone': 1,
-    'hunter-drone': 1,
+    'basic-drone': 8,
+    'ranged-drone': 4,
+    'hunter-drone': 2,
     'elite-drone': 0,
   });
   // All three regular roles are present at gameplay scale in the image.
@@ -198,11 +200,12 @@ test('captures the exact e5 group through the forced prepared-asset fallback pat
     'v02-wi-04-m01-e5-fallback-viewport.png',
   );
 
-  // Workload facts proven from authoritative development observability.
+  // Workload facts proven from authoritative development observability: the same
+  // exact approved v0.2.1 §2.1 `BRH14` composition, rendered from the fallback.
   expect(observed.activeEnemiesByType).toEqual({
-    'basic-drone': 3,
-    'ranged-drone': 1,
-    'hunter-drone': 1,
+    'basic-drone': 8,
+    'ranged-drone': 4,
+    'hunter-drone': 2,
     'elite-drone': 0,
   });
   // Fallback facts: every enemy image request was actually aborted, the

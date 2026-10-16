@@ -32,8 +32,10 @@ export function mapCommitMissionOutcome(
  * action:
  * - a committed Success/Evacuation authorizes the deterministic exit;
  * - a committed Defeat/Game Over returns the immutable result to the boundary,
- *   which dispatches it only when presentation is safe or holds it behind the
- *   explicit Resume-only continuation when the browser-safety latch is set;
+ *   which runs its committed `30`-step terminal fade and dispatches the Result
+ *   only after that fade reaches zero opacity — and only when presentation is
+ *   safe, otherwise holding it behind the explicit Resume-only continuation when
+ *   the browser-safety latch is set;
  * - `inert` opens Save Conflict (Reload is the only continuation);
  * - `failed`/`rejected` open Save Error (Retry Save is the only continuation).
  *
@@ -148,9 +150,10 @@ export function ownsTerminalSnapshot(
  * One boundary action for a resolved terminal commitment (V02-WI-05 C03/C04).
  * This is the exact decision the Combat presentation entry applies:
  * - committed Success/Evacuation authorizes the deterministic exit;
- * - a committed Defeat/Game Over is presented immediately only when no
- *   browser-safety latch is set; under the latch it is HELD frozen behind the
- *   explicit Resume-only continuation and is never re-written/retried;
+ * - a committed Defeat/Game Over runs its committed `30`-step fade and is
+ *   presented only after that fade completes, and only when no browser-safety
+ *   latch is set; under the latch it is HELD frozen behind the explicit
+ *   Resume-only continuation and is never re-written/retried;
  * - failed/rejected and inert outcomes open Save Error / Save Conflict;
  * - a completion that no longer owns the exact snapshot is stale and inert.
  */
@@ -191,8 +194,14 @@ export function planCommittedTerminal(
   return disposition;
 }
 
-/** Pure eligibility gate for presenting one held committed Defeat/Game Over
- *  after an explicit Resume (running with no blocking Overlay, exact snapshot). */
+/**
+ * Pure eligibility gate for releasing one held or fade-pending committed
+ * Defeat/Game Over: the exact originating snapshot must still be owned and the
+ * lifecycle must be running with no blocking Overlay. A browser-safety latch or
+ * an ordinary Pause therefore keeps the immutable Result/Game Over held until an
+ * explicit Resume, and V021-WI-04-B additionally requires the committed `30`
+ * step fade to have reached zero opacity before this gate may release it.
+ */
 export function mayPresentHeldDefeat(
   session: SessionState | null,
   identity: TerminalSnapshotIdentity,

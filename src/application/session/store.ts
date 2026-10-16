@@ -349,6 +349,7 @@ export function sessionReducer(
     case 'combat-lifecycle/cancel-evacuation-confirmation':
     case 'combat-lifecycle/confirm-evacuation':
     case 'combat-terminal/pending':
+    case 'combat-terminal/fade-pending':
     case 'combat-terminal/save-error':
     case 'combat-terminal/save-conflict':
     case 'combat-terminal/recover':

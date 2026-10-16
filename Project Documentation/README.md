@@ -38,6 +38,7 @@ These documents define the shipped v0.1 behaviour and its accepted coverage. Use
 
 ## Post-MVP scope documents
 
+- `SHMUP_V0.2.1_COMBAT_PATCH_SPECIFICATION.md` — v0.2.1 Combat intensity/readability delta, independently reviewed and accepted by the Product Owner as locally complete on 2026-10-17 with V021-DEC-007. `verification/v021-final-local-integration-review.md` maps the technical evidence; `verification/v021-local-product-acceptance.md` records the exact accepted candidate and limits. Physical-device validation and external-release readiness remain separate; no worst-case/combined-Elite performance or full-mission certification is claimed.
 - `SHMUP_V0.2_TACTICAL_COMBAT_FOUNDATION_SPECIFICATION.md` — approved canonical product contract for the v0.2 Tactical Combat Foundation Epic; ready only for bounded Work Item handoffs.
 - `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` — approved dependency order, ownership, acceptance boundaries, and DeepSeek handoff gates for v0.2 Work Items.
 - `SHMUP_V0.2_RECOVERY_AND_READINESS_AUDIT.md` — recovery evidence, freshness audit, corrected blockers, and implementation-state report.

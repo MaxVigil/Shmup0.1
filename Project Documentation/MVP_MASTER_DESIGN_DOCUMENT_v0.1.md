@@ -593,3 +593,29 @@ The readiness and accounting above remain the historical accepted v0.1 baseline.
 - five approved optimized enemy PNGs extend the bounded Boot preload manifest from twelve to seventeen entries. They use the existing non-critical `5 s`, one-request, stable-fallback, and inert-late-completion rules; Combat consumes the prepared result without a second loader. The complete runtime set is `1,800,725 bytes` and remains bounded by the unchanged `2 MiB` total budget.
 
 Unaffected Master requirements remain authoritative. The v0.2 specification, its traceability entry, and `SHMUP_V0.2_IMPLEMENTATION_SLICES.md` must be used together; no single document authorizes an unbounded Epic implementation.
+
+## 12. Approved v0.2.1 patch boundary
+
+`SHMUP_V0.2.1_COMBAT_PATCH_SPECIFICATION.md` owns only the later Product
+Owner-approved Combat-density, regular-enemy geometry, Hunter movement and
+orientation, later Elite attack, projectile-silhouette, and
+committed-terminal-fade deltas. The
+accepted v0.2.0 product contract and evidence remain historical; unaffected
+v0.2 Master overrides in §11 continue to apply. In particular, the patch does
+not change mission ownership, persisted campaign and Settings schema, exact-once
+result/economy commitment, lazy Combat loading, or external-use conditions.
+
+The v0.2.1 Defeat presentation gains a post-commit fade before the existing
+result/Game Over destination; Defeat priority and durable Repair/Game Over
+consequences still occur at the authoritative terminal boundary. A pending or
+failed durable write must not trigger a visual exit. The first Mission 01
+small-group density pilot was rejected; its unaccepted `1.5×` regular scale
+was retained. The second 398-enemy block preview was positively received but
+superseded by the exact 348/480-enemy Mission 01/02 local candidates in the
+patch specification. Mission 03's exact 552-regular-plus-Elite staging and
+Elite cadence were subsequently implemented and accepted in WI-02/C01. All
+bounded Work Items and the approved local integration route have passed their
+independent reviews; the Product Owner accepted v0.2.1 as locally complete on
+2026-10-17 with V021-DEC-007. See `verification/v021-local-product-acceptance.md`
+for the accepted candidate and retained security, physical-device and external
+release conditions. This local verdict does not certify external release.

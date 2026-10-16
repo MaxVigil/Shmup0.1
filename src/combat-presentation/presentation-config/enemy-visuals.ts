@@ -66,6 +66,11 @@ export interface EnemyVisualScale {
    * configured Elite value is the approved mid-point `2.45`). The footprint
    * is an area ratio, so the complete rendered area of each enemy equals
    * `footprintAreaRatio × (0.04 × shortSide)²`.
+   *
+   * v0.2.1 patch §3 keeps this field an **area** ratio and applies its first
+   * approved candidate (Basic/Ranged/Hunter complete width and height `1.5×`,
+   * area `2.25×`) in the single content geometry owner, so the regular-enemy
+   * ratios are `2.25` / `2.7` / `1.8` and the Elite stays `2.45`.
    */
   readonly footprintAreaRatio: number;
   /**
@@ -177,7 +182,8 @@ export const ENEMY_VISUAL_MAPPINGS: readonly EnemyVisualMapping[] = [
   {
     kind: 'ranged-drone',
     assetId: 'enemy-ranged-drone',
-    // §16.2: heavier/wider gun platform with two weapon housings, 1.2× Basic.
+    // §16.2: heavier/wider gun platform with two weapon housings, 1.2× Basic
+    // area in v0.2 (v0.2.1 §3 candidate: 1.5× width/height = 2.7× area).
     scale: regularScale('ranged-drone'),
     fallback: {
       shapes: [
@@ -215,7 +221,8 @@ export const ENEMY_VISUAL_MAPPINGS: readonly EnemyVisualMapping[] = [
   {
     kind: 'hunter-drone',
     assetId: 'enemy-hunter-drone',
-    // §16.2: narrow, elongated, pointed interceptor, 0.8× Basic; must read as
+    // §16.2: narrow, elongated, pointed interceptor, 0.8× Basic area in v0.2
+    // (v0.2.1 §3 candidate: 1.5× width/height = 1.8× area); must read as
     // an aircraft, not a missile, so the fallback adds small swept wings.
     scale: regularScale('hunter-drone'),
     fallback: {

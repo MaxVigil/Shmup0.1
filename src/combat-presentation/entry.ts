@@ -8,6 +8,7 @@ import {
   EVIDENCE_SCENARIOS_ENABLED,
   isDebugCommandEligible,
   synchronizeSharedModeAfterToggle,
+  terminalFadeComplete,
   type CombatDebugCommand,
   type CombatEvidenceRecord,
   type CombatEvidenceWindow,
@@ -379,6 +380,11 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
     let terminalDispatched = false;
     let pendingExitResult: MissionResult | null = null;
     let heldDefeatResult: MissionResult | null = null;
+    // V021-WI-04-B: the immutable committed Defeat/Game Over payload whose
+    // `30`-step terminal fade is running. It is presented exactly once, AFTER
+    // the fade reaches zero opacity (and only while the lifecycle is running
+    // with no blocking Overlay).
+    let pendingDefeatResult: MissionResult | null = null;
     let exitResultDispatched = false;
     const retryController = createTerminalRetryController();
     const frozenPayload = createFrozenTerminalPayload();
@@ -420,11 +426,21 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
         return;
       }
       if (plan.kind === 'present') {
-        // No browser-safety latch: the committed Defeat/Game Over is presented
-        // exactly once through the immutable session result.
+        // V021-WI-04-B (patch §4, V021-AC-005, V021-DEC-001): no browser-safety
+        // latch is set, so the exact-attempt committed Defeat/Game Over
+        // authorizes its deterministic `30`-step (`0.5 s`) terminal fade right
+        // now. The immutable Result/Game Over is deliberately NOT presented at
+        // this instant: it is presented exactly once, after the fade reaches
+        // zero opacity, through the fade-completion boundary below — the same
+        // commit-then-exit ordering the committed Success/Evacuation exit uses.
+        // The lifecycle records the pending committed fade so a later
+        // focus/hidden safety event freezes the remaining steps behind the
+        // Resume-only terminal-exit Pause instead of an ordinary Pause.
+        pendingDefeatResult = plan.result;
+        runtime.authorizeCommittedExit();
         input.store.dispatch({
-          type: 'mission/result',
-          result: plan.result,
+          type: 'combat-terminal/fade-pending',
+          missionInstanceOrdinal: input.snapshot.missionInstanceOrdinal,
         });
         return;
       }
@@ -519,16 +535,45 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
         return;
       }
       // Only an explicit Resume that left the terminal-exit Pause into a running
-      // state with no Overlay may present the held result; restoring
+      // state with no Overlay may release the held result; restoring
       // focus/visibility never does (the lifecycle stays paused). The session
       // must still own the exact originating mission + durable attempt.
       if (!mayPresentHeldDefeat(input.store.getState(), input.snapshot)) {
         return;
       }
-      // Exactly-once: cleared before dispatch, and the session reducer ignores
-      // any duplicate once the mission resolves.
+      // V021-WI-04-B (patch §4, V021-AC-005, V021-DEC-001): the latch froze the
+      // whole fade, so this explicit Resume STARTS the committed Defeat/Game
+      // Over fade from its first step — never restarts a partially run one, and
+      // never rewrites the frozen payload. The Result/Game Over is still not
+      // presented here: the fade-completion boundary below presents it exactly
+      // once, after the remaining `30` running steps reach zero opacity.
       const result = heldDefeatResult;
       heldDefeatResult = null;
+      pendingDefeatResult = result;
+      runtime.authorizeCommittedExit();
+      input.store.dispatch({
+        type: 'combat-terminal/fade-pending',
+        missionInstanceOrdinal: input.snapshot.missionInstanceOrdinal,
+      });
+    };
+    const dispatchPendingDefeatWhenComplete = (
+      state: CombatSimulationState,
+    ): void => {
+      if (pendingDefeatResult === null || !terminalFadeComplete(state)) {
+        return;
+      }
+      // The fade is complete; the immutable Result/Game Over may be presented —
+      // but only while the exact originating snapshot is still owned and the
+      // lifecycle is running with no blocking Overlay (a safety latch or an
+      // ordinary Pause holds the remaining presentation until explicit Resume,
+      // and the frozen fade is never re-run or re-armed).
+      if (!mayPresentHeldDefeat(input.store.getState(), input.snapshot)) {
+        return;
+      }
+      // Exactly-once: cleared before dispatch, and the session reducer ignores
+      // any duplicate once the mission resolves.
+      const result = pendingDefeatResult;
+      pendingDefeatResult = null;
       input.store.dispatch({ type: 'mission/result', result });
     };
     const advanceFrame = (frameDeltaSeconds: number): CombatSimulationState => {
@@ -536,6 +581,7 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
       relayTerminalIfPresent(state);
       dispatchExitWhenComplete(state);
       dispatchHeldDefeatAfterResume();
+      dispatchPendingDefeatWhenComplete(state);
       return state;
     };
 
@@ -711,18 +757,16 @@ export function createCombatSession(input: CombatSessionInput): CombatSession {
         // repeated or racing commands after the first terminal are strict no-ops.
         const after = runtime.getState();
         relayTerminalIfPresent(after);
-        // V02-WI-04 C01 / V02-WI-07 D01: forced Success and forced Evacuation
-        // run the same committed 0.5 s centre phase and 60% VH/s upward exit as
-        // their natural outcomes. The Debug Overlay holds the runtime paused, so
-        // it is closed through the authoritative lifecycle (unpausing when Debug
-        // opened from running Combat) before the committed exit advances; the
-        // exit itself still waits for the campaign transaction to commit through
-        // the `authorizeCommittedExit` seam. Forced Defeat needs no close: its
-        // committed result is presented through the unchanged session path.
-        if (
-          after.terminalResult?.kind === 'success' ||
-          after.terminalResult?.kind === 'evacuated'
-        ) {
+        // V021-WI-04-B (patch §4, V021-AC-005, V021-DEC-001): every forced
+        // terminal — Success, Evacuation, AND Defeat — now runs its committed
+        // terminal sequence before the Result/Game Over is presented. The Debug
+        // Overlay holds the runtime paused, so it is closed through the
+        // authoritative lifecycle (unpausing when Debug opened from running
+        // Combat) before the committed `30`-step terminal fade / centre-and-up
+        // exit can advance; the continuation itself still waits for the campaign
+        // transaction to commit through the `authorizeCommittedExit` seam, and
+        // the Result/Game Over is dispatched only after the fade/exit completes.
+        if (after.terminalResult !== null) {
           input.store.dispatch({
             type: 'combat-lifecycle/close-debug',
             missionInstanceOrdinal: input.snapshot.missionInstanceOrdinal,

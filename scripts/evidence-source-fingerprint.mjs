@@ -62,6 +62,7 @@ export function collectSourceInputFiles(root = ROOT) {
     'playwright.config.ts',
     'playwright.evidence.config.ts',
     'playwright.elite-pass-b.config.ts',
+    'playwright.patch-dense.config.ts',
     'playwright.legacy.config.ts',
     '.gitignore',
     '.agent-handoff/control.json',

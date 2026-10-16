@@ -20,6 +20,7 @@ const PAUSED: CombatLifecycleState = {
   debugRestoreOrigin: 'none',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  terminalFadePending: false,
   evacuationConfirmationOrigin: 'none',
   evacuationCommitted: false,
 };
@@ -29,6 +30,7 @@ const SETTINGS: CombatLifecycleState = {
   debugRestoreOrigin: 'none',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  terminalFadePending: false,
   evacuationConfirmationOrigin: 'none',
   evacuationCommitted: false,
 };
@@ -38,6 +40,7 @@ const DEBUG_FROM_RUNNING: CombatLifecycleState = {
   debugRestoreOrigin: 'running',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  terminalFadePending: false,
   evacuationConfirmationOrigin: 'none',
   evacuationCommitted: false,
 };
@@ -47,6 +50,7 @@ const DEBUG_FROM_PAUSE: CombatLifecycleState = {
   debugRestoreOrigin: 'pause',
   browserSafetyLatched: false,
   terminalSavePending: false,
+  terminalFadePending: false,
   evacuationConfirmationOrigin: 'none',
   evacuationCommitted: false,
 };
@@ -145,6 +149,7 @@ describe('S13 lifecycle: Settings Overlay', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -154,6 +159,7 @@ describe('S13 lifecycle: Settings Overlay', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -190,6 +196,7 @@ describe('S13 lifecycle: Debug Overlay', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -220,6 +227,7 @@ describe('S13 lifecycle: browser safety events', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -246,6 +254,7 @@ describe('V02-WI-04 C02: terminal-persistence recovery states', () => {
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -255,6 +264,7 @@ describe('V02-WI-04 C02: terminal-persistence recovery states', () => {
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -342,6 +352,7 @@ describe('V02-WI-04 C03: hidden-tab/focus safety during terminal recovery', () =
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -355,6 +366,7 @@ describe('V02-WI-04 C03: hidden-tab/focus safety during terminal recovery', () =
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -407,6 +419,7 @@ describe('V02-WI-04 C03: hidden-tab/focus safety during terminal recovery', () =
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     };
@@ -429,6 +442,7 @@ describe('V02-WI-05 C03: Defeat/Game Over committed under the initial-write latc
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -438,6 +452,7 @@ describe('V02-WI-05 C03: Defeat/Game Over committed under the initial-write latc
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -447,6 +462,7 @@ describe('V02-WI-05 C03: Defeat/Game Over committed under the initial-write latc
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -456,6 +472,7 @@ describe('V02-WI-05 C03: Defeat/Game Over committed under the initial-write latc
     debugRestoreOrigin: 'running',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -510,6 +527,7 @@ describe('V02-WI-05 C04: terminal-pending write keeps browser safety terminal-aw
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: true,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -519,6 +537,7 @@ describe('V02-WI-05 C04: terminal-pending write keeps browser safety terminal-aw
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: true,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -580,6 +599,7 @@ describe('V02-WI-05 C04: terminal-pending write keeps browser safety terminal-aw
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -601,6 +621,7 @@ describe('V02-WI-05 C04: terminal-pending write keeps browser safety terminal-aw
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
       terminalSavePending: true,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     };
@@ -623,6 +644,7 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: true,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -632,6 +654,7 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
     debugRestoreOrigin: 'none',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -647,6 +670,7 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -673,6 +697,7 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
       debugRestoreOrigin: 'none',
       browserSafetyLatched: true,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -710,6 +735,7 @@ describe('V02-WI-05 C05: the manual-resume latch survives terminal recovery tran
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -724,6 +750,7 @@ describe('V02-DEC-031: Mission Start Recovery Error lifecycle state', () => {
     debugRestoreOrigin: 'none',
     browserSafetyLatched: false,
     terminalSavePending: false,
+    terminalFadePending: false,
     evacuationConfirmationOrigin: 'none',
     evacuationCommitted: false,
   };
@@ -1012,6 +1039,101 @@ describe('V02-WI-05 E01: Evacuation Confirmation lifecycle (Epic §13.4, §15.5,
   });
 });
 
+describe('V021-WI-04-B: the committed Defeat/Game Over fade keeps the lifecycle terminal-aware', () => {
+  const FADE_PENDING_RUNNING: CombatLifecycleState = {
+    running: true,
+    overlay: 'none',
+    debugRestoreOrigin: 'none',
+    browserSafetyLatched: false,
+    terminalSavePending: false,
+    terminalFadePending: true,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
+  };
+  const FADE_PENDING_PAUSE: CombatLifecycleState = {
+    running: false,
+    overlay: 'pause',
+    debugRestoreOrigin: 'none',
+    browserSafetyLatched: false,
+    terminalSavePending: false,
+    terminalFadePending: true,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
+  };
+  const FROZEN_FADE_PAUSE: CombatLifecycleState = {
+    running: false,
+    overlay: 'terminal-exit-pause',
+    debugRestoreOrigin: 'none',
+    browserSafetyLatched: true,
+    terminalSavePending: false,
+    terminalFadePending: true,
+    evacuationConfirmationOrigin: 'none',
+    evacuationCommitted: false,
+  };
+
+  it('the fade-pending action marks the committed fade once, clears the pending-write flag, and is idempotent', () => {
+    // The write has resolved by definition when the fade is authorized, so the
+    // pending-write flag is cleared by the same transition.
+    const stillWriting = reduce(RUNNING, 'combat-terminal/pending');
+    expect(stillWriting.terminalSavePending).toBe(true);
+    const marked = reduce(stillWriting, 'combat-terminal/fade-pending');
+    expect(marked).toEqual(FADE_PENDING_RUNNING);
+    // Repeated/racing relays never re-arm or restart the committed fade.
+    expect(reduce(marked, 'combat-terminal/fade-pending')).toBe(marked);
+    expect(reduce(FADE_PENDING_RUNNING, 'combat-terminal/fade-pending')).toBe(
+      FADE_PENDING_RUNNING,
+    );
+  });
+
+  it('a focus-loss/hidden-tab event during the running fade freezes it behind the Resume-only terminal-exit Pause', () => {
+    const frozen = reduce(
+      FADE_PENDING_RUNNING,
+      'combat-lifecycle/browser-safety-event',
+    );
+    expect(frozen).toEqual(FROZEN_FADE_PAUSE);
+    // Repeated safety events stay idempotent: returning focus is not a
+    // lifecycle action and never resumes the remaining fade steps.
+    expect(reduce(frozen, 'combat-lifecycle/browser-safety-event')).toBe(
+      frozen,
+    );
+    for (const action of [
+      'combat-lifecycle/open-pause',
+      'combat-lifecycle/open-settings',
+      'combat-lifecycle/open-debug',
+      'combat-terminal/save-error',
+      'combat-terminal/save-conflict',
+      'combat-terminal/recover',
+      'combat-terminal/fade-pending',
+    ] as const) {
+      expect(reduce(frozen, action)).toBe(frozen);
+    }
+    // Only the explicit Resume continues the frozen fade to its end.
+    expect(reduce(frozen, 'combat-lifecycle/resume')).toEqual(RUNNING);
+  });
+
+  it('a safety event during a paused committed fade latches manual Resume and keeps the fade armed', () => {
+    const latched = reduce(
+      FADE_PENDING_PAUSE,
+      'combat-lifecycle/browser-safety-event',
+    );
+    expect(latched).toEqual({
+      ...FADE_PENDING_PAUSE,
+      browserSafetyLatched: true,
+    });
+    // The frozen fade is never re-armed, and the explicit Resume is the only
+    // continuation: it clears the latch and keeps the armed flag so the
+    // remaining steps may finish.
+    expect(reduce(latched, 'combat-lifecycle/resume')).toEqual(
+      FADE_PENDING_RUNNING,
+    );
+  });
+
+  it('the neutral lifecycle constants carry an unarmed committed-fade flag', () => {
+    expect(RUNNING.terminalFadePending).toBe(false);
+    expect(IDLE.terminalFadePending).toBe(false);
+  });
+});
+
 describe('V02-WI-05 E03 C01: application-owned Evacuation availability selector (Epic §13.4, §15.5)', () => {
   const withLifecycle = (
     base: CombatLifecycleState,
@@ -1034,9 +1156,14 @@ describe('V02-WI-05 E03 C01: application-owned Evacuation availability selector 
     overlay: 'terminal-exit-pause',
     browserSafetyLatched: true,
     terminalSavePending: false,
+    terminalFadePending: false,
   });
   const TERMINAL_PENDING_RUNNING = reduce(RUNNING, 'combat-terminal/pending');
   const TERMINAL_PENDING_PAUSE = reduce(PAUSED, 'combat-terminal/pending');
+  // V021-WI-04-B: an authorized committed Defeat/Game Over fade is just as
+  // terminal-aware as the pending write it replaced.
+  const TERMINAL_FADE_RUNNING = reduce(RUNNING, 'combat-terminal/fade-pending');
+  const TERMINAL_FADE_PAUSE = reduce(PAUSED, 'combat-terminal/fade-pending');
   const COMMITTED_RUNNING = withLifecycle(RUNNING, {
     evacuationCommitted: true,
   });
@@ -1056,7 +1183,13 @@ describe('V02-WI-05 E03 C01: application-owned Evacuation availability selector 
   });
 
   it('hides the affordance while an atomic terminal write is pending', () => {
-    for (const state of [TERMINAL_PENDING_RUNNING, TERMINAL_PENDING_PAUSE]) {
+    for (const state of [
+      TERMINAL_PENDING_RUNNING,
+      TERMINAL_PENDING_PAUSE,
+      // A committed-but-fading Defeat/Game Over is equally unavailable.
+      TERMINAL_FADE_RUNNING,
+      TERMINAL_FADE_PAUSE,
+    ]) {
       expect(evacuationAvailability(state)).toEqual({
         visible: false,
         enabled: false,

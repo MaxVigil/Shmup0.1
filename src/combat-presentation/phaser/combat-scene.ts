@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import {
   buildEvacuationCountdownReadModel,
-  evacuationEnemyOpacity,
+  terminalFadeOpacity,
   routeKeyInput,
   shouldForwardPointerMove,
   type CombatEnemy,
@@ -29,6 +29,11 @@ import {
   type EnemyVisualResolution,
   type FallbackPolygon,
 } from '../presentation-config/enemy-visuals';
+import {
+  destructionShatterGeometry,
+  type DestructionShatterGeometry,
+  type ShatterOutline,
+} from '../presentation-config/destruction-shatter';
 
 export interface CombatSceneContext {
   readonly geometry: CombatGeometry;
@@ -77,10 +82,12 @@ export class CombatScene extends Phaser.Scene {
   private simState: CombatSimulationState;
   /** Read-only stable-ID visual map for player projectiles (S09): Phaser
    *  reflects the authoritative snapshot each frame and never owns projectile
-   *  lifetime, firing cadence, damage, position, or removal. */
+   *  lifetime, firing cadence, damage, position, or removal. V021-WI-04-A
+   *  (patch §4, V021-AC-004) draws the approved filled teardrop silhouette for
+   *  both player weapons. */
   private readonly projectileVisuals = new Map<
     number,
-    Phaser.GameObjects.Rectangle
+    Phaser.GameObjects.Graphics
   >();
   /** Read-only stable-ID visual map for active Basic Drones (S10): Phaser
    *  reflects the authoritative snapshot each frame and never owns enemy
@@ -113,17 +120,28 @@ export class CombatScene extends Phaser.Scene {
     EnemyVisualKind,
     HTMLImageElement
   >();
-  /** Read-only stable-ID visual map for enemy (Ranged) projectiles (v0.2 §9.2). */
+  /**
+   * Read-only stable-ID visual map for the non-Core enemy projectiles: the
+   * Ranged projectile (v0.2 §9.2) and the Elite armoured cannon (Epic §9.4).
+   * V021-WI-04-A (patch §4, V021-DEC-002, V021-AC-004) draws each as the same
+   * approved filled circle centred on its authoritative centre, with a diameter
+   * equal to the longer side of its unchanged authoritative AABB.
+   */
   private readonly enemyProjectileVisuals = new Map<
     number,
-    Phaser.GameObjects.Rectangle
+    Phaser.GameObjects.Graphics
   >();
-  /** Read-only stable-ID visual map for hitbox-free destroyed-enemy flashes
-   *  (S11): white stationary squares that are removed when the 100 ms feedback
-   *  expires. They never participate in gameplay or collision. */
-  private readonly destroyedEnemyFlashVisuals = new Map<
+  /**
+   * V021-WI-05 (patch §4.1, V021-DEC-005, V021-AC-009) read-only stable-ID
+   * visual map for the hitbox-free destruction shatters, keyed by the destroyed
+   * enemy's stable id. The authoritative record owns the role variant, the
+   * complete visual dimension and the visual age; this adapter only paints the
+   * approved procedural burst and removes the surface at expiry or at terminal
+   * zero opacity (never re-creating it afterwards).
+   */
+  private readonly destructionShatterVisuals = new Map<
     number,
-    Phaser.GameObjects.Rectangle
+    Phaser.GameObjects.Graphics
   >();
   /** True while the aircraft danger flash is active (drives tint/redraw). */
   private aircraftFlashActive = false;
@@ -169,7 +187,7 @@ export class CombatScene extends Phaser.Scene {
       // scene-owned and destroyed with it; the maps are cleared so no stale
       // id → destroyed-object references survive (S09/S10/S11 cleanup).
       this.enemyVisuals.clear();
-      this.destroyedEnemyFlashVisuals.clear();
+      this.destructionShatterVisuals.clear();
       this.projectileVisuals.clear();
       this.enemyProjectileVisuals.clear();
       this.eliteCoreVisuals.clear();
@@ -209,7 +227,7 @@ export class CombatScene extends Phaser.Scene {
       this.simState.aircraft.centerY,
     );
     this.syncEnemyVisuals();
-    this.syncDestroyedEnemyFlashes();
+    this.syncDestructionShatters();
     this.syncProjectileVisuals();
     this.syncEnemyProjectileVisuals();
     this.syncEliteDeflectionVisuals();
@@ -392,7 +410,7 @@ export class CombatScene extends Phaser.Scene {
     this.simState = this.context.getSimulationState();
     this.layoutAircraft();
     this.syncEnemyVisuals();
-    this.syncDestroyedEnemyFlashes();
+    this.syncDestructionShatters();
     this.syncProjectileVisuals();
     this.applyAircraftFlash();
   }
@@ -427,13 +445,6 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /**
-   * Reflects the authoritative projectile snapshot into the stable-ID visual
-   * map (S09): a rectangle is created for each new projectile id, existing
-   * visuals are repositioned and resized, and visuals whose id left the
-   * simulation are destroyed. Cadence, lifetime, damage, position, and removal
-   * all remain application-owned.
-   */
-  /**
    * Reflects the authoritative enemy snapshot into the stable-ID visual map
    * (V02-WI-04): each role renders its prepared image (once its texture is
    * registered) or its approved procedural fallback geometry, both sized to
@@ -447,12 +458,13 @@ export class CombatScene extends Phaser.Scene {
       return;
     }
     const { enemies, activeEnemyFlashStepsRemaining } = this.simState;
-    // V02-WI-05 E02: one simulation-owned scalar drives every active enemy's
-    // opacity (full during normal Combat and the frozen pre-commit Evacuation
-    // terminal; `remaining / 30` across the exact 30 committed centre steps).
-    // A fully faded enemy surface is removed/inert (never re-created), exactly
-    // as Epic §13.4 requires after the fade completes.
-    const opacity = evacuationEnemyOpacity(this.simState);
+    // V02-WI-05 E02 / V021-WI-04-B: one simulation-owned scalar drives every
+    // active enemy's opacity — full during normal Combat and while the terminal
+    // write is uncommitted, then the exact committed terminal progression
+    // (`15` steps for Success, `30` for Evacuated and Defeat/Game Over). A fully
+    // faded enemy surface is removed/inert (never re-created), exactly as
+    // Epic §13.4 and V021-AC-005 require after the fade completes.
+    const opacity = terminalFadeOpacity(this.simState);
     const seen = new Set<number>();
     for (const enemy of enemies) {
       if (opacity <= 0) {
@@ -607,7 +619,7 @@ export class CombatScene extends Phaser.Scene {
       this.enemyVisuals.set(enemy.id, visual);
     }
     visual.setPosition(enemy.centerX, enemy.centerY);
-    visual.setDisplaySize(enemy.width, enemy.height);
+    applyImageEnemyVisualGeometry(visual, enemy);
     visual.setAlpha(opacity);
     if (flashing) {
       // V02-WI-07 D04-C02: a damaging-hit flash must be *visible*. Phaser 4's
@@ -627,12 +639,12 @@ export class CombatScene extends Phaser.Scene {
         visual.setTint(hexToNumber(this.geometry.enemyFlashColor));
       } else {
         visual.setTexture(flashKey);
-        visual.setDisplaySize(enemy.width, enemy.height);
+        applyImageEnemyVisualGeometry(visual, enemy);
       }
     } else {
       if (visual.texture.key !== key) {
         visual.setTexture(key);
-        visual.setDisplaySize(enemy.width, enemy.height);
+        applyImageEnemyVisualGeometry(visual, enemy);
       }
       visual.setTintMode(Phaser.TintModes.MULTIPLY);
       visual.clearTint();
@@ -735,9 +747,16 @@ export class CombatScene extends Phaser.Scene {
   ): void {
     graphics.clear();
     graphics.setPosition(enemy.centerX, enemy.centerY);
+    // V021-WI-03 (patch §3): the fallback geometry is authored nose-down at `+y`
+    // in normalized coordinates of the CONFIGURED complete rendered bounds, so a
+    // Hunter is scaled by those bounds and rotated by its authoritative heading
+    // about the configured centre — the same single heading the prepared image
+    // uses, never a second presentation-owned direction.
+    const size = enemyVisualSize(enemy);
+    graphics.setRotation(enemyVisualRotationRadians(enemy));
     for (const shape of shapes) {
       const points: Phaser.Math.Vector2[] = shape.points.map(
-        ([x, y]) => new Phaser.Math.Vector2(x * enemy.width, y * enemy.height),
+        ([x, y]) => new Phaser.Math.Vector2(x * size.width, y * size.height),
       );
       graphics.fillStyle(
         hexToNumber(
@@ -752,40 +771,98 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /**
-   * Reflects the hitbox-free destroyed-enemy flash state (S11): stationary
-   * white squares created on destruction and removed when the 100 ms feedback
-   * expires. These visuals never participate in gameplay or collision.
+   * Reflects the authoritative hitbox-free destruction shatters (patch §4.1,
+   * V021-DEC-005, V021-AC-009): the approved procedural burst is painted from
+   * the record's role variant, complete visual dimension and visual age, so one
+   * destroyed enemy owns exactly ONE surface, created on its destruction step
+   * and removed by the record's own expiry or by committed terminal zero opacity
+   * — never re-created afterwards, including across resize.
+   *
+   * A committed terminal multiplies the effect opacity: the surface carries the
+   * simulation-owned terminal scalar exactly as the other named fade surfaces
+   * do, while each painted fill carries the effect's own monotonically faded
+   * alpha, so the rendered opacity is the product of the two authoritative
+   * values and the renderer still owns no timer of its own.
    */
-  private syncDestroyedEnemyFlashes(): void {
+  private syncDestructionShatters(): void {
     if (this.isShuttingDown) {
       return;
     }
-    const { destroyedEnemyFlashes } = this.simState;
+    const { destructionShatters } = this.simState;
+    const opacity = terminalFadeOpacity(this.simState);
     const seen = new Set<number>();
-    for (const flash of destroyedEnemyFlashes) {
-      seen.add(flash.enemyId);
-      let visual = this.destroyedEnemyFlashVisuals.get(flash.enemyId);
-      if (visual === undefined) {
-        visual = this.add
-          .rectangle(
-            flash.centerX,
-            flash.centerY,
-            flash.size,
-            flash.size,
-            hexToNumber(this.geometry.enemyFlashColor),
-          )
-          .setDepth(COMBAT_RENDER_DEPTH.enemy);
-        this.destroyedEnemyFlashVisuals.set(flash.enemyId, visual);
-      } else {
-        visual.setPosition(flash.centerX, flash.centerY);
-        visual.setSize(flash.size, flash.size);
+    for (const shatter of destructionShatters) {
+      if (opacity <= 0) {
+        continue;
       }
+      seen.add(shatter.enemyId);
+      let visual = this.destructionShatterVisuals.get(shatter.enemyId);
+      if (visual === undefined) {
+        visual = this.add.graphics();
+        visual.setDepth(COMBAT_RENDER_DEPTH.enemy);
+        this.destructionShatterVisuals.set(shatter.enemyId, visual);
+      }
+      this.drawDestructionShatter(
+        visual,
+        shatter.centerX,
+        shatter.centerY,
+        destructionShatterGeometry(shatter),
+      );
+      visual.setAlpha(opacity);
     }
-    for (const [id, visual] of this.destroyedEnemyFlashVisuals) {
+    for (const [id, visual] of this.destructionShatterVisuals) {
       if (!seen.has(id)) {
         visual.destroy();
-        this.destroyedEnemyFlashVisuals.delete(id);
+        this.destructionShatterVisuals.delete(id);
       }
+    }
+  }
+
+  /**
+   * Paints one approved destruction burst: the expanding broken ring(s), the
+   * tapered `danger` fragments with their `text-primary` highlights, and the
+   * small four-point `text-primary` glint of the effect's first two steps. The
+   * graphics object is positioned on the authoritative destruction centre and
+   * only local outlines are redrawn, so this adapter never duplicates the
+   * authoritative centre, variant, dimension, or age. Only solid fills are
+   * painted: no rectangular white block, outline, glow, trail, particle, camera
+   * effect, or extra asset request.
+   */
+  private drawDestructionShatter(
+    graphics: Phaser.GameObjects.Graphics,
+    centerX: number,
+    centerY: number,
+    geometry: DestructionShatterGeometry,
+  ): void {
+    graphics.setPosition(centerX, centerY);
+    graphics.clear();
+    for (const ring of geometry.rings) {
+      graphics.fillStyle(
+        hexToNumber(this.geometry.shatterFragmentColor),
+        ring.alpha,
+      );
+      for (const segment of ring.segments) {
+        graphics.fillPoints(shatterPoints(segment), true);
+      }
+    }
+    for (const fragment of geometry.fragments) {
+      graphics.fillStyle(
+        hexToNumber(this.geometry.shatterFragmentColor),
+        fragment.alpha,
+      );
+      graphics.fillPoints(shatterPoints(fragment.outline), true);
+      graphics.fillStyle(
+        hexToNumber(this.geometry.shatterHighlightColor),
+        fragment.alpha,
+      );
+      graphics.fillPoints(shatterPoints(fragment.highlight), true);
+    }
+    if (geometry.glint !== null) {
+      graphics.fillStyle(
+        hexToNumber(this.geometry.shatterHighlightColor),
+        geometry.glintAlpha,
+      );
+      graphics.fillPoints(shatterPoints(geometry.glint), true);
     }
   }
 
@@ -817,29 +894,49 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Reflects the authoritative player-projectile snapshot into the stable-ID
+   * visual map (S09): one Graphics surface is created for each new projectile
+   * id, existing surfaces are repositioned and redrawn to the authoritative
+   * AABB, and surfaces whose id left the simulation are destroyed. V021-WI-04-A
+   * (patch §4, V021-AC-004) replaces the old filled rectangle with the approved
+   * filled teardrop silhouette for both player weapons; the simulation keeps
+   * owning width, height, cadence, lifetime, damage, position, order, and
+   * single-hit removal, and there is no outline, glow, trail, or particle.
+   */
   private syncProjectileVisuals(): void {
     if (this.isShuttingDown) {
       return;
     }
     const { projectiles, projectileWidth, projectileHeight } = this.simState;
+    const color = this.geometry.projectileColor;
+    // V021-WI-04-B (patch §4, V021-AC-005): player projectiles are a named
+    // terminal-fade surface. They consume the same simulation-owned scalar as
+    // the enemy surfaces — full until the exact-attempt terminal commit, then
+    // the committed per-terminal progression — and a fully faded surface is
+    // removed (never re-created) exactly at zero opacity.
+    const opacity = terminalFadeOpacity(this.simState);
     const seen = new Set<number>();
     for (const projectile of projectiles) {
+      if (opacity <= 0) {
+        continue;
+      }
       seen.add(projectile.id);
       let visual = this.projectileVisuals.get(projectile.id);
       if (visual === undefined) {
-        visual = this.add.rectangle(
-          projectile.centerX,
-          projectile.centerY,
-          projectileWidth,
-          projectileHeight,
-          hexToNumber(this.geometry.projectileColor),
-        );
+        visual = this.add.graphics();
         visual.setDepth(COMBAT_RENDER_DEPTH.projectile);
         this.projectileVisuals.set(projectile.id, visual);
-      } else {
-        visual.setPosition(projectile.centerX, projectile.centerY);
-        visual.setSize(projectileWidth, projectileHeight);
       }
+      this.drawPlayerProjectile(
+        visual,
+        projectile.centerX,
+        projectile.centerY,
+        projectileWidth,
+        projectileHeight,
+        color,
+      );
+      visual.setAlpha(opacity);
     }
     for (const [id, visual] of this.projectileVisuals) {
       if (!seen.has(id)) {
@@ -851,25 +948,35 @@ export class CombatScene extends Phaser.Scene {
 
   /**
    * Reflects the authoritative enemy-projectile snapshot into per-kind visuals
-   * (V02-WI-06 E03):
-   * - Ranged: solid horizontal `danger` rectangle (v0.2 §9.2);
-   * - Elite cannon: solid vertical `danger` rectangle using its authoritative
-   *   AABB (Epic §9.4);
+   * (V02-WI-06 E03; V021-WI-04-A patch §4, V021-DEC-002, V021-AC-004):
+   * - Ranged: solid `danger` filled circle;
+   * - Elite cannon: solid `danger` filled circle;
    * - Elite homing Core: solid `accent` diamond inscribed in its authoritative
    *   square AABB, with no glow or trail.
-   * Every visual reflects position/size from the simulation and owns no
-   * lifetime, movement, turning, or collision. A fully faded Evacuation surface
-   * (opacity `0`) is removed and never re-created.
+   * Both non-Core kinds render the same approved circle: it is centred on that
+   * projectile's authoritative centre and its diameter is the longer side of the
+   * projectile's unchanged authoritative AABB. At `1280 × 600` those AABBs are
+   * `7.2 × 3.6` and `3.6 × 7.2`, so both circles are `7.2 px`: each one extends
+   * `1.8 px` beyond the two shorter AABB sides while that AABB's four corners
+   * lie about `0.42 px` outside the ideal circle. V021-DEC-002 explicitly
+   * accepts that small presentation/collision mismatch, forbids claiming the
+   * visual encloses the collision AABB, and forbids squaring the hitbox, so the
+   * simulation remains the only size authority and presentation owns no
+   * orientation or scale of its own. Every visual reflects position/size from
+   * the simulation and owns no lifetime, movement, turning, or collision. A
+   * fully faded Evacuation surface (opacity `0`) is removed and never
+   * re-created.
    */
   private syncEnemyProjectileVisuals(): void {
     if (this.isShuttingDown) {
       return;
     }
     const { enemyProjectiles } = this.simState;
-    // V02-WI-05 E02: the same simulation-owned scalar drives every active
-    // enemy-projectile opacity across the committed Evacuation fade; a fully
+    // V02-WI-05 E02 / V021-WI-04-B: the same simulation-owned scalar drives
+    // every active enemy-projectile opacity across the committed terminal fade
+    // (Success `15` steps, Evacuated and Defeat/Game Over `30` steps); a fully
     // faded projectile surface is removed/inert (never re-created).
-    const opacity = evacuationEnemyOpacity(this.simState);
+    const opacity = terminalFadeOpacity(this.simState);
     const seen = new Set<number>();
     const seenCores = new Set<number>();
     for (const projectile of enemyProjectiles) {
@@ -902,22 +1009,22 @@ export class CombatScene extends Phaser.Scene {
           : this.geometry.rangedProjectileColor;
       let visual = this.enemyProjectileVisuals.get(projectile.id);
       if (visual === undefined) {
-        // Both kinds are solid `danger` rectangles whose complete bounds equal
-        // their authoritative AABB; only the orientation differs, which the
-        // authoritative width/height already expresses.
-        visual = this.add.rectangle(
-          projectile.centerX,
-          projectile.centerY,
-          projectile.width,
-          projectile.height,
-          hexToNumber(color),
-        );
+        // Both kinds are the same solid `danger` filled circle, centred on the
+        // authoritative centre with a diameter equal to the longer side of their
+        // unchanged authoritative AABB (V021-DEC-002); the authoritative
+        // width/height still drive that diameter.
+        visual = this.add.graphics();
         visual.setDepth(COMBAT_RENDER_DEPTH.projectile);
         this.enemyProjectileVisuals.set(projectile.id, visual);
-      } else {
-        visual.setPosition(projectile.centerX, projectile.centerY);
-        visual.setSize(projectile.width, projectile.height);
       }
+      this.drawEnemyProjectile(
+        visual,
+        projectile.centerX,
+        projectile.centerY,
+        projectile.width,
+        projectile.height,
+        color,
+      );
       visual.setAlpha(opacity);
     }
     for (const [id, visual] of this.enemyProjectileVisuals) {
@@ -942,13 +1049,14 @@ export class CombatScene extends Phaser.Scene {
    * (its exact three-step lifetime is simulation-owned). No other Elite feedback
    * exists: no full-craft tint, shield, aura, particle, or animation.
    *
-   * V02-WI-06 E03 C01: the local deflection consumes the SAME simulation-owned
-   * `evacuationEnemyOpacity` scalar as the Elite surface and the enemy
-   * projectiles. A committed Evacuated terminal stops authoritative stepping, so
-   * a record still inside its three-step lifetime can no longer expire; the
-   * exposure is therefore owned by the terminal-fade scalar, which removes the
-   * diamond at exact zero and never recreates it during fly-up. Pause and
-   * resize stay continuous because the alpha is re-read from the current
+   * V02-WI-06 E03 C01 / V021-WI-04-B: the local deflection consumes the SAME
+   * simulation-owned `terminalFadeOpacity` scalar as the Elite surface, the
+   * enemy projectiles, the player projectiles, and the destroyed-enemy hit
+   * flash. A committed terminal stops authoritative stepping, so a record still
+   * inside its three-step lifetime can no longer expire; the exposure is
+   * therefore owned by the terminal-fade scalar, which removes the diamond at
+   * exact zero and never recreates it during the remaining exit/flight. Pause
+   * and resize stay continuous because the alpha is re-read from the current
    * snapshot on every render frame, and the frozen record itself is never
    * mutated, cleared, or reinterpreted here.
    */
@@ -957,7 +1065,7 @@ export class CombatScene extends Phaser.Scene {
       return;
     }
     const records = Object.values(this.simState.eliteDeflectionFeedbacks);
-    const opacity = evacuationEnemyOpacity(this.simState);
+    const opacity = terminalFadeOpacity(this.simState);
     const size =
       this.geometry.shortSide * this.geometry.eliteDeflectionSizeRatio;
     const seen = new Set<number>();
@@ -991,6 +1099,56 @@ export class CombatScene extends Phaser.Scene {
         this.eliteDeflectionVisuals.delete(id);
       }
     }
+  }
+
+  /**
+   * Draws one solid filled teardrop presentation centred on the given point
+   * (V021-WI-04-A, patch §4/V021-AC-004): the point is the leading (upward)
+   * edge and the rounded end the trailing edge, and the outline's extrema touch
+   * the authoritative `width × height` AABB exactly. The graphics object is
+   * positioned at the authoritative centre and only its relative outline is
+   * redrawn, so no projectile position or size is duplicated outside the
+   * simulation snapshot.
+   */
+  private drawPlayerProjectile(
+    graphics: Phaser.GameObjects.Graphics,
+    centerX: number,
+    centerY: number,
+    width: number,
+    height: number,
+    color: string,
+  ): void {
+    graphics.setPosition(centerX, centerY);
+    graphics.clear();
+    graphics.fillStyle(hexToNumber(color), 1);
+    graphics.fillPoints(
+      playerProjectileOffsets(width, height).map(
+        ([x, y]) => new Phaser.Math.Vector2(x, y),
+      ),
+      true,
+    );
+  }
+
+  /**
+   * Draws one solid filled circle presentation centred on the given point
+   * (V021-WI-04-A, patch §4/V021-DEC-002/V021-AC-004): the diameter is the
+   * longer side of the projectile's unchanged authoritative `width × height`
+   * AABB, so both non-Core kinds render the approved equal-diameter `7.2 px`
+   * circle at `1280 × 600` and the simulation stays the only size authority.
+   * Only a solid fill is painted — no outline, glow, or trail.
+   */
+  private drawEnemyProjectile(
+    graphics: Phaser.GameObjects.Graphics,
+    centerX: number,
+    centerY: number,
+    width: number,
+    height: number,
+    color: string,
+  ): void {
+    graphics.setPosition(centerX, centerY);
+    graphics.clear();
+    graphics.fillStyle(hexToNumber(color), 1);
+    graphics.fillCircle(0, 0, Math.max(width, height) / 2);
   }
 
   /**
@@ -1140,6 +1298,87 @@ function enemyTextureKey(kind: EnemyVisualKind): string {
 }
 
 /**
+ * V021-WI-03 (patch §3, V021-AC-003): the unrotated rectangle the presentation
+ * scales one enemy's prepared image and procedural fallback to. A Hunter's
+ * configured complete rendered bounds are that rectangle — its authoritative
+ * `width`/`height` are the enclosing rotated AABB, which would distort the
+ * artwork — while every other role keeps rendering its authoritative AABB.
+ */
+function enemyVisualSize(enemy: CombatEnemy): {
+  readonly width: number;
+  readonly height: number;
+} {
+  return enemy.kind === 'hunter'
+    ? { width: enemy.visualWidth, height: enemy.visualHeight }
+    : { width: enemy.width, height: enemy.height };
+}
+
+/**
+ * V021-WI-03 (patch §3, V021-AC-003): the ONE rotation the presentation applies,
+ * about the configured centre — the Hunter's authoritative `headingRadians`,
+ * because the configured Hunter artwork and its fallback geometry are both
+ * oriented nose-down at `+y` and `headingRadians` is the clockwise screen
+ * rotation of that nose. Every other role renders unrotated, so presentation
+ * owns no heading of its own and can never steer gameplay.
+ */
+function enemyVisualRotationRadians(enemy: CombatEnemy): number {
+  return enemy.kind === 'hunter' ? enemy.headingRadians : 0;
+}
+
+/** Applies the authoritative scale and rotation to one prepared-image visual. */
+function applyImageEnemyVisualGeometry(
+  visual: Phaser.GameObjects.Image,
+  enemy: CombatEnemy,
+): void {
+  const size = enemyVisualSize(enemy);
+  visual.setDisplaySize(size.width, size.height);
+  visual.setRotation(enemyVisualRotationRadians(enemy));
+}
+
+/**
+ * V021-WI-04-A (patch §4, V021-AC-004): the ONE filled teardrop silhouette both
+ * player weapons render, as offsets from the authoritative projectile centre.
+ * The outline is pointed at the leading (upward, `-y`) edge and rounded at the
+ * trailing (`+y`) edge, and its extrema touch the authoritative AABB exactly:
+ * `x = ±width / 2` at the trailing arc's widest points and `y = -height / 2` /
+ * `y = +height / 2` at the point and at the arc's trailing extreme. Only the
+ * silhouette is presentation-owned; the authoritative width, height, speed,
+ * lifetime, collision, damage, order, and single-hit removal are unchanged.
+ */
+function playerProjectileOffsets(
+  width: number,
+  height: number,
+): readonly (readonly [number, number])[] {
+  const radius = width / 2;
+  // The rounded end is a half-circle of this radius whose centre sits one radius
+  // above the trailing edge, so the arc's trailing extreme touches the AABB and
+  // its widest points are the horizontal extrema.
+  const arcCenterY = height / 2 - radius;
+  const flankY = (fraction: number): number =>
+    -height / 2 + (arcCenterY + height / 2) * fraction;
+  const points: (readonly [number, number])[] = [[0, -height / 2]];
+  // Straight flanks from the point out to the arc's widest row.
+  for (const fraction of [0.34, 0.67]) {
+    points.push([radius * fraction, flankY(fraction)]);
+  }
+  points.push([radius, arcCenterY]);
+  // The rounded trailing end, sampled every 30° from the right extreme through
+  // the trailing extreme to the left extreme.
+  for (const degrees of [30, 60, 90, 120, 150]) {
+    const radians = (degrees * Math.PI) / 180;
+    points.push([
+      radius * Math.cos(radians),
+      arcCenterY + radius * Math.sin(radians),
+    ]);
+  }
+  points.push([-radius, arcCenterY]);
+  for (const fraction of [0.67, 0.34]) {
+    points.push([-radius * fraction, flankY(fraction)]);
+  }
+  return points;
+}
+
+/**
  * Derived opaque flash-colour silhouette of one prepared enemy artwork
  * (V02-WI-07 D04-C02). Derived at runtime from the already prepared texture; it
  * is never a shipped asset and never triggers a second network request.
@@ -1167,6 +1406,11 @@ function fallbackFillColor(
     return geometry.fallbackSurfaceRaisedColor;
   }
   return geometry.fallbackAccentColor;
+}
+
+/** Adapts one approved shatter outline to the renderer's vector points. */
+function shatterPoints(outline: ShatterOutline): Phaser.Math.Vector2[] {
+  return outline.map(([x, y]) => new Phaser.Math.Vector2(x, y));
 }
 
 function hexToNumber(hex: string): number {

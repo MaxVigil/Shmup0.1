@@ -47,8 +47,15 @@ export default defineConfig({
       // same kind of evidence-only run (instrumented build and
       // production-optimized uninstrumented scenario build, own configs/ports)
       // and therefore never run against the dev server either.
+      // V021-WI-04-B: the focused ordinary-production natural-Defeat check is
+      // a production-artifact contract (no Debug surface) and therefore also
+      // belongs to the production project only.
+      // V021-PATCH-STAB-01 C02-SIMPLE: the six-second ordinary-production
+      // Mission 01 spot check is its own isolated evidence run (`npm run
+      // evidence:patch-dense`, own config and port) and must never be measured
+      // a second time by the development project or by `verify:smoke`.
       testIgnore:
-        /production-smoke\.spec\.ts|wi04-evidence-performance\.spec\.ts|legacy-proxy-performance\.spec\.ts|wi06-evidence-elite-pass-a\.spec\.ts|wi06-evidence-elite-pass-b\.spec\.ts/,
+        /production-smoke\.spec\.ts|v021-wi-04-b-fade-production\.spec\.ts|wi04-evidence-performance\.spec\.ts|legacy-proxy-performance\.spec\.ts|wi06-evidence-elite-pass-a\.spec\.ts|wi06-evidence-elite-pass-b\.spec\.ts|v021-performance-spot-check\.spec\.ts/,
     },
     {
       name: 'production',
@@ -57,7 +64,13 @@ export default defineConfig({
       // production-only boundaries (base path, lazy Combat chunk, Debug
       // exclusion, console, request boundary, artifact hygiene) instead of
       // repeating the full DEV behaviour suite against the built artifact.
-      testMatch: /production-smoke\.spec\.ts/,
+      // V021-WI-04-B: the focused ordinary-production natural-Defeat check is
+      // its own file (the assigned local route names it) and runs in this
+      // project beside the compact smoke. No existing file is removed from any
+      // project and the four historical @release-evidence cases stay excluded
+      // by the existing `verify:smoke` command.
+      testMatch:
+        /production-smoke\.spec\.ts|v021-wi-04-b-fade-production\.spec\.ts/,
     },
   ],
   webServer: [

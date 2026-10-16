@@ -48,10 +48,13 @@ describe('enemy visual mapping (V02-WI-01)', () => {
     const scales = new Map(
       ENEMY_VISUAL_MAPPINGS.map((mapping) => [mapping.kind, mapping.scale]),
     );
-    expect(scales.get('basic-drone')?.footprintAreaRatio).toBe(1);
-    expect(scales.get('ranged-drone')?.footprintAreaRatio).toBe(1.2);
-    expect(scales.get('hunter-drone')?.footprintAreaRatio).toBe(0.8);
-    // Elite: approved mid-point of the 2.3–2.6× footprint band.
+    // v0.2.1 patch §3 first approved candidate: each regular role's v0.2
+    // §16.2–16.3 area ratio multiplied by the approved 1.5× width × 1.5×
+    // height (2.25× area). §3 forbids multiplying this field by 1.5 again.
+    expect(scales.get('basic-drone')?.footprintAreaRatio).toBe(2.25);
+    expect(scales.get('ranged-drone')?.footprintAreaRatio).toBe(2.7);
+    expect(scales.get('hunter-drone')?.footprintAreaRatio).toBe(1.8);
+    // Elite: unchanged approved mid-point of the 2.3–2.6× footprint band.
     expect(scales.get('elite-drone-armoured')?.footprintAreaRatio).toBe(2.45);
     expect(scales.get('elite-drone-vulnerable')?.footprintAreaRatio).toBe(2.45);
 
@@ -136,18 +139,82 @@ describe('enemy visual mapping (V02-WI-01)', () => {
         9,
       );
     }
-    // Relative footprint order: Ranged > Basic > Hunter, Elite far larger.
+    // Relative footprint order: Ranged > Basic > Hunter is unchanged by the
+    // approved candidate. The candidate scales only the three regular roles, so
+    // the Ranged Drone's complete area (2.7) is now intentionally larger than
+    // the unchanged Elite double (2.45) while the Elite still exceeds Basic and
+    // Hunter; v0.2's "Elite far larger than every regular" no longer holds.
     const area = (kind: EnemyVisualKind): number => {
       const bounds = boundsByKind.get(kind);
       return bounds!.widthPx * bounds!.heightPx;
     };
     expect(area('ranged-drone')).toBeGreaterThan(area('basic-drone'));
     expect(area('basic-drone')).toBeGreaterThan(area('hunter-drone'));
-    expect(area('elite-drone-armoured')).toBeGreaterThan(area('ranged-drone'));
+    expect(area('ranged-drone')).toBeGreaterThan(area('elite-drone-armoured'));
+    expect(area('elite-drone-armoured')).toBeGreaterThan(area('basic-drone'));
+    expect(area('elite-drone-armoured')).toBeGreaterThan(area('hunter-drone'));
     expect(area('elite-drone-vulnerable')).toBeCloseTo(
       area('elite-drone-armoured'),
       6,
     );
+  });
+
+  it('applies the approved v0.2.1 §3 regular 1.5× width/height scale and leaves the Elite geometry unchanged (V021-AC-002)', () => {
+    // v0.2 baseline area ratios (Epic §16.2–16.3) resolved through the same
+    // documented formula, so the comparison is against the accepted revision.
+    const v02AreaRatios: Record<EnemyVisualKind, number> = {
+      'basic-drone': 1,
+      'ranged-drone': 1.2,
+      'hunter-drone': 0.8,
+      'elite-drone-armoured': 2.45,
+      'elite-drone-vulnerable': 2.45,
+    };
+    const regularKinds = ['basic-drone', 'ranged-drone', 'hunter-drone'];
+    for (const kind of ENEMY_VISUAL_KINDS) {
+      const mapping = enemyVisualMappingFor(kind);
+      const current = resolveEnemyRenderedBounds(
+        mapping,
+        MINIMUM_VIEWPORT_SHORT_SIDE,
+      );
+      const v02 = enemyRenderedBounds(
+        {
+          visualFootprintAreaRatio: v02AreaRatios[kind],
+          visualAspectRatio: mapping.scale.aspectRatio,
+        },
+        MINIMUM_VIEWPORT_SHORT_SIDE,
+      );
+      if (regularKinds.includes(kind)) {
+        // Exactly 1.5× the v0.2 complete width and height, 2.25× the area.
+        expect(current.widthPx).toBeCloseTo(v02.widthPx * 1.5, 9);
+        expect(current.heightPx).toBeCloseTo(v02.heightPx * 1.5, 9);
+        expect(current.widthPx * current.heightPx).toBeCloseTo(
+          v02.widthPx * v02.heightPx * 2.25,
+          9,
+        );
+      } else {
+        expect(current).toEqual(v02);
+      }
+      // The prepared-PNG aspect ratio is preserved exactly by both the
+      // prepared asset and the fallback, which share these configured bounds.
+      expect(current.widthPx / current.heightPx).toBeCloseTo(
+        mapping.scale.aspectRatio,
+        9,
+      );
+    }
+    // Exact px at the minimum supported viewport (1280 × 600): the candidate
+    // values are derived from `ratio × (0.04 × 600)²`, not from any Phaser
+    // image scale, and are identical for the prepared and fallback renderers.
+    const boundsAt = (kind: EnemyVisualKind) =>
+      resolveEnemyRenderedBounds(
+        enemyVisualMappingFor(kind),
+        MINIMUM_VIEWPORT_SHORT_SIDE,
+      );
+    expect(boundsAt('basic-drone').widthPx).toBeCloseTo(49.635503, 5);
+    expect(boundsAt('basic-drone').heightPx).toBeCloseTo(26.110343, 5);
+    expect(boundsAt('ranged-drone').widthPx).toBeCloseTo(46.22994, 5);
+    expect(boundsAt('ranged-drone').heightPx).toBeCloseTo(33.640537, 5);
+    expect(boundsAt('hunter-drone').widthPx).toBeCloseTo(24.811288, 5);
+    expect(boundsAt('hunter-drone').heightPx).toBeCloseTo(41.787432, 5);
   });
 
   it('defines exact normalized procedural fallback geometry for every kind (§16.5)', () => {

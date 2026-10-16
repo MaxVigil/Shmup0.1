@@ -13,9 +13,13 @@ import {
   stepCombatSimulation,
   FIXED_STEP_SECONDS,
 } from './combat-simulation';
-import type { CombatSimulationRuntime } from './combat-simulation';
+import type {
+  CombatSimulationRuntime,
+  CombatSimulationState,
+} from './combat-simulation';
 import { resolveGermanFighter } from './combat-session';
-import type { CombatEnemy } from './enemies';
+import { hunterRotatedBounds } from './enemies';
+import type { CombatEnemy, HunterEnemyState } from './enemies';
 
 const AIRCRAFT_WIDTH = 48 * (1278 / 1231);
 const AIRCRAFT_HEIGHT = 48;
@@ -173,5 +177,78 @@ describe('S13 escaped-enemy observability count (Combat §7.5)', () => {
     // The count is cumulative and never decrements.
     const again = stepCombatSimulation(stepped, FIXED_STEP_SECONDS);
     expect(again.escapedCountByType['basic-drone']).toBe(1);
+  });
+});
+
+describe('V021-WI-03 Hunter committed steering vs pause time (patch §3)', () => {
+  const findCommittedHunter = (
+    state: CombatSimulationState,
+  ): HunterEnemyState | undefined =>
+    state.enemies.find(
+      (enemy): enemy is HunterEnemyState =>
+        enemy.kind === 'hunter' && enemy.phase === 'committed',
+    );
+
+  it('consumes no committed steering step while the runtime is paused (hidden time)', () => {
+    const runtime = createRuntime();
+    // The Debug Hunter spawn reuses the current mission's authored fixed Side
+    // Placement, so four Hunters give the seek loop slack against the
+    // Aircraft's automatic fire.
+    for (let i = 0; i < 4; i += 1) {
+      runtime.submitDebug({
+        type: 'combat-debug/spawn-enemy',
+        enemyType: 'hunter-drone',
+      });
+    }
+    let committing: HunterEnemyState | undefined;
+    for (let step = 0; step < 4000 && committing === undefined; step += 1) {
+      runtime.advance(FIXED_STEP_SECONDS);
+      committing = findCommittedHunter(runtime.getState());
+    }
+    if (committing === undefined) {
+      throw new Error('Expected a debug-spawned Hunter to reach Commitment.');
+    }
+    // Commitment and the first committed step are authoritative on the same
+    // step, so detection lands inside the open steering window (1…60).
+    const frozen = findCommittedHunter(runtime.getState());
+    if (frozen === undefined) {
+      throw new Error('Expected the Hunter to still be committing.');
+    }
+    expect(frozen.committedStepsExecuted).toBeGreaterThan(0);
+    expect(frozen.committedStepsExecuted).toBeLessThan(60);
+    expect(frozen.steeringEnded).toBe(false);
+    const envelope = hunterRotatedBounds({
+      width: frozen.visualWidth,
+      height: frozen.visualHeight,
+      headingRadians: frozen.headingRadians,
+    });
+    expect(frozen.width).toBeCloseTo(envelope.width, 9);
+    expect(frozen.height).toBeCloseTo(envelope.height, 9);
+
+    runtime.setPaused(true);
+    for (let frame = 0; frame < 600; frame += 1) {
+      runtime.advance(FIXED_STEP_SECONDS);
+    }
+    const paused = findCommittedHunter(runtime.getState());
+    if (paused === undefined) {
+      throw new Error('Expected the paused Hunter to stay untouched.');
+    }
+    // Paused (Pause overlay, Settings, focus loss, hidden tab: all reach the
+    // runtime through the same lifecycle pause) time executes no fixed step, so
+    // the committed-step counter, the heading, and the position are all frozen.
+    expect(paused.committedStepsExecuted).toBe(frozen.committedStepsExecuted);
+    expect(paused.headingRadians).toBe(frozen.headingRadians);
+    expect(paused.centerX).toBe(frozen.centerX);
+    expect(paused.centerY).toBe(frozen.centerY);
+
+    runtime.setPaused(false);
+    runtime.advance(FIXED_STEP_SECONDS);
+    const resumed = findCommittedHunter(runtime.getState());
+    if (resumed === undefined) {
+      throw new Error('Expected the resumed Hunter to keep committing.');
+    }
+    expect(resumed.committedStepsExecuted).toBe(
+      frozen.committedStepsExecuted + 1,
+    );
   });
 });

@@ -3,6 +3,7 @@ import { CONTENT_CATALOGUE } from '@content/index';
 import { createInitializedTestApplication } from '@test-support/persistence';
 import type { InitializedTestApplication } from '@test-support/persistence';
 import { startMission, commitMissionResult } from '@application/mission';
+import { TERMINAL_FADE_STEPS } from '@application/combat';
 import type { CombatSessionInput } from '@application/combat';
 import { mapCommitMissionOutcome } from './terminal-commit';
 import { V02_DEFEAT_REPAIR_COST_CREDITS } from '@domain/index';
@@ -159,9 +160,21 @@ for (const credits of [12, 7]) {
         expect(app.store.getState()?.activeMission).not.toBe('none');
         const durableAfterCommit = structuredClone(app.campaignStore.current);
 
-        // Explicit Resume is the only discharge: one frame later the held
-        // result presents exactly once and the durable state is untouched.
+        // V021-WI-04-B (patch §4, V021-AC-005, V021-DEC-001): explicit Resume is
+        // the only discharge. That frame releases the hold and authorizes the
+        // committed fade, after which exactly `TERMINAL_FADE_STEPS` running steps
+        // reach zero opacity. The immutable Defeat/Game Over is presented on the
+        // last of those steps and never one step earlier.
         dispatch('combat-lifecycle/resume');
+        renderer.advanceFrame(1 / 60);
+        expect(app.store.getState()?.activeMission).not.toBe('none');
+        expect(app.store.getState()?.missionResult).toBeNull();
+        for (let step = 1; step < TERMINAL_FADE_STEPS; step += 1) {
+          renderer.advanceFrame(1 / 60);
+          // Running fade steps 1..29: still frozen, nothing presented early.
+          expect(app.store.getState()?.activeMission).not.toBe('none');
+          expect(app.store.getState()?.missionResult).toBeNull();
+        }
         renderer.advanceFrame(1 / 60);
         const presented = app.store.getState();
         expect(presented?.activeMission).toBe('none');

@@ -3,6 +3,7 @@ import { CONTENT_CATALOGUE } from '@content/index';
 import { createInitializedTestApplication } from '@test-support/persistence';
 import type { InitializedTestApplication } from '@test-support/persistence';
 import { startMission, commitMissionResult } from '@application/mission';
+import { TERMINAL_FADE_STEPS } from '@application/combat';
 import type { CombatSession, CombatSessionInput } from '@application/combat';
 import type { SessionStore } from '@application/session';
 import { V02_DEFEAT_REPAIR_COST_CREDITS } from '@domain/index';
@@ -386,7 +387,7 @@ it('a forced Evacuation committed under the browser-safety latch waits behind th
   }
 });
 
-it('forced Defeat presents through the unchanged Defeat/Game Over boundary (Epic §12.4/§13.5, V02-AC-016/026)', async () => {
+it('forced Defeat runs the committed terminal fade, then presents through the unchanged Defeat/Game Over boundary (Epic §12.4/§13.5, V02-AC-016/026, V021-AC-005)', async () => {
   const affordable = await createForcedTerminalHarness(12);
   try {
     affordable.dispatch('combat-lifecycle/open-debug');
@@ -396,7 +397,23 @@ it('forced Defeat presents through the unchanged Defeat/Game Over boundary (Epic
     // The authoritative Combat Hull is 0 before the normal Defeat relay; the
     // paid full-Repair economy is owned by the campaign transaction.
     expect(affordable.calls[0]![1]).toBe(0);
+    // V021-WI-04-B (patch §4, V021-AC-005): the forced Defeat closes Debug
+    // through the authoritative lifecycle so its committed `30`-step terminal
+    // fade can run, and presents nothing before that fade completes.
+    expect(affordable.app.store.getState()?.combatLifecycle.overlay).toBe(
+      'none',
+    );
+    expect(affordable.app.store.getState()?.missionResult).toBeNull();
+
     await resolveCapturedTerminal(affordable, 0);
+    // Committed, but still frozen: the immutable Defeat/Game Over is held for
+    // the whole fade and is never presented one step early (nor late).
+    expect(affordable.app.store.getState()?.missionResult).toBeNull();
+    expect(affordable.app.store.getState()?.activeMission).not.toBe('none');
+    advanceFrames(TERMINAL_FADE_STEPS - 1);
+    expect(affordable.app.store.getState()?.missionResult).toBeNull();
+    expect(affordable.app.store.getState()?.activeMission).not.toBe('none');
+    advanceFrames(1);
     const presented = affordable.app.store.getState();
     expect(presented?.missionResult).toMatchObject({
       kind: 'defeat',
@@ -408,7 +425,12 @@ it('forced Defeat presents through the unchanged Defeat/Game Over boundary (Epic
     expect(presented?.credits).toBe(12 - V02_DEFEAT_REPAIR_COST_CREDITS);
     expect(presented?.runStatus).toBe('active');
     expect(presented?.hullIntegrity).toBe(100);
+    // Never replayed on further frames, and never re-committed.
+    advanceFrames(60);
     expect(affordable.calls).toHaveLength(1);
+    expect(affordable.app.store.getState()?.missionResult).toMatchObject({
+      kind: 'defeat',
+    });
   } finally {
     affordable.dispose();
   }
@@ -423,6 +445,12 @@ it('forced Defeat presents through the unchanged Defeat/Game Over boundary (Epic
       type: 'combat-debug/lose-mission',
     });
     await resolveCapturedTerminal(unaffordable, 0);
+    // Game Over is the same committed Defeat terminal: it fades first and is
+    // released only when the fade reaches zero opacity.
+    expect(unaffordable.app.store.getState()?.missionResult).toBeNull();
+    expect(unaffordable.app.store.getState()?.runStatus).toBe('active');
+    expect(unaffordable.app.store.getState()?.activeMission).not.toBe('none');
+    advanceFrames(TERMINAL_FADE_STEPS);
     const state = unaffordable.app.store.getState();
     expect(state?.missionResult).toBeNull();
     expect(state?.runStatus).toBe('game-over');

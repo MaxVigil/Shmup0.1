@@ -318,9 +318,9 @@ describe('Mission 02 economy and progression through the real transaction (Epic 
     });
     expect(app.store.getState()?.missionResult).toBeNull();
 
-    // V02-WI-06 E03: the unlocked Mission 03 is now fully authored and
+    // V021-WI-02: the unlocked Mission 03 is now fully authored and
     // startable — every encounter carries its exact Arrival Groups
-    // (V02-DEC-032), so the same readiness gate that rejected a partially
+    // (V021-DEC-003), so the same readiness gate that rejected a partially
     // authored mission lets it through to the real mission-start transaction.
     expect(
       INTERCEPTION_03.encounters.every(

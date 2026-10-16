@@ -321,6 +321,7 @@ describe('createSessionStore', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -331,6 +332,7 @@ describe('createSessionStore', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
@@ -370,6 +372,7 @@ describe('createSessionStore', () => {
       debugRestoreOrigin: 'none',
       browserSafetyLatched: false,
       terminalSavePending: false,
+      terminalFadePending: false,
       evacuationConfirmationOrigin: 'none',
       evacuationCommitted: false,
     });
